@@ -6,61 +6,51 @@ import (
 	otypes "github.com/joyautomation/tentacle/internal/types"
 )
 
-// moduleRegistry mirrors install.sh's MODULES array.
-// The orchestrator uses this to know how to download, install, and
-// create systemd units for each module.
+// moduleRegistry describes all modules the orchestrator can manage.
+// In monolith mode, modules are started as in-process goroutines.
+// In bare-metal mode, modules are managed as systemd services.
 var moduleRegistry = []otypes.ModuleRegistryEntry{
 	{
-		Repo:        "tentacle-graphql",
-		ModuleID:    "tentacle-graphql",
-		Description: "GraphQL API gateway",
-		Category:    "core",
-		Runtime:     "deno",
+		Repo:        "tentacle-next",
+		ModuleID:    "gateway",
+		Description: "Device gateway (RBE, UDT assembly)",
+		Category:    "optional",
+		Runtime:     "embedded",
 	},
 	{
-		Repo:        "tentacle-web",
-		ModuleID:    "tentacle-web",
-		Description: "Web dashboard",
-		Category:    "core",
-		Runtime:     "deno-web",
-	},
-	{
-		Repo:        "tentacle-ethernetip-go",
-		ModuleID:    "tentacle-ethernetip",
+		Repo:        "tentacle-next",
+		ModuleID:    "ethernetip",
 		Description: "EtherNet/IP scanner (Allen-Bradley, etc.)",
 		Category:    "optional",
-		Runtime:     "go",
-		AptDeps:     []string{"cmake", "build-essential"},
-		BuildDeps: []otypes.BuildDep{
-			{
-				Name:    "libplctag",
-				Version: "v2.6.15",
-				Repo:    "https://github.com/libplctag/libplctag.git",
-				TestCmd: "ldconfig -p | grep libplctag",
-			},
-		},
+		Runtime:     "embedded",
 	},
 	{
-		Repo:        "tentacle-opcua-go",
-		ModuleID:    "tentacle-opcua",
+		Repo:        "tentacle-next",
+		ModuleID:    "opcua",
 		Description: "OPC UA client",
 		Category:    "optional",
-		Runtime:     "go",
-		ExtraEnv:    "OPCUA_PKI_DIR=/opt/tentacle/data/opcua/pki",
+		Runtime:     "embedded",
 	},
 	{
-		Repo:        "tentacle-snmp",
-		ModuleID:    "tentacle-snmp",
+		Repo:        "tentacle-next",
+		ModuleID:    "snmp",
 		Description: "SNMP scanner & trap listener",
 		Category:    "optional",
-		Runtime:     "go",
+		Runtime:     "embedded",
 	},
 	{
-		Repo:        "tentacle-mqtt",
-		ModuleID:    "tentacle-mqtt",
+		Repo:        "tentacle-next",
+		ModuleID:    "modbus",
+		Description: "Modbus TCP scanner",
+		Category:    "optional",
+		Runtime:     "embedded",
+	},
+	{
+		Repo:        "tentacle-next",
+		ModuleID:    "mqtt",
 		Description: "MQTT Sparkplug B bridge",
 		Category:    "optional",
-		Runtime:     "deno",
+		Runtime:     "embedded",
 		RequiredConfig: []otypes.ConfigField{
 			{EnvVar: "MQTT_BROKER_URL", Description: "MQTT broker URL (mqtt:// or mqtts://)", Required: true},
 			{EnvVar: "MQTT_CLIENT_ID", Description: "MQTT client ID base", Default: "tentacle-mqtt"},
@@ -71,46 +61,44 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 		},
 	},
 	{
-		Repo:        "tentacle-history",
-		ModuleID:    "tentacle-history",
-		Description: "Edge historian (TimescaleDB)",
+		Repo:        "tentacle-next",
+		ModuleID:    "ethernetip-server",
+		Description: "EtherNet/IP server",
 		Category:    "optional",
-		Runtime:     "deno",
+		Runtime:     "embedded",
 	},
 	{
-		Repo:        "tentacle-modbus",
-		ModuleID:    "tentacle-modbus",
-		Description: "Modbus TCP scanner",
-		Category:    "optional",
-		Runtime:     "deno",
-	},
-	{
-		Repo:        "tentacle-modbus-server",
-		ModuleID:    "tentacle-modbus-server",
+		Repo:        "tentacle-next",
+		ModuleID:    "modbus-server",
 		Description: "Modbus TCP server",
 		Category:    "optional",
-		Runtime:     "deno",
+		Runtime:     "embedded",
 	},
 	{
-		Repo:        "tentacle-network",
-		ModuleID:    "tentacle-network",
+		Repo:        "tentacle-next",
+		ModuleID:    "history",
+		Description: "Edge historian (TimescaleDB)",
+		Category:    "optional",
+		Runtime:     "embedded",
+		RequiredConfig: []otypes.ConfigField{
+			{EnvVar: "HISTORY_DB_HOST", Description: "PostgreSQL host", Default: "localhost"},
+			{EnvVar: "HISTORY_DB_PORT", Description: "PostgreSQL port", Default: "5432"},
+			{EnvVar: "HISTORY_DB_NAME", Description: "Database name", Default: "tentacle"},
+		},
+	},
+	{
+		Repo:        "tentacle-next",
+		ModuleID:    "network",
 		Description: "Network interface manager",
 		Category:    "optional",
-		Runtime:     "deno",
+		Runtime:     "embedded",
 	},
 	{
-		Repo:        "tentacle-nftables",
-		ModuleID:    "tentacle-nftables",
+		Repo:        "tentacle-next",
+		ModuleID:    "nftables",
 		Description: "Firewall manager",
 		Category:    "optional",
-		Runtime:     "deno",
-	},
-	{
-		Repo:        "tentacle-gateway-go",
-		ModuleID:    "tentacle-gateway",
-		Description: "Device gateway (RBE, UDT)",
-		Category:    "optional",
-		Runtime:     "go",
+		Runtime:     "embedded",
 	},
 }
 

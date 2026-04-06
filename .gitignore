@@ -1,0 +1,7 @@
+# Go
+bin/
+
+# Web
+web/node_modules/
+web/.svelte-kit/
+internal/web/static/

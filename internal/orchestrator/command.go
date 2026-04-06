@@ -3,6 +3,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"time"
@@ -14,7 +15,7 @@ import (
 
 // startCommandListener subscribes to orchestrator.command for request/reply.
 // Returns the subscription so it can be cleaned up on stop.
-func startCommandListener(b bus.Bus, config *OrchestratorConfig) (bus.Subscription, error) {
+func startCommandListener(b bus.Bus, config *OrchestratorConfig, mod *Module) (bus.Subscription, error) {
 	sub, err := b.Subscribe(topics.OrchestratorCommand, func(subject string, data []byte, reply bus.ReplyFunc) {
 		var req otypes.OrchestratorCommandRequest
 		if err := json.Unmarshal(data, &req); err != nil {
@@ -30,9 +31,9 @@ func startCommandListener(b bus.Bus, config *OrchestratorConfig) (bus.Subscripti
 		case "check-internet":
 			resp = handleCheckInternet(req.RequestID)
 		case "get-module-versions":
-			resp = handleGetModuleVersions(req.RequestID, req.ModuleID, config)
+			resp = handleGetModuleVersions(req.RequestID, req.ModuleID, config, mod)
 		case "restart-service":
-			resp = handleRestartService(req.RequestID, req.ModuleID)
+			resp = handleRestartService(req.RequestID, req.ModuleID, mod)
 		default:
 			resp = otypes.OrchestratorCommandResponse{
 				RequestID: req.RequestID,
@@ -115,7 +116,7 @@ func handleCheckInternet(requestID string) otypes.OrchestratorCommandResponse {
 	}
 }
 
-func handleRestartService(requestID, modID string) otypes.OrchestratorCommandResponse {
+func handleRestartService(requestID, modID string, mod *Module) otypes.OrchestratorCommandResponse {
 	if modID == "" {
 		return otypes.OrchestratorCommandResponse{
 			RequestID: requestID,
@@ -124,6 +125,61 @@ func handleRestartService(requestID, modID string) otypes.OrchestratorCommandRes
 			Timestamp: time.Now().UnixMilli(),
 		}
 	}
+
+	if mod != nil && mod.IsMonolith() {
+		// Monolith mode: stop and restart the goroutine
+		mod.mu.Lock()
+		rm, isRunning := mod.running[modID]
+		mod.mu.Unlock()
+
+		if !isRunning {
+			return otypes.OrchestratorCommandResponse{
+				RequestID: requestID,
+				Success:   false,
+				Error:     "Module not running: " + modID,
+				Timestamp: time.Now().UnixMilli(),
+			}
+		}
+
+		factory, hasFactory := mod.factories[modID]
+		if !hasFactory {
+			return otypes.OrchestratorCommandResponse{
+				RequestID: requestID,
+				Success:   false,
+				Error:     "No factory for module: " + modID,
+				Timestamp: time.Now().UnixMilli(),
+			}
+		}
+
+		// Stop existing
+		slog.Info("command: restarting in-process module", "moduleId", modID)
+		rm.mod.Stop()
+		rm.cancel()
+
+		// Start new instance
+		newMod := factory(modID)
+		ctx, cancel := context.WithCancel(context.Background())
+		mod.mu.Lock()
+		mod.running[modID] = &runningModule{mod: newMod, cancel: cancel}
+		mod.mu.Unlock()
+
+		go func() {
+			if err := newMod.Start(ctx, mod.b); err != nil {
+				slog.Error("command: restarted module failed", "moduleId", modID, "error", err)
+			}
+			mod.mu.Lock()
+			delete(mod.running, modID)
+			mod.mu.Unlock()
+		}()
+
+		return otypes.OrchestratorCommandResponse{
+			RequestID: requestID,
+			Success:   true,
+			Timestamp: time.Now().UnixMilli(),
+		}
+	}
+
+	// Bare-metal mode: systemd restart
 	if !unitExists(modID) {
 		return otypes.OrchestratorCommandResponse{
 			RequestID: requestID,
@@ -147,7 +203,7 @@ func handleRestartService(requestID, modID string) otypes.OrchestratorCommandRes
 	}
 }
 
-func handleGetModuleVersions(requestID, modID string, config *OrchestratorConfig) otypes.OrchestratorCommandResponse {
+func handleGetModuleVersions(requestID, modID string, config *OrchestratorConfig, mod *Module) otypes.OrchestratorCommandResponse {
 	if modID == "" {
 		return otypes.OrchestratorCommandResponse{
 			RequestID: requestID,
@@ -163,6 +219,20 @@ func handleGetModuleVersions(requestID, modID string, config *OrchestratorConfig
 			RequestID: requestID,
 			Success:   false,
 			Error:     "Unknown module: " + modID,
+			Timestamp: time.Now().UnixMilli(),
+		}
+	}
+
+	if mod != nil && mod.IsMonolith() {
+		versions := &otypes.ModuleVersionInfo{
+			ModuleID:          modID,
+			InstalledVersions: []string{"embedded"},
+			ActiveVersion:     "embedded",
+		}
+		return otypes.OrchestratorCommandResponse{
+			RequestID: requestID,
+			Success:   true,
+			Versions:  versions,
 			Timestamp: time.Now().UnixMilli(),
 		}
 	}

@@ -1,0 +1,316 @@
+// Shared styles for tag config table cells across TemplateDefaultsTab, InstancesTab, and AtomicTagsTab.
+
+// ── Empty state ──
+.empty-state {
+	padding: 3rem 2rem;
+	text-align: center;
+
+	p {
+		color: var(--theme-text-muted);
+		font-size: 0.875rem;
+	}
+}
+
+// ── Table base ──
+.tpl-table {
+	width: 100%;
+	border-collapse: separate;
+	border-spacing: 0;
+}
+.tpl-table th {
+	text-align: left;
+	font-size: 0.625rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--theme-text-muted);
+	padding: 0.5rem 0.75rem;
+	border-bottom: 2px solid var(--theme-border);
+	background: var(--theme-surface);
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	&.sortable {
+		cursor: pointer;
+		user-select: none;
+		&:hover { color: var(--theme-text); }
+	}
+	&.sorted { color: var(--theme-primary); }
+}
+
+.sort-arrow {
+	font-size: 0.5rem;
+	margin-left: 0.15rem;
+	opacity: 0.7;
+}
+.tpl-table td {
+	padding: 0.5rem 0.75rem;
+	border-bottom: 1px solid var(--theme-border);
+	font-size: 0.8125rem;
+}
+.tpl-table tr:hover td {
+	background: color-mix(in srgb, var(--theme-text) 3%, transparent);
+}
+.tpl-table tr.row-override td {
+	background: rgba(167, 139, 250, 0.06);
+}
+.tpl-table tr.row-override:hover td {
+	background: rgba(167, 139, 250, 0.10);
+}
+
+// ── Dirty row indicator ──
+.dirty-icon {
+	display: inline-flex; align-items: center; flex-shrink: 0;
+	color: #f59e0b;
+	vertical-align: middle;
+	margin-right: 0.375rem;
+	overflow: hidden;
+	:global(svg) { flex-shrink: 0; }
+}
+
+// ── Toggle switch ──
+.toggle-switch {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	cursor: pointer;
+	margin: 0;
+
+	input {
+		position: absolute;
+		opacity: 0;
+		width: 0;
+		height: 0;
+	}
+
+	.toggle-track {
+		width: 32px;
+		height: 18px;
+		border-radius: 9px;
+		background: var(--theme-border);
+		position: relative;
+		transition: background 0.2s;
+
+		&::after {
+			content: '';
+			position: absolute;
+			left: 2px;
+			top: 2px;
+			width: 14px;
+			height: 14px;
+			border-radius: 50%;
+			background: var(--theme-text-muted);
+			transition: all 0.2s;
+		}
+	}
+
+	input:checked + .toggle-track {
+		background: var(--theme-primary);
+
+		&::after {
+			transform: translateX(14px);
+			background: white;
+		}
+	}
+}
+
+// ── Inline edit value button ──
+.il-value {
+	font-size: 0.8125rem;
+	line-height: 1.25;
+	padding: 0.15rem 0.4rem;
+	border-radius: 0;
+	cursor: pointer;
+	border: 1px solid transparent;
+	background: none;
+	font-family: 'IBM Plex Mono', monospace;
+	min-width: 2rem;
+	text-align: left;
+	color: var(--theme-text);
+	box-sizing: border-box;
+	height: 1.5rem;
+
+	&:hover {
+		background: color-mix(in srgb, var(--theme-text) 6%, transparent);
+	}
+
+	&.inherited, &.inherited-device {
+		color: var(--theme-text-muted);
+	}
+
+	&.overridden {
+		color: #a78bfa;
+		background: rgba(167, 139, 250, 0.08);
+		border-color: rgba(167, 139, 250, 0.25);
+	}
+}
+
+.il-time {
+	font-size: 0.75rem;
+}
+
+// ── Inline edit input ──
+.il-input {
+	font-size: 0.8125rem;
+	line-height: 1.25;
+	background: var(--theme-input-bg);
+	border: 1px solid var(--theme-primary);
+	color: var(--theme-text);
+	padding: 0.15rem 0.4rem;
+	border-radius: 0;
+	outline: none;
+	width: 5rem;
+	font-family: 'IBM Plex Mono', monospace;
+	box-sizing: border-box;
+	height: 1.5rem;
+}
+
+// ── Text helpers ──
+.mono {
+	font-family: 'IBM Plex Mono', monospace;
+}
+
+.device-inherit {
+	font-style: italic;
+	opacity: 0.7;
+}
+
+// ── Name cells ──
+.item-name {
+	font-weight: 500;
+	font-size: 0.8125rem;
+}
+
+// ── Type badges ──
+.type-badge {
+	font-size: 0.6875rem;
+	padding: 0.1rem 0.4rem;
+	font-weight: 500;
+	font-family: 'IBM Plex Mono', monospace;
+}
+
+.type-number {
+	background: color-mix(in srgb, var(--theme-primary) 10%, transparent);
+	color: var(--theme-primary);
+}
+
+.type-bool {
+	background: var(--badge-amber-bg, #fef3c7);
+	color: var(--badge-amber-text, #92400e);
+}
+
+// ── RBE status ──
+.rbe-na {
+	color: var(--theme-text-muted);
+	font-size: 0.6875rem;
+}
+
+.rbe-pill {
+	font-size: 0.6875rem;
+	padding: 0.15rem 0.5rem;
+	border-radius: 0;
+	font-family: 'IBM Plex Mono', monospace;
+
+	&.on {
+		background: color-mix(in srgb, var(--badge-teal-bg) 50%, transparent);
+		color: var(--badge-teal-text);
+		border: 1px solid var(--badge-teal-text);
+	}
+
+	&.off {
+		color: var(--theme-text-muted);
+	}
+
+	&.device {
+		color: var(--theme-text-muted);
+		font-style: italic;
+		text-decoration: none;
+		cursor: pointer;
+		&:hover { color: var(--theme-primary); }
+	}
+
+	&.off-mode {
+		background: color-mix(in srgb, var(--color-red-500, #ef4444) 15%, transparent);
+		color: var(--color-red-500, #ef4444);
+		border: 1px solid color-mix(in srgb, var(--color-red-500, #ef4444) 40%, transparent);
+	}
+}
+
+.status-inherited {
+	font-size: 0.625rem;
+	color: var(--theme-text-muted);
+	font-family: 'IBM Plex Mono', monospace;
+	border: none;
+	background: none;
+	padding: 0;
+
+	&.link {
+		cursor: pointer;
+		&:hover { color: var(--theme-primary); }
+	}
+}
+
+.status-override {
+	font-size: 0.625rem;
+	color: #a78bfa;
+	font-family: 'IBM Plex Mono', monospace;
+}
+
+// ── Action buttons (revert/clear/enable/off) ──
+.action-btn {
+	font-size: 0.6875rem;
+	color: var(--theme-text-muted);
+	cursor: pointer;
+	padding: 0.15rem 0.4rem;
+	border-radius: 0;
+	border: none;
+	background: none;
+	font-family: 'IBM Plex Mono', monospace;
+
+	&:hover {
+		color: #a78bfa;
+		background: rgba(167, 139, 250, 0.08);
+	}
+}
+
+// ── Mobile card layout ──
+@media (max-width: 640px) {
+	.tpl-table thead {
+		display: none;
+	}
+	.tpl-table,
+	.tpl-table tbody {
+		display: block;
+	}
+	.tpl-table tr {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.25rem 0.75rem;
+		padding: 0.625rem 0;
+		border-bottom: 1px solid var(--theme-border);
+	}
+	.tpl-table td {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.15rem 0;
+		border: none;
+		font-size: 0.8125rem;
+		&::before {
+			content: attr(data-label);
+			font-size: 0.5625rem;
+			font-weight: 700;
+			text-transform: uppercase;
+			letter-spacing: 0.04em;
+			color: var(--theme-text-muted);
+			flex-shrink: 0;
+		}
+		&[data-label='Type'] {
+			&::before { display: none; }
+		}
+	}
+	.td-actions {
+		margin-left: auto;
+	}
+}

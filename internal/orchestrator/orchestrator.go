@@ -10,12 +10,37 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
+	modpkg "github.com/joyautomation/tentacle/internal/module"
 	"github.com/joyautomation/tentacle/internal/topics"
 )
+
+// ModuleFactory is a constructor function for creating module instances.
+// Used in monolith mode to start/stop modules as goroutines.
+type ModuleFactory func(moduleID string) modpkg.Module
+
+// Option configures the orchestrator module.
+type Option func(*Module)
+
+// WithModuleFactories enables monolith mode with the given module constructors.
+// When set, the orchestrator manages modules as in-process goroutines
+// instead of systemd services.
+func WithModuleFactories(factories map[string]ModuleFactory) Option {
+	return func(m *Module) {
+		m.factories = factories
+		m.running = make(map[string]*runningModule)
+	}
+}
+
+// runningModule tracks an in-process module goroutine.
+type runningModule struct {
+	mod    modpkg.Module
+	cancel context.CancelFunc
+}
 
 const defaultServiceType = "orchestrator"
 
@@ -26,14 +51,28 @@ type Module struct {
 	stopReconciler context.CancelFunc
 	subs           []bus.Subscription
 	b              bus.Bus
+
+	// Monolith mode: in-process module management
+	factories map[string]ModuleFactory   // nil = bare-metal mode
+	running   map[string]*runningModule
+	mu        sync.Mutex
+}
+
+// IsMonolith returns true if the orchestrator is running in monolith mode.
+func (m *Module) IsMonolith() bool {
+	return m.factories != nil
 }
 
 // New creates a new orchestrator module.
-func New(moduleID string) *Module {
+func New(moduleID string, opts ...Option) *Module {
 	if moduleID == "" {
 		moduleID = "orchestrator"
 	}
-	return &Module{moduleID: moduleID}
+	mod := &Module{moduleID: moduleID}
+	for _, opt := range opts {
+		opt(mod)
+	}
+	return mod
 }
 
 func (m *Module) ModuleID() string    { return m.moduleID }
@@ -43,12 +82,15 @@ func (m *Module) ServiceType() string { return defaultServiceType }
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.b = b
 
-	slog.Info("orchestrator: starting bare-metal service orchestrator", "moduleId", m.moduleID)
+	mode := "bare-metal"
+	if m.IsMonolith() {
+		mode = "monolith"
+	}
+	slog.Info("orchestrator: starting service orchestrator", "moduleId", m.moduleID, "mode", mode)
 
 	// Load config
 	config := loadConfig()
 	slog.Info("orchestrator: config loaded",
-		"installDir", config.InstallDir,
 		"reconcileIntervalMs", config.ReconcileIntervalMs,
 	)
 
@@ -65,23 +107,30 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 	}
 
-	// Ensure directories exist
-	os.MkdirAll(config.VersionsDir, 0755)
-	os.MkdirAll(config.CacheDir+"/deno/versions", 0755)
-
-	// Run bootstrap migration if needed (first boot)
-	runMigration(b, config)
+	// Bare-metal only: directories and migration
+	if !m.IsMonolith() {
+		os.MkdirAll(config.VersionsDir, 0755)
+		os.MkdirAll(config.CacheDir+"/deno/versions", 0755)
+		runMigration(b, config)
+	}
 
 	// Start heartbeat
 	m.stopHB = heartbeat.Start(b, m.moduleID, defaultServiceType, func() map[string]interface{} {
-		return map[string]interface{}{
+		meta := map[string]interface{}{
 			"reconcileIntervalMs": config.ReconcileIntervalMs,
+			"mode":                mode,
 		}
+		if m.IsMonolith() {
+			m.mu.Lock()
+			meta["runningModules"] = len(m.running)
+			m.mu.Unlock()
+		}
+		return meta
 	})
 	slog.Info("orchestrator: heartbeat started", "moduleId", m.moduleID)
 
 	// Start command listener (request/reply)
-	cmdSub, err := startCommandListener(b, config)
+	cmdSub, err := startCommandListener(b, config, m)
 	if err != nil {
 		slog.Warn("orchestrator: command listener failed to start", "error", err)
 	} else {
@@ -92,6 +141,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	rctx := &reconcilerContext{
 		b:      b,
 		config: config,
+		mod:    m,
 	}
 	m.stopReconciler = startReconciler(rctx)
 	slog.Info("orchestrator: reconciler started")
@@ -118,11 +168,26 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	return nil
 }
 
-// Stop tears down reconciler, heartbeat, and subscriptions.
+// Stop tears down reconciler, heartbeat, subscriptions, and running modules.
 func (m *Module) Stop() error {
 	if m.stopReconciler != nil {
 		m.stopReconciler()
 	}
+
+	// Stop all in-process modules (monolith mode)
+	if m.IsMonolith() {
+		m.mu.Lock()
+		for id, rm := range m.running {
+			slog.Info("orchestrator: stopping in-process module", "moduleId", id)
+			if err := rm.mod.Stop(); err != nil {
+				slog.Warn("orchestrator: module stop error", "moduleId", id, "error", err)
+			}
+			rm.cancel()
+		}
+		m.running = make(map[string]*runningModule)
+		m.mu.Unlock()
+	}
+
 	if m.stopHB != nil {
 		m.stopHB()
 	}

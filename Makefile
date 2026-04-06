@@ -1,7 +1,14 @@
-.PHONY: build test vet fmt clean
+.PHONY: build test vet fmt clean web-build web-install
 
-# Default: build monolith
-build:
+# Build SvelteKit SPA into internal/web/static/
+web-install:
+	cd web && NODE_ENV=development npm install
+
+web-build: web-install
+	cd web && npm run build
+
+# Default: build monolith (builds web first)
+build: web-build
 	go build -tags all,web -o bin/tentacle ./cmd/tentacle
 
 # Build all standalone binaries

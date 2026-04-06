@@ -19,9 +19,129 @@ import (
 type reconcilerContext struct {
 	b      bus.Bus
 	config *OrchestratorConfig
+	mod    *Module // back-reference for monolith mode
 }
 
-// reconcileModule ensures a single module's actual state matches desired.
+// dispatchReconcile routes to the correct reconciler based on mode.
+func dispatchReconcile(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
+	if rctx.mod != nil && rctx.mod.IsMonolith() {
+		reconcileModuleMonolith(desired, rctx)
+	} else {
+		reconcileModule(desired, rctx)
+	}
+}
+
+// reconcileModuleMonolith manages a module as an in-process goroutine.
+func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
+	entry := getRegistryEntry(desired.ModuleID)
+	if entry == nil {
+		slog.Warn("reconcile: unknown module in desired_services", "moduleId", desired.ModuleID)
+		return
+	}
+
+	factory, hasFactory := rctx.mod.factories[desired.ModuleID]
+	if !hasFactory {
+		reportStatus(rctx.b, entry, statusOpts{
+			SystemdState:   "not-found",
+			ReconcileState: "error",
+			LastError:      fmt.Sprintf("Module %q not compiled into this binary", desired.ModuleID),
+		})
+		return
+	}
+
+	// Check required config before starting
+	if len(entry.RequiredConfig) > 0 && desired.Running {
+		moduleConfig, err := getModuleConfig(rctx.b, entry.ModuleID)
+		if err != nil {
+			slog.Warn("reconcile: failed to read config", "moduleId", entry.ModuleID, "error", err)
+		}
+
+		var missing []string
+		for _, cf := range entry.RequiredConfig {
+			if cf.Required {
+				if val, ok := moduleConfig[cf.EnvVar]; !ok || val == "" {
+					if cf.Default == "" {
+						missing = append(missing, cf.EnvVar)
+					}
+				}
+			}
+		}
+		if len(missing) > 0 {
+			reportStatus(rctx.b, entry, statusOpts{
+				InstalledVersions: []string{"embedded"},
+				ActiveVersion:     "embedded",
+				SystemdState:      "inactive",
+				ReconcileState:    "needs_config",
+				LastError:         fmt.Sprintf("Missing required config: %v", missing),
+			})
+			return
+		}
+	}
+
+	rctx.mod.mu.Lock()
+	_, isRunning := rctx.mod.running[desired.ModuleID]
+	rctx.mod.mu.Unlock()
+
+	if desired.Running && !isRunning {
+		// Start module as goroutine
+		mod := factory(desired.ModuleID)
+		ctx, cancel := context.WithCancel(context.Background())
+
+		rctx.mod.mu.Lock()
+		rctx.mod.running[desired.ModuleID] = &runningModule{mod: mod, cancel: cancel}
+		rctx.mod.mu.Unlock()
+
+		slog.Info("reconcile: starting in-process module", "moduleId", desired.ModuleID)
+		go func() {
+			if err := mod.Start(ctx, rctx.b); err != nil {
+				slog.Error("reconcile: in-process module failed", "moduleId", desired.ModuleID, "error", err)
+			}
+			rctx.mod.mu.Lock()
+			delete(rctx.mod.running, desired.ModuleID)
+			rctx.mod.mu.Unlock()
+		}()
+
+		reportStatus(rctx.b, entry, statusOpts{
+			InstalledVersions: []string{"embedded"},
+			ActiveVersion:     "embedded",
+			SystemdState:      "active",
+			ReconcileState:    "ok",
+		})
+	} else if !desired.Running && isRunning {
+		// Stop module
+		slog.Info("reconcile: stopping in-process module", "moduleId", desired.ModuleID)
+		rctx.mod.mu.Lock()
+		rm := rctx.mod.running[desired.ModuleID]
+		delete(rctx.mod.running, desired.ModuleID)
+		rctx.mod.mu.Unlock()
+
+		if err := rm.mod.Stop(); err != nil {
+			slog.Warn("reconcile: module stop error", "moduleId", desired.ModuleID, "error", err)
+		}
+		rm.cancel()
+
+		reportStatus(rctx.b, entry, statusOpts{
+			InstalledVersions: []string{"embedded"},
+			ActiveVersion:     "embedded",
+			SystemdState:      "inactive",
+			ReconcileState:    "ok",
+		})
+	} else {
+		// Already in desired state
+		state := "inactive"
+		if isRunning {
+			state = "active"
+		}
+		reportStatus(rctx.b, entry, statusOpts{
+			InstalledVersions: []string{"embedded"},
+			ActiveVersion:     "embedded",
+			SystemdState:      state,
+			ReconcileState:    "ok",
+		})
+	}
+}
+
+// reconcileModule ensures a single module's actual state matches desired (bare-metal mode).
 func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 	entry := getRegistryEntry(desired.ModuleID)
 	if entry == nil {
@@ -232,7 +352,7 @@ func fullSweep(rctx *reconcilerContext) {
 					slog.Error("reconcile: panic", "moduleId", d.ModuleID, "recover", r)
 				}
 			}()
-			reconcileModule(d, rctx)
+			dispatchReconcile(d, rctx)
 		}()
 	}
 
@@ -298,8 +418,19 @@ func startKvWatch(ctx context.Context, rctx *reconcilerContext) {
 	sub, err := rctx.b.KVWatchAll(topics.BucketDesiredServices, func(key string, value []byte, op bus.KVOperation) {
 		if op == bus.KVOpDelete {
 			slog.Info("reconcile: module removed from desired_services, stopping and cleaning up", "moduleId", key)
-			if getSystemdState(key) == "active" {
-				systemctlStop(key)
+			if rctx.mod != nil && rctx.mod.IsMonolith() {
+				// Stop in-process module
+				rctx.mod.mu.Lock()
+				if rm, ok := rctx.mod.running[key]; ok {
+					rm.mod.Stop()
+					rm.cancel()
+					delete(rctx.mod.running, key)
+				}
+				rctx.mod.mu.Unlock()
+			} else {
+				if getSystemdState(key) == "active" {
+					systemctlStop(key)
+				}
 			}
 			if err := rctx.b.KVDelete(topics.BucketServiceStatus, key); err != nil {
 				slog.Warn("reconcile: failed to delete service status", "moduleId", key, "error", err)
@@ -314,7 +445,7 @@ func startKvWatch(ctx context.Context, rctx *reconcilerContext) {
 		}
 
 		slog.Info("reconcile: desired state changed", "moduleId", desired.ModuleID, "version", desired.Version, "running", desired.Running)
-		reconcileModule(desired, rctx)
+		dispatchReconcile(desired, rctx)
 	})
 	if err != nil {
 		slog.Error("reconcile: failed to start KV watch", "error", err)

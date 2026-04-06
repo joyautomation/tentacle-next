@@ -30,31 +30,24 @@ import (
 )
 
 func main() {
-	allMode := flag.Bool("all", false, "Run all modules in-process (channel bus)")
-	mode := flag.String("mode", "", "Run a single module with NATS bus")
+	mode := flag.String("mode", "", "Run a single module with NATS bus (distributed mode)")
 	natsURL := flag.String("nats", "nats://localhost:4222", "NATS server URL (for --mode)")
 	flag.Parse()
-
-	if !*allMode && *mode == "" {
-		fmt.Fprintln(os.Stderr, "Usage: tentacle --all | tentacle --mode <module>")
-		fmt.Fprintln(os.Stderr, "\nModules: ethernetip, opcua, snmp, modbus, gateway, mqtt,")
-		fmt.Fprintln(os.Stderr, "         ethernetipserver, modbusserver, orchestrator,")
-		fmt.Fprintln(os.Stderr, "         history, network, nftables, api")
-		os.Exit(1)
-	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	if *allMode {
-		runAll(ctx)
-	} else {
+	if *mode != "" {
 		runSingle(ctx, *mode, *natsURL)
+	} else {
+		runMonolith(ctx)
 	}
 }
 
-// runAll starts all modules in-process with a channel-based Bus.
-func runAll(ctx context.Context) {
+// runMonolith starts core modules (api + orchestrator) with a channel-based Bus.
+// Optional modules are managed by the orchestrator as in-process goroutines,
+// started/stopped via the desired_services KV bucket.
+func runMonolith(ctx context.Context) {
 	slog.Info("starting tentacle monolith")
 
 	b := bus.NewChannelBus()
@@ -68,11 +61,30 @@ func runAll(ctx context.Context) {
 		}
 	}
 
-	modules := allModules()
+	// Module factories for optional modules managed by the orchestrator.
+	factories := map[string]orchestrator.ModuleFactory{
+		"gateway":           func(id string) module.Module { return gateway.New(id) },
+		"ethernetip":        func(id string) module.Module { return ethernetip.New(id) },
+		"opcua":             func(id string) module.Module { return opcua.New(id) },
+		"snmp":              func(id string) module.Module { return snmp.New(id) },
+		"modbus":            func(id string) module.Module { return modbus.New(id) },
+		"mqtt":              func(id string) module.Module { return mqtt.New(id) },
+		"ethernetip-server": func(id string) module.Module { return ethernetipserver.New(id) },
+		"modbus-server":     func(id string) module.Module { return modbusserver.New(id) },
+		"history":           func(id string) module.Module { return history.New(id) },
+		"network":           func(id string) module.Module { return network.New(id) },
+		"nftables":          func(id string) module.Module { return nftables.New(id) },
+	}
 
-	// Start all modules as goroutines.
-	errCh := make(chan error, len(modules))
-	for _, m := range modules {
+	// Core modules: always running.
+	coreModules := []module.Module{
+		api.New("api"),
+		orchestrator.New("orchestrator", orchestrator.WithModuleFactories(factories)),
+	}
+
+	// Start core modules as goroutines.
+	errCh := make(chan error, len(coreModules))
+	for _, m := range coreModules {
 		m := m
 		go func() {
 			slog.Info("starting module", "module", m.ModuleID(), "service", m.ServiceType())
@@ -83,7 +95,7 @@ func runAll(ctx context.Context) {
 		}()
 	}
 
-	// Wait for shutdown signal or first module failure.
+	// Wait for shutdown signal or first core module failure.
 	select {
 	case <-ctx.Done():
 		slog.Info("shutdown signal received")
@@ -91,8 +103,8 @@ func runAll(ctx context.Context) {
 		slog.Error("module error triggered shutdown", "error", err)
 	}
 
-	// Stop all modules.
-	for _, m := range modules {
+	// Stop core modules (orchestrator.Stop will also stop any running optional modules).
+	for _, m := range coreModules {
 		if err := m.Stop(); err != nil {
 			slog.Warn("module stop error", "module", m.ModuleID(), "error", err)
 		}
@@ -120,24 +132,6 @@ func runSingle(ctx context.Context, mode, natsURL string) {
 	if err := m.Start(ctx, nb); err != nil {
 		slog.Error("module failed", "module", mode, "error", err)
 		os.Exit(1)
-	}
-}
-
-func allModules() []module.Module {
-	return []module.Module{
-		gateway.New("gateway"),
-		ethernetip.New("ethernetip"),
-		opcua.New("opcua"),
-		snmp.New("snmp"),
-		modbus.New("modbus"),
-		mqtt.New("mqtt"),
-		ethernetipserver.New("ethernetip-server"),
-		modbusserver.New("modbus-server"),
-		orchestrator.New("orchestrator"),
-		history.New("history"),
-		network.New("network"),
-		nftables.New("nftables"),
-		api.New("api"),
 	}
 }
 
