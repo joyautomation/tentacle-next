@@ -40,11 +40,9 @@ jobs:
             -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DBUILD_EXAMPLES=OFF
-          make -j$(nproc)
-          sudo mkdir -p /usr/aarch64-linux-gnu/lib /usr/aarch64-linux-gnu/include
-          sudo cp bin_dist/libplctag.so /usr/aarch64-linux-gnu/lib/
-          sudo cp ../src/lib/libplctag.h /usr/aarch64-linux-gnu/include/
+            -DCMAKE_INSTALL_PREFIX=/usr/aarch64-linux-gnu
+          make -j$(nproc) plctag
+          sudo make install
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
