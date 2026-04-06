@@ -13,6 +13,10 @@ builds:
       - CGO_ENABLED=1
       - >-
         {{- if eq .Arch "arm64" }}CC=aarch64-linux-gnu-gcc{{- end }}
+      - >-
+        {{- if eq .Arch "arm64" }}CGO_CFLAGS=-I/usr/aarch64-linux-gnu/include{{- end }}
+      - >-
+        {{- if eq .Arch "arm64" }}CGO_LDFLAGS=-L/usr/aarch64-linux-gnu/lib{{- end }}
     goos:
       - linux
     goarch:
@@ -43,6 +47,10 @@ builds:
       - CGO_ENABLED=1
       - >-
         {{- if eq .Arch "arm64" }}CC=aarch64-linux-gnu-gcc{{- end }}
+      - >-
+        {{- if eq .Arch "arm64" }}CGO_CFLAGS=-I/usr/aarch64-linux-gnu/include{{- end }}
+      - >-
+        {{- if eq .Arch "arm64" }}CGO_LDFLAGS=-L/usr/aarch64-linux-gnu/lib{{- end }}
     goos:
       - linux
     goarch:
