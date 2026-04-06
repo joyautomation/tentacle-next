@@ -23,6 +23,7 @@ jobs:
           git clone --depth 1 https://github.com/libplctag/libplctag.git /tmp/libplctag
           cd /tmp/libplctag && mkdir build && cd build
           cmake .. && make -j$(nproc) && sudo make install
+          sudo cp bin_dist/libplctag_static.a /usr/local/lib/
           sudo ldconfig
 
       - name: Vet

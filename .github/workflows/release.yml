@@ -30,6 +30,7 @@ jobs:
           git clone --depth 1 https://github.com/libplctag/libplctag.git /tmp/libplctag
           cd /tmp/libplctag && mkdir build && cd build
           cmake .. && make -j$(nproc) && sudo make install
+          sudo cp bin_dist/libplctag_static.a /usr/local/lib/
           sudo ldconfig
 
       - name: Install libplctag (arm64 cross-compile)
@@ -44,6 +45,7 @@ jobs:
           make -j$(nproc) || true
           sudo mkdir -p /usr/aarch64-linux-gnu/lib /usr/aarch64-linux-gnu/include
           sudo cp -f bin_dist/libplctag.so* /usr/aarch64-linux-gnu/lib/
+          sudo cp -f bin_dist/libplctag_static.a /usr/aarch64-linux-gnu/lib/
           sudo find /tmp/libplctag/src -name 'libplctag.h' -exec cp {} /usr/aarch64-linux-gnu/include/ \;
 
       - name: Run GoReleaser

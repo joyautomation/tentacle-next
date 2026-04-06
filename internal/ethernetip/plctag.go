@@ -3,7 +3,7 @@
 package ethernetip
 
 /*
-#cgo LDFLAGS: -lplctag
+#cgo LDFLAGS: -l:libplctag_static.a -lm -lpthread
 #include <stdlib.h>
 #include <libplctag.h>
 */
