@@ -1,0 +1,156 @@
+package types
+
+import ttypes "github.com/joyautomation/tentacle/types"
+
+// GatewayConfigKV is the full gateway configuration stored in the gateway_config
+// NATS KV bucket, keyed by gatewayId.
+type GatewayConfigKV struct {
+	GatewayID    string                              `json:"gatewayId"`
+	Devices      map[string]GatewayDeviceConfig       `json:"devices"`
+	Variables    map[string]GatewayVariableConfig      `json:"variables"`
+	UdtTemplates map[string]GatewayUdtTemplateConfig  `json:"udtTemplates,omitempty"`
+	UdtVariables map[string]GatewayUdtVariableConfig  `json:"udtVariables,omitempty"`
+	UpdatedAt    int64                                `json:"updatedAt"`
+}
+
+// GatewayDeviceConfig is a protocol-specific device connection configuration.
+type GatewayDeviceConfig struct {
+	Protocol              string                   `json:"protocol"` // "ethernetip", "opcua", "snmp", "modbus"
+	Host                  string                   `json:"host,omitempty"`
+	Port                  *int                     `json:"port,omitempty"`
+	EndpointURL           string                   `json:"endpointUrl,omitempty"` // OPC UA
+	Version               string                   `json:"version,omitempty"`     // SNMP: "1", "2c", "3"
+	Community             string                   `json:"community,omitempty"`   // SNMP
+	V3Auth                *V3Auth                  `json:"v3Auth,omitempty"`      // SNMP v3
+	UnitID                *int                     `json:"unitId,omitempty"`      // Modbus
+	ScanRate              *int                     `json:"scanRate,omitempty"`
+	Deadband              *ttypes.DeadBandConfig   `json:"deadband,omitempty"`
+	DisableRBE            *bool                    `json:"disableRBE,omitempty"`
+	TemplateNameOverrides map[string]string         `json:"templateNameOverrides,omitempty"`
+}
+
+// V3Auth holds SNMP v3 authentication credentials.
+type V3Auth struct {
+	Username      string `json:"username"`
+	SecurityLevel string `json:"securityLevel"` // "noAuthNoPriv", "authNoPriv", "authPriv"
+	AuthProtocol  string `json:"authProtocol,omitempty"`
+	AuthPassword  string `json:"authPassword,omitempty"`
+	PrivProtocol  string `json:"privProtocol,omitempty"`
+	PrivPassword  string `json:"privPassword,omitempty"`
+}
+
+// GatewayVariableConfig maps a device tag/node/OID to a named gateway variable.
+type GatewayVariableConfig struct {
+	ID             string                  `json:"id"`
+	Description    string                  `json:"description,omitempty"`
+	Datatype       string                  `json:"datatype"` // "number", "boolean", "string"
+	Default        interface{}             `json:"default"`
+	DeviceID       string                  `json:"deviceId"`
+	Tag            string                  `json:"tag"`
+	CipType        string                  `json:"cipType,omitempty"`
+	Bidirectional  bool                    `json:"bidirectional,omitempty"`
+	Deadband       *ttypes.DeadBandConfig  `json:"deadband,omitempty"`
+	DisableRBE     bool                    `json:"disableRBE,omitempty"`
+	FunctionCode   *int                    `json:"functionCode,omitempty"`
+	ModbusDatatype string                  `json:"modbusDatatype,omitempty"`
+	ByteOrder      string                  `json:"byteOrder,omitempty"`
+	Address        *int                    `json:"address,omitempty"`
+}
+
+// GatewayUdtTemplateMemberConfig describes a single field in a UDT template.
+type GatewayUdtTemplateMemberConfig struct {
+	Name            string                 `json:"name"`
+	Datatype        string                 `json:"datatype"`
+	TemplateRef     string                 `json:"templateRef,omitempty"`
+	DefaultDeadband *ttypes.DeadBandConfig `json:"defaultDeadband,omitempty"`
+}
+
+// GatewayUdtTemplateConfig is a UDT template definition stored in gateway config.
+type GatewayUdtTemplateConfig struct {
+	Name    string                           `json:"name"`
+	Version string                           `json:"version,omitempty"`
+	Members []GatewayUdtTemplateMemberConfig `json:"members"`
+}
+
+// GatewayUdtVariableConfig maps a UDT instance to a named variable with member tags.
+type GatewayUdtVariableConfig struct {
+	ID              string                            `json:"id"`
+	DeviceID        string                            `json:"deviceId"`
+	Tag             string                            `json:"tag"`
+	TemplateName    string                            `json:"templateName"`
+	MemberTags      map[string]string                 `json:"memberTags"`
+	MemberCipTypes  map[string]string                 `json:"memberCipTypes,omitempty"`
+	MemberDeadbands map[string]ttypes.DeadBandConfig  `json:"memberDeadbands,omitempty"`
+	Deadband        *ttypes.DeadBandConfig            `json:"deadband,omitempty"`
+	DisableRBE      bool                              `json:"disableRBE,omitempty"`
+}
+
+// ─── Scanner Subscribe Requests ─────────────────────────────────────────────
+
+// EthernetIPSubscribeRequest matches tentacle-ethernetip-go's subscribe format.
+type EthernetIPSubscribeRequest struct {
+	SubscriberID string                           `json:"subscriberId"`
+	DeviceID     string                           `json:"deviceId"`
+	Host         string                           `json:"host"`
+	Port         int                              `json:"port,omitempty"`
+	Tags         []string                         `json:"tags"`
+	ScanRate     int                              `json:"scanRate,omitempty"`
+	CipTypes     map[string]string                `json:"cipTypes,omitempty"`
+	StructTypes  map[string]string                `json:"structTypes,omitempty"`
+	Deadbands    map[string]ttypes.DeadBandConfig `json:"deadbands,omitempty"`
+	DisableRBE   map[string]bool                  `json:"disableRBE,omitempty"`
+}
+
+// OpcUASubscribeRequest matches tentacle-opcua-go's subscribe format.
+type OpcUASubscribeRequest struct {
+	SubscriberID string   `json:"subscriberId"`
+	DeviceID     string   `json:"deviceId"`
+	EndpointURL  string   `json:"endpointUrl"`
+	NodeIDs      []string `json:"nodeIds"`
+	ScanRate     int      `json:"scanRate,omitempty"`
+}
+
+// SNMPSubscribeRequest matches tentacle-snmp's subscribe format.
+type SNMPSubscribeRequest struct {
+	SubscriberID string   `json:"subscriberId"`
+	DeviceID     string   `json:"deviceId"`
+	Host         string   `json:"host"`
+	Port         int      `json:"port,omitempty"`
+	Version      string   `json:"version"`
+	Community    string   `json:"community,omitempty"`
+	V3Auth       *V3Auth  `json:"v3Auth,omitempty"`
+	OIDs         []string `json:"oids"`
+	ScanRate     int      `json:"scanRate,omitempty"`
+}
+
+// ModbusRegister describes a single Modbus register for subscription.
+type ModbusRegister struct {
+	Tag            string `json:"tag"`
+	Address        int    `json:"address"`
+	FunctionCode   int    `json:"functionCode"`
+	ModbusDatatype string `json:"modbusDatatype"`
+	ByteOrder      string `json:"byteOrder,omitempty"`
+}
+
+// ModbusSubscribeRequest is the subscribe payload for the Modbus scanner.
+type ModbusSubscribeRequest struct {
+	SubscriberID string           `json:"subscriberId"`
+	DeviceID     string           `json:"deviceId"`
+	Host         string           `json:"host"`
+	Port         int              `json:"port,omitempty"`
+	UnitID       int              `json:"unitId,omitempty"`
+	Registers    []ModbusRegister `json:"registers"`
+	ScanRate     int              `json:"scanRate,omitempty"`
+}
+
+// CipToNatsDatatype normalizes CIP type names to tentacle datatypes.
+func CipToNatsDatatype(cipType string) string {
+	switch cipType {
+	case "BOOL":
+		return "boolean"
+	case "STRING":
+		return "string"
+	default:
+		return "number"
+	}
+}

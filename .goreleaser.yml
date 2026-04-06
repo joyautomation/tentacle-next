@@ -1,0 +1,215 @@
+version: 2
+
+project_name: tentacle
+
+builds:
+  - id: tentacle
+    dir: cmd/tentacle
+    binary: tentacle
+    tags:
+      - all
+      - web
+    env:
+      - CGO_ENABLED=1
+      - >-
+        {{- if eq .Arch "arm64" }}CC=aarch64-linux-gnu-gcc{{- end }}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-core
+    dir: cmd/tentacle-core
+    binary: tentacle-core
+    tags:
+      - gateway
+      - api
+      - web
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-ethernetip
+    dir: cmd/tentacle-ethernetip
+    binary: tentacle-ethernetip
+    tags:
+      - ethernetip
+    env:
+      - CGO_ENABLED=1
+      - >-
+        {{- if eq .Arch "arm64" }}CC=aarch64-linux-gnu-gcc{{- end }}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-opcua
+    dir: cmd/tentacle-opcua
+    binary: tentacle-opcua
+    tags:
+      - opcua
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-snmp
+    dir: cmd/tentacle-snmp
+    binary: tentacle-snmp
+    tags:
+      - snmp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-modbus
+    dir: cmd/tentacle-modbus
+    binary: tentacle-modbus
+    tags:
+      - modbus
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-sparkplug
+    dir: cmd/tentacle-sparkplug
+    binary: tentacle-sparkplug
+    tags:
+      - mqtt
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-gateway
+    dir: cmd/tentacle-gateway
+    binary: tentacle-gateway
+    tags:
+      - gateway
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-orchestrator
+    dir: cmd/tentacle-orchestrator
+    binary: tentacle-orchestrator
+    tags:
+      - orchestrator
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-ethernetip-server
+    dir: cmd/tentacle-ethernetip-server
+    binary: tentacle-ethernetip-server
+    tags:
+      - ethernetipserver
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-modbus-server
+    dir: cmd/tentacle-modbus-server
+    binary: tentacle-modbus-server
+    tags:
+      - modbusserver
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-history
+    dir: cmd/tentacle-history
+    binary: tentacle-history
+    tags:
+      - history
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-network
+    dir: cmd/tentacle-network
+    binary: tentacle-network
+    tags:
+      - network
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-nftables
+    dir: cmd/tentacle-nftables
+    binary: tentacle-nftables
+    tags:
+      - nftables
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+  - id: tentacle-web
+    dir: cmd/tentacle-web
+    binary: tentacle-web
+    tags:
+      - api
+      - web
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"

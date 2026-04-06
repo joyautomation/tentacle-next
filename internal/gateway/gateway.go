@@ -1,0 +1,767 @@
+//go:build gateway || all
+
+// Package gateway routes scanner data through the Bus, applying RBE deadband
+// filtering and UDT assembly. It subscribes to protocol scanner data
+// (ethernetip.data.>, opcua.data.>, etc.) and publishes gateway-level
+// variables to plc.data.{gatewayId}.{variableId}.
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/rbe"
+	"github.com/joyautomation/tentacle/internal/topics"
+	itypes "github.com/joyautomation/tentacle/internal/types"
+	"github.com/joyautomation/tentacle/types"
+)
+
+const serviceType = "gateway"
+
+// TrackedVariable holds the RBE state for a single gateway variable.
+type TrackedVariable struct {
+	Config     itypes.GatewayVariableConfig
+	Deadband   *types.DeadBandConfig
+	DisableRBE bool
+	Value      interface{}
+	rbeState   rbe.State
+}
+
+type udtMemberRef struct {
+	variableID string
+	memberName string
+}
+
+// Gateway manages scanner subscriptions, data routing, and variable state.
+type Gateway struct {
+	b         bus.Bus
+	gatewayID string
+
+	mu        sync.RWMutex
+	config    *itypes.GatewayConfigKV
+	variables map[string]*TrackedVariable
+
+	// Maps scanner subject tokens to gateway variable IDs.
+	// Key: "{protocol}.{deviceId}.{sanitizedTag}" → []variableId
+	tagIndex map[string][]string
+
+	// UDT assemblers: variableId → assembler
+	udtAssemblers map[string]*UdtAssembler
+
+	// Maps member tag subject tokens to (variableId, memberName) pairs.
+	udtMemberIndex map[string][]udtMemberRef
+
+	// Active subscriptions.
+	subs   []bus.Subscription
+	varSub bus.Subscription
+	cmdSub bus.Subscription
+
+	stopHeartbeat func()
+}
+
+// New creates a new Gateway module.
+func New(gatewayID string) *Gateway {
+	if gatewayID == "" {
+		gatewayID = "gateway"
+	}
+	return &Gateway{
+		gatewayID:      gatewayID,
+		variables:      make(map[string]*TrackedVariable),
+		tagIndex:       make(map[string][]string),
+		udtAssemblers:  make(map[string]*UdtAssembler),
+		udtMemberIndex: make(map[string][]udtMemberRef),
+	}
+}
+
+func (g *Gateway) ModuleID() string    { return g.gatewayID }
+func (g *Gateway) ServiceType() string { return serviceType }
+
+// Start initializes the gateway module with the given Bus.
+func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
+	g.b = b
+
+	// Ensure required KV buckets exist
+	for _, bucket := range []string{topics.BucketGatewayConfig, topics.BucketServiceEnabled} {
+		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
+			slog.Warn("gateway: failed to create bucket", "bucket", bucket, "error", err)
+		}
+	}
+
+	// Start heartbeat
+	g.stopHeartbeat = heartbeat.Start(b, g.gatewayID, serviceType, func() map[string]interface{} {
+		return map[string]interface{}{
+			"variableCount": g.VariableCount(),
+			"hasConfig":     g.HasConfig(),
+		}
+	})
+
+	// Load initial config
+	if data, _, err := b.KVGet(topics.BucketGatewayConfig, g.gatewayID); err == nil {
+		var config itypes.GatewayConfigKV
+		if err := json.Unmarshal(data, &config); err != nil {
+			slog.Error("gateway: failed to parse initial config", "error", err)
+		} else {
+			slog.Info("gateway: loaded initial config", "updatedAt", config.UpdatedAt)
+			g.ApplyConfig(&config)
+		}
+	} else {
+		slog.Info("gateway: no existing config found, waiting for configuration")
+	}
+
+	// Watch for config changes
+	configSub, err := b.KVWatch(topics.BucketGatewayConfig, g.gatewayID, func(key string, value []byte, op bus.KVOperation) {
+		if op == bus.KVOpDelete {
+			slog.Info("gateway: config deleted, stopping")
+			g.ApplyConfig(nil)
+			return
+		}
+		var config itypes.GatewayConfigKV
+		if err := json.Unmarshal(value, &config); err != nil {
+			slog.Error("gateway: failed to parse updated config", "error", err)
+			return
+		}
+		slog.Info("gateway: config updated, rebuilding subscriptions",
+			"devices", len(config.Devices),
+			"variables", len(config.Variables),
+			"udtTemplates", len(config.UdtTemplates),
+			"udtVariables", len(config.UdtVariables))
+		g.ApplyConfig(&config)
+	})
+	if err != nil {
+		slog.Error("gateway: failed to watch config KV", "error", err)
+	} else {
+		g.mu.Lock()
+		g.subs = append(g.subs, configSub)
+		g.mu.Unlock()
+	}
+
+	// Listen for shutdown via NATS
+	shutdownSub, _ := b.Subscribe(topics.Shutdown(g.gatewayID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		slog.Info("gateway: received shutdown command via Bus")
+		g.Stop()
+		os.Exit(0)
+	})
+	g.mu.Lock()
+	g.subs = append(g.subs, shutdownSub)
+	g.mu.Unlock()
+
+	// Block until context cancelled or signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case <-ctx.Done():
+	case <-sigChan:
+	}
+	return nil
+}
+
+// Stop tears down all subscriptions and cleans up.
+func (g *Gateway) Stop() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.unsubscribeAllLocked()
+	g.config = nil
+	g.variables = make(map[string]*TrackedVariable)
+	g.tagIndex = make(map[string][]string)
+	g.udtAssemblers = make(map[string]*UdtAssembler)
+	g.udtMemberIndex = make(map[string][]udtMemberRef)
+	if g.stopHeartbeat != nil {
+		g.stopHeartbeat()
+	}
+	return nil
+}
+
+// VariableCount returns the number of active variables (atomic + UDT).
+func (g *Gateway) VariableCount() int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return len(g.variables) + len(g.udtAssemblers)
+}
+
+// HasConfig returns true if a config is currently applied.
+func (g *Gateway) HasConfig() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.config != nil
+}
+
+// ApplyConfig stops any current subscriptions and applies a new configuration.
+func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.unsubscribeDataLocked()
+
+	g.config = config
+	g.variables = make(map[string]*TrackedVariable)
+	g.tagIndex = make(map[string][]string)
+	g.udtAssemblers = make(map[string]*UdtAssembler)
+	g.udtMemberIndex = make(map[string][]udtMemberRef)
+
+	if config == nil {
+		slog.Info("gateway: config cleared, no variables active")
+		return
+	}
+
+	// Build tracked variables and tag index for atomic variables
+	for varID, varCfg := range config.Variables {
+		device, ok := config.Devices[varCfg.DeviceID]
+		if !ok {
+			slog.Warn("gateway: variable references unknown device", "variable", varID, "device", varCfg.DeviceID)
+			continue
+		}
+
+		deadband := varCfg.Deadband
+		if deadband == nil {
+			deadband = device.Deadband
+		}
+		disableRBE := varCfg.DisableRBE
+		if !disableRBE && device.DisableRBE != nil && *device.DisableRBE {
+			disableRBE = true
+		}
+
+		tv := &TrackedVariable{
+			Config:     varCfg,
+			Deadband:   deadband,
+			DisableRBE: disableRBE,
+			Value:      varCfg.Default,
+		}
+		g.variables[varID] = tv
+
+		sanitizedTag := types.SanitizeForSubject(varCfg.Tag)
+		key := fmt.Sprintf("%s.%s.%s", device.Protocol, types.SanitizeForSubject(varCfg.DeviceID), sanitizedTag)
+		g.tagIndex[key] = append(g.tagIndex[key], varID)
+	}
+
+	// Build UDT assemblers and member tag index
+	udtVarCount := 0
+	for varID, udtVar := range config.UdtVariables {
+		device, ok := config.Devices[udtVar.DeviceID]
+		if !ok {
+			continue
+		}
+		tmpl, ok := config.UdtTemplates[udtVar.TemplateName]
+		if !ok {
+			continue
+		}
+
+		udtDeadband := udtVar.Deadband
+		if udtDeadband == nil {
+			udtDeadband = device.Deadband
+		}
+		udtDisableRBE := udtVar.DisableRBE
+		if !udtDisableRBE && device.DisableRBE != nil && *device.DisableRBE {
+			udtDisableRBE = true
+		}
+
+		memberDeadbands := make(map[string]types.DeadBandConfig)
+		for _, member := range tmpl.Members {
+			dt := member.Datatype
+			if dt == "boolean" || dt == "string" || dt == "BOOL" || dt == "BOOLEAN" || dt == "STRING" {
+				continue
+			}
+			if instDb, ok := udtVar.MemberDeadbands[member.Name]; ok {
+				memberDeadbands[member.Name] = instDb
+			} else if member.DefaultDeadband != nil {
+				memberDeadbands[member.Name] = *member.DefaultDeadband
+			} else if device.Deadband != nil {
+				memberDeadbands[member.Name] = *device.Deadband
+			}
+		}
+
+		assembler := NewUdtAssembler(g.b, g.gatewayID, varID, udtVar, tmpl, udtDeadband, udtDisableRBE, memberDeadbands)
+		g.udtAssemblers[varID] = assembler
+
+		sanitizedDevice := types.SanitizeForSubject(udtVar.DeviceID)
+		for memberName, memberTag := range udtVar.MemberTags {
+			sanitizedTag := types.SanitizeForSubject(memberTag)
+			key := fmt.Sprintf("%s.%s.%s", device.Protocol, sanitizedDevice, sanitizedTag)
+			g.udtMemberIndex[key] = append(g.udtMemberIndex[key], udtMemberRef{
+				variableID: varID,
+				memberName: memberName,
+			})
+		}
+		udtVarCount++
+	}
+
+	slog.Info("gateway: config applied",
+		"atomicVars", len(g.variables),
+		"udtVars", udtVarCount,
+		"templates", len(config.UdtTemplates),
+		"devices", len(config.Devices))
+
+	g.subscribeToScannersLocked()
+	g.setupVariablesHandlerLocked()
+	g.setupCommandRoutingLocked()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Internal: subscription management
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (g *Gateway) unsubscribeAllLocked() {
+	g.unsubscribeDataLocked()
+	// Also unsub lifecycle subs
+	for _, sub := range g.subs {
+		_ = sub.Unsubscribe()
+	}
+	g.subs = nil
+}
+
+func (g *Gateway) unsubscribeDataLocked() {
+	if g.varSub != nil {
+		_ = g.varSub.Unsubscribe()
+		g.varSub = nil
+	}
+	if g.cmdSub != nil {
+		_ = g.cmdSub.Unsubscribe()
+		g.cmdSub = nil
+	}
+	for _, a := range g.udtAssemblers {
+		a.Stop()
+	}
+	if g.config != nil {
+		g.sendUnsubscribeRequestsLocked()
+	}
+}
+
+func (g *Gateway) subscribeToScannersLocked() {
+	if g.config == nil {
+		return
+	}
+
+	type deviceGroup struct {
+		device    itypes.GatewayDeviceConfig
+		deviceID  string
+		variables map[string]itypes.GatewayVariableConfig
+	}
+	groups := make(map[string]*deviceGroup)
+
+	for varID, varCfg := range g.config.Variables {
+		device, ok := g.config.Devices[varCfg.DeviceID]
+		if !ok {
+			continue
+		}
+		grp, ok := groups[varCfg.DeviceID]
+		if !ok {
+			grp = &deviceGroup{device: device, deviceID: varCfg.DeviceID, variables: make(map[string]itypes.GatewayVariableConfig)}
+			groups[varCfg.DeviceID] = grp
+		}
+		grp.variables[varID] = varCfg
+	}
+
+	// Add UDT member tags as synthetic variables for subscription
+	for _, udtVar := range g.config.UdtVariables {
+		device, ok := g.config.Devices[udtVar.DeviceID]
+		if !ok {
+			continue
+		}
+		grp, ok := groups[udtVar.DeviceID]
+		if !ok {
+			grp = &deviceGroup{device: device, deviceID: udtVar.DeviceID, variables: make(map[string]itypes.GatewayVariableConfig)}
+			groups[udtVar.DeviceID] = grp
+		}
+		for memberName, memberTag := range udtVar.MemberTags {
+			syntheticID := fmt.Sprintf("__udt__%s__%s", udtVar.ID, memberName)
+			cipType := ""
+			if udtVar.MemberCipTypes != nil {
+				cipType = udtVar.MemberCipTypes[memberName]
+			}
+			grp.variables[syntheticID] = itypes.GatewayVariableConfig{
+				ID: syntheticID, DeviceID: udtVar.DeviceID, Tag: memberTag, Datatype: "number", CipType: cipType,
+			}
+		}
+	}
+
+	for _, grp := range groups {
+		g.subscribeToDeviceLocked(grp.deviceID, grp.device, grp.variables)
+	}
+}
+
+func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
+	sanitizedDevice := types.SanitizeForSubject(deviceID)
+	protocol := device.Protocol
+
+	// Subscribe to wildcard: {protocol}.data.{deviceId}.>
+	subject := fmt.Sprintf("%s.data.%s.>", protocol, sanitizedDevice)
+	sub, err := g.b.Subscribe(subject, func(subj string, data []byte, reply bus.ReplyFunc) {
+		g.handleScannerData(subj, data, protocol, deviceID)
+	})
+	if err != nil {
+		slog.Error("gateway: failed to subscribe", "subject", subject, "error", err)
+	} else {
+		g.subs = append(g.subs, sub)
+	}
+
+	// Also subscribe to exact device subject for batch messages
+	batchSubject := fmt.Sprintf("%s.data.%s", protocol, sanitizedDevice)
+	batchSub, err := g.b.Subscribe(batchSubject, func(subj string, data []byte, reply bus.ReplyFunc) {
+		g.handleScannerBatchData(data, protocol, deviceID)
+	})
+	if err != nil {
+		slog.Error("gateway: failed to subscribe", "subject", batchSubject, "error", err)
+	} else {
+		g.subs = append(g.subs, batchSub)
+	}
+
+	g.sendSubscribeRequest(deviceID, device, vars)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Scanner subscribe/unsubscribe requests
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (g *Gateway) sendSubscribeRequest(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
+	subscriberID := fmt.Sprintf("gateway-%s", g.gatewayID)
+	subject := fmt.Sprintf("%s.subscribe", device.Protocol)
+
+	var payload []byte
+	var err error
+
+	scanRate := func(defaultRate int) int {
+		if device.ScanRate != nil {
+			return *device.ScanRate
+		}
+		return defaultRate
+	}
+
+	switch device.Protocol {
+	case "ethernetip":
+		tags := make([]string, 0, len(vars))
+		cipTypes := make(map[string]string)
+		structTypes := make(map[string]string)
+		deadbands := make(map[string]types.DeadBandConfig)
+		disableRBE := make(map[string]bool)
+		for _, v := range vars {
+			tags = append(tags, v.Tag)
+			if v.CipType != "" {
+				cipTypes[v.Tag] = v.CipType
+			}
+			if v.Deadband != nil {
+				deadbands[v.Tag] = *v.Deadband
+			}
+			if v.DisableRBE {
+				disableRBE[v.Tag] = true
+			}
+		}
+		if g.config != nil {
+			for _, udtVar := range g.config.UdtVariables {
+				if udtVar.DeviceID == deviceID {
+					structTypes[udtVar.Tag] = udtVar.TemplateName
+				}
+			}
+		}
+		port := 44818
+		if device.Port != nil {
+			port = *device.Port
+		}
+		req := itypes.EthernetIPSubscribeRequest{
+			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
+			Tags: tags, ScanRate: scanRate(1000), CipTypes: cipTypes, StructTypes: structTypes,
+			Deadbands: deadbands, DisableRBE: disableRBE,
+		}
+		payload, err = json.Marshal(req)
+
+	case "opcua":
+		nodeIDs := make([]string, 0, len(vars))
+		for _, v := range vars {
+			nodeIDs = append(nodeIDs, v.Tag)
+		}
+		req := itypes.OpcUASubscribeRequest{
+			SubscriberID: subscriberID, DeviceID: deviceID, EndpointURL: device.EndpointURL,
+			NodeIDs: nodeIDs, ScanRate: scanRate(1000),
+		}
+		payload, err = json.Marshal(req)
+
+	case "snmp":
+		oids := make([]string, 0, len(vars))
+		for _, v := range vars {
+			oids = append(oids, v.Tag)
+		}
+		port := 161
+		if device.Port != nil {
+			port = *device.Port
+		}
+		req := itypes.SNMPSubscribeRequest{
+			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
+			Version: device.Version, Community: device.Community, V3Auth: device.V3Auth,
+			OIDs: oids, ScanRate: scanRate(5000),
+		}
+		payload, err = json.Marshal(req)
+
+	case "modbus":
+		registers := make([]itypes.ModbusRegister, 0, len(vars))
+		for _, v := range vars {
+			fc := 3
+			if v.FunctionCode != nil {
+				fc = *v.FunctionCode
+			}
+			addr := 0
+			if v.Address != nil {
+				addr = *v.Address
+			}
+			dt := "uint16"
+			if v.ModbusDatatype != "" {
+				dt = v.ModbusDatatype
+			}
+			bo := "big"
+			if v.ByteOrder != "" {
+				bo = v.ByteOrder
+			}
+			registers = append(registers, itypes.ModbusRegister{Tag: v.Tag, Address: addr, FunctionCode: fc, ModbusDatatype: dt, ByteOrder: bo})
+		}
+		port := 502
+		if device.Port != nil {
+			port = *device.Port
+		}
+		unitID := 1
+		if device.UnitID != nil {
+			unitID = *device.UnitID
+		}
+		req := itypes.ModbusSubscribeRequest{
+			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
+			UnitID: unitID, Registers: registers, ScanRate: scanRate(1000),
+		}
+		payload, err = json.Marshal(req)
+
+	default:
+		slog.Warn("gateway: unknown protocol", "protocol", device.Protocol, "device", deviceID)
+		return
+	}
+
+	if err != nil {
+		slog.Error("gateway: failed to marshal subscribe request", "device", deviceID, "error", err)
+		return
+	}
+
+	_, err = g.b.Request(subject, payload, 5*time.Second)
+	if err != nil {
+		slog.Warn("gateway: subscribe request failed (scanner may not be running)", "subject", subject, "device", deviceID, "error", err)
+		return
+	}
+	slog.Info("gateway: subscribed to scanner", "protocol", device.Protocol, "device", deviceID)
+}
+
+func (g *Gateway) sendUnsubscribeRequestsLocked() {
+	subscriberID := fmt.Sprintf("gateway-%s", g.gatewayID)
+
+	type devKey struct{ protocol, deviceID string }
+	seen := make(map[devKey]bool)
+
+	for _, varCfg := range g.config.Variables {
+		device, ok := g.config.Devices[varCfg.DeviceID]
+		if !ok {
+			continue
+		}
+		dk := devKey{device.Protocol, varCfg.DeviceID}
+		if seen[dk] {
+			continue
+		}
+		seen[dk] = true
+
+		subject := fmt.Sprintf("%s.unsubscribe", device.Protocol)
+		req := struct {
+			SubscriberID string `json:"subscriberId"`
+			DeviceID     string `json:"deviceId"`
+		}{subscriberID, varCfg.DeviceID}
+		data, _ := json.Marshal(req)
+		_, _ = g.b.Request(subject, data, 2*time.Second)
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Data handling: scanner → gateway → plc.data.*
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (g *Gateway) handleScannerData(subject string, rawData []byte, protocol, deviceID string) {
+	var dataMsg types.PlcDataMessage
+	if err := json.Unmarshal(rawData, &dataMsg); err != nil {
+		return
+	}
+
+	parts := strings.SplitN(subject, ".", 4)
+	if len(parts) < 4 {
+		return
+	}
+	tag := parts[3]
+
+	g.routeValue(protocol, deviceID, tag, dataMsg.Value, dataMsg.Datatype)
+}
+
+func (g *Gateway) handleScannerBatchData(rawData []byte, protocol, deviceID string) {
+	var batch types.ScannerBatchMessage
+	if err := json.Unmarshal(rawData, &batch); err != nil {
+		return
+	}
+
+	for _, val := range batch.Values {
+		sanitizedTag := types.SanitizeForSubject(val.VariableID)
+		g.routeValue(protocol, deviceID, sanitizedTag, val.Value, val.Datatype)
+	}
+}
+
+func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value interface{}, datatype string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	sanitizedDevice := types.SanitizeForSubject(deviceID)
+	key := fmt.Sprintf("%s.%s.%s", protocol, sanitizedDevice, sanitizedTag)
+
+	// Route to atomic variables
+	if varIDs, ok := g.tagIndex[key]; ok {
+		nowMs := time.Now().UnixMilli()
+		for _, varID := range varIDs {
+			tv, ok := g.variables[varID]
+			if !ok {
+				continue
+			}
+			tv.Value = value
+
+			if !rbe.ShouldPublish(&tv.rbeState, value, nowMs, tv.Deadband, tv.DisableRBE) {
+				continue
+			}
+
+			dt := datatype
+			if dt == "" {
+				dt = tv.Config.Datatype
+			}
+
+			outMsg := types.PlcDataMessage{
+				ModuleID:    g.gatewayID,
+				DeviceID:    tv.Config.DeviceID,
+				VariableID:  varID,
+				Value:       value,
+				Timestamp:   nowMs,
+				Datatype:    dt,
+				Description: tv.Config.Description,
+			}
+			if tv.Deadband != nil {
+				outMsg.Deadband = tv.Deadband
+			}
+			if tv.DisableRBE {
+				outMsg.DisableRBE = true
+			}
+
+			data, err := json.Marshal(outMsg)
+			if err != nil {
+				continue
+			}
+
+			pubSubject := fmt.Sprintf("plc.data.%s.%s", g.gatewayID, types.SanitizeForSubject(varID))
+			_ = g.b.Publish(pubSubject, data)
+
+			rbe.RecordPublish(&tv.rbeState, value, nowMs)
+		}
+	}
+
+	// Route to UDT assemblers
+	if memberRefs, ok := g.udtMemberIndex[key]; ok {
+		for _, ref := range memberRefs {
+			if assembler, ok := g.udtAssemblers[ref.variableID]; ok {
+				assembler.SetMember(ref.memberName, value)
+			}
+		}
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Variables request handler
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (g *Gateway) setupVariablesHandlerLocked() {
+	subject := topics.Variables(g.gatewayID)
+	sub, err := g.b.Subscribe(subject, func(subj string, data []byte, reply bus.ReplyFunc) {
+		if reply == nil {
+			return
+		}
+		g.mu.RLock()
+		defer g.mu.RUnlock()
+
+		vars := make([]types.VariableInfo, 0, len(g.variables)+len(g.udtAssemblers))
+		for varID, tv := range g.variables {
+			vars = append(vars, types.VariableInfo{
+				ModuleID: g.gatewayID, DeviceID: tv.Config.DeviceID, VariableID: varID,
+				Value: tv.Value, Datatype: tv.Config.Datatype, Description: tv.Config.Description,
+				Deadband: tv.Deadband, DisableRBE: tv.DisableRBE,
+			})
+		}
+
+		for varID, assembler := range g.udtAssemblers {
+			tmpl := assembler.template
+			members := make([]types.UdtMemberDefinition, len(tmpl.Members))
+			for i, m := range tmpl.Members {
+				datatype := m.Datatype
+				if assembler.config.MemberCipTypes != nil {
+					if cipType, ok := assembler.config.MemberCipTypes[m.Name]; ok {
+						datatype = itypes.CipToNatsDatatype(cipType)
+					}
+				}
+				members[i] = types.UdtMemberDefinition{Name: m.Name, Datatype: datatype, TemplateRef: m.TemplateRef}
+			}
+			vars = append(vars, types.VariableInfo{
+				ModuleID: g.gatewayID, DeviceID: assembler.config.DeviceID, VariableID: varID,
+				Value: assembler.Value(), Datatype: "udt",
+				UdtTemplate: &types.UdtTemplateDefinition{Name: tmpl.Name, Version: tmpl.Version, Members: members},
+			})
+		}
+
+		resp, err := json.Marshal(vars)
+		if err != nil {
+			return
+		}
+		_ = reply(resp)
+	})
+	if err != nil {
+		slog.Error("gateway: failed to subscribe to variables", "subject", subject, "error", err)
+		return
+	}
+	g.varSub = sub
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Command routing
+// ═══════════════════════════════════════════════════════════════════════════
+
+func (g *Gateway) setupCommandRoutingLocked() {
+	subject := topics.CommandWildcard(g.gatewayID)
+	sub, err := g.b.Subscribe(subject, func(subj string, data []byte, reply bus.ReplyFunc) {
+		parts := strings.SplitN(subj, ".", 3)
+		if len(parts) < 3 {
+			return
+		}
+		varID := parts[2]
+
+		g.mu.RLock()
+		tv, ok := g.variables[varID]
+		if !ok || !tv.Config.Bidirectional {
+			g.mu.RUnlock()
+			return
+		}
+		device, ok := g.config.Devices[tv.Config.DeviceID]
+		if !ok {
+			g.mu.RUnlock()
+			return
+		}
+		tag := tv.Config.Tag
+		protocol := device.Protocol
+		g.mu.RUnlock()
+
+		cmdSubject := fmt.Sprintf("%s.command.%s", protocol, types.SanitizeForSubject(tag))
+		_ = g.b.Publish(cmdSubject, data)
+	})
+	if err != nil {
+		slog.Error("gateway: failed to subscribe to commands", "subject", subject, "error", err)
+		return
+	}
+	g.cmdSub = sub
+}

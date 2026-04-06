@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install libplctag (for CGO ethernetip build)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential
+          git clone --depth 1 https://github.com/libplctag/libplctag.git /tmp/libplctag
+          cd /tmp/libplctag && mkdir build && cd build
+          cmake .. && make -j$(nproc) && sudo make install
+          sudo ldconfig
+
+      - name: Vet
+        run: GOFLAGS="-tags=all" go vet ./...
+
+      - name: Test
+        run: GOFLAGS="-tags=all" go test ./...
+
+      - name: Build (monolith)
+        run: go build -tags all,web -o /dev/null ./cmd/tentacle
+
+      - name: Build (all standalone)
+        run: |
+          go build -tags gateway,api,web -o /dev/null ./cmd/tentacle-core
+          go build -tags ethernetip -o /dev/null ./cmd/tentacle-ethernetip
+          go build -tags opcua -o /dev/null ./cmd/tentacle-opcua
+          go build -tags snmp -o /dev/null ./cmd/tentacle-snmp
+          go build -tags modbus -o /dev/null ./cmd/tentacle-modbus
+          go build -tags mqtt -o /dev/null ./cmd/tentacle-sparkplug
+          go build -tags gateway -o /dev/null ./cmd/tentacle-gateway
+          go build -tags orchestrator -o /dev/null ./cmd/tentacle-orchestrator
+          go build -tags ethernetipserver -o /dev/null ./cmd/tentacle-ethernetip-server
+          go build -tags modbusserver -o /dev/null ./cmd/tentacle-modbus-server
+          go build -tags history -o /dev/null ./cmd/tentacle-history
+          go build -tags network -o /dev/null ./cmd/tentacle-network
+          go build -tags nftables -o /dev/null ./cmd/tentacle-nftables
+          go build -tags web,api -o /dev/null ./cmd/tentacle-web

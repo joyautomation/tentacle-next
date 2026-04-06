@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install cross-compilation toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu cmake build-essential
+
+      - name: Install libplctag (amd64)
+        run: |
+          git clone --depth 1 https://github.com/libplctag/libplctag.git /tmp/libplctag
+          cd /tmp/libplctag && mkdir build && cd build
+          cmake .. && make -j$(nproc) && sudo make install
+          sudo ldconfig
+
+      - name: Install libplctag (arm64 cross-compile)
+        run: |
+          cd /tmp/libplctag && mkdir build-arm64 && cd build-arm64
+          cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
+          make -j$(nproc)
+          sudo cp bin/libplctag.so /usr/aarch64-linux-gnu/lib/
+          sudo cp ../src/lib/libplctag.h /usr/aarch64-linux-gnu/include/
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CGO_LDFLAGS_ALLOW: ".*"
+          C_INCLUDE_PATH: /usr/local/include
+          LIBRARY_PATH: /usr/local/lib
