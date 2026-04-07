@@ -1,7 +1,14 @@
 # Go
 bin/
+dist/
+tentacle
+tentacle-*
+!tentacle-*/
 
 # Web
 web/node_modules/
 web/.svelte-kit/
 internal/web/static/
+
+# Tool config
+.claudeignore
