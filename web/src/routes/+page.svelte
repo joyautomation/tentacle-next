@@ -15,6 +15,7 @@
   // Live-updating services list — starts empty, populated by polling
   let liveServices = $state<Service[]>([]);
   let apiConnected = $state(false);
+  let hasPolled = $state(false); // suppress banner until first poll completes
 
   // Derive monolith mode from the orchestrator service's metadata
   const monolith = $derived(
@@ -49,6 +50,7 @@
       } catch {
         if (apiConnected) apiConnected = false;
       }
+      hasPolled = true;
     };
 
     const interval = setInterval(poll, 5000);
@@ -62,7 +64,7 @@
 </script>
 
 <div class="page">
-  {#if !apiConnected}
+  {#if hasPolled && !apiConnected}
     <div class="disconnected-banner">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10" />
