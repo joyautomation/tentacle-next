@@ -192,6 +192,20 @@
     const ageDays = Math.floor(ageHours / 24);
     return `${ageDays}d ago`;
   }
+
+  /** Short age label shown inline next to values (colorblind-accessible) */
+  function formatAgeShort(timestamp: number | null | undefined): string {
+    if (!timestamp) return '';
+    const ageMs = Math.max(0, now - timestamp);
+    const ageSeconds = Math.floor(ageMs / 1000);
+    if (ageSeconds < 60) return `${ageSeconds}s`;
+    const ageMinutes = Math.floor(ageSeconds / 60);
+    if (ageMinutes < 60) return `${ageMinutes}m`;
+    const ageHours = Math.floor(ageMinutes / 60);
+    if (ageHours < 24) return `${ageHours}h`;
+    const ageDays = Math.floor(ageHours / 24);
+    return `${ageDays}d`;
+  }
 </script>
 
 <div class="metrics-page">
@@ -295,6 +309,7 @@
                                 ></span>
                                 <span class="leaf-name">{member.name}</span>
                                 <span class="leaf-value">{formatValue(member.value)}</span>
+                                <span class="staleness-label" style="color: {getFreshnessColor(member.timestamp)}">{formatAgeShort(member.timestamp)}</span>
                                 <span class="leaf-type">{memberDef?.datatype ?? member.type}</span>
                               </div>
                             {/each}
@@ -327,7 +342,7 @@
   <!-- Scalar Metrics -->
   {#if organized().scalars.length > 0}
     <section class="section">
-      <h2>Scalar Metrics</h2>
+      <h2>Atomic</h2>
       <div class="tree">
         {#each organized().scalars as metric}
           <div class="tree-leaf">
@@ -338,6 +353,7 @@
             ></span>
             <span class="leaf-name">{metric.name}</span>
             <span class="leaf-value">{formatValue(metric.value)}</span>
+            <span class="staleness-label" style="color: {getFreshnessColor(metric.timestamp)}">{formatAgeShort(metric.timestamp)}</span>
             <span class="leaf-type">{metric.sparkplugType}</span>
           </div>
         {/each}
@@ -565,6 +581,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .staleness-label {
+    font-size: 0.6875rem;
+    font-family: 'IBM Plex Mono', monospace;
+    flex-shrink: 0;
+    min-width: 2rem;
+    text-align: right;
+    transition: color 1s ease;
   }
 
   .leaf-type {
