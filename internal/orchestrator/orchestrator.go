@@ -51,6 +51,7 @@ type Module struct {
 	stopReconciler context.CancelFunc
 	subs           []bus.Subscription
 	b              bus.Bus
+	log            *slog.Logger
 
 	// Monolith mode: in-process module management
 	factories map[string]ModuleFactory   // nil = bare-metal mode
@@ -81,16 +82,17 @@ func (m *Module) ServiceType() string { return defaultServiceType }
 // Start initializes the orchestrator, heartbeat, command listener, and reconciler.
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.b = b
+	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
 
 	mode := "bare-metal"
 	if m.IsMonolith() {
 		mode = "monolith"
 	}
-	slog.Info("orchestrator: starting service orchestrator", "moduleId", m.moduleID, "mode", mode)
+	m.log.Info("orchestrator: starting service orchestrator", "moduleId", m.moduleID, "mode", mode)
 
 	// Load config
 	config := loadConfig()
-	slog.Info("orchestrator: config loaded",
+	m.log.Info("orchestrator: config loaded",
 		"reconcileIntervalMs", config.ReconcileIntervalMs,
 	)
 
@@ -103,7 +105,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		topics.BucketTentacleConfig,
 	} {
 		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
-			slog.Warn("orchestrator: failed to create bucket", "bucket", bucket, "error", err)
+			m.log.Warn("orchestrator: failed to create bucket", "bucket", bucket, "error", err)
 		}
 	}
 
@@ -111,7 +113,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	if !m.IsMonolith() {
 		os.MkdirAll(config.VersionsDir, 0755)
 		os.MkdirAll(config.CacheDir+"/deno/versions", 0755)
-		runMigration(b, config)
+		runMigration(b, config, m.log)
 	}
 
 	// Start heartbeat
@@ -127,12 +129,12 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 		return meta
 	})
-	slog.Info("orchestrator: heartbeat started", "moduleId", m.moduleID)
+	m.log.Info("orchestrator: heartbeat started", "moduleId", m.moduleID)
 
 	// Start command listener (request/reply)
 	cmdSub, err := startCommandListener(b, config, m)
 	if err != nil {
-		slog.Warn("orchestrator: command listener failed to start", "error", err)
+		m.log.Warn("orchestrator: command listener failed to start", "error", err)
 	} else {
 		m.subs = append(m.subs, cmdSub)
 	}
@@ -142,19 +144,20 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		b:      b,
 		config: config,
 		mod:    m,
+		log:    m.log,
 	}
 	m.stopReconciler = startReconciler(rctx)
-	slog.Info("orchestrator: reconciler started")
+	m.log.Info("orchestrator: reconciler started")
 
 	// Listen for shutdown via Bus
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("orchestrator: received shutdown command via Bus")
+		m.log.Info("orchestrator: received shutdown command via Bus")
 		m.Stop()
 		os.Exit(0)
 	})
 	m.subs = append(m.subs, shutdownSub)
 
-	slog.Info("orchestrator: running", "moduleId", m.moduleID)
+	m.log.Info("orchestrator: running", "moduleId", m.moduleID)
 
 	// Block until context cancelled or signal
 	sigChan := make(chan os.Signal, 1)
@@ -162,7 +165,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	select {
 	case <-ctx.Done():
 	case sig := <-sigChan:
-		slog.Info("orchestrator: received signal, shutting down", "signal", sig)
+		m.log.Info("orchestrator: received signal, shutting down", "signal", sig)
 	}
 
 	return nil
@@ -178,9 +181,9 @@ func (m *Module) Stop() error {
 	if m.IsMonolith() {
 		m.mu.Lock()
 		for id, rm := range m.running {
-			slog.Info("orchestrator: stopping in-process module", "moduleId", id)
+			m.log.Info("orchestrator: stopping in-process module", "moduleId", id)
 			if err := rm.mod.Stop(); err != nil {
-				slog.Warn("orchestrator: module stop error", "moduleId", id, "error", err)
+				m.log.Warn("orchestrator: module stop error", "moduleId", id, "error", err)
 			}
 			rm.cancel()
 		}
@@ -195,6 +198,6 @@ func (m *Module) Stop() error {
 		_ = sub.Unsubscribe()
 	}
 	m.subs = nil
-	slog.Info("orchestrator: stopped")
+	m.log.Info("orchestrator: stopped")
 	return nil
 }

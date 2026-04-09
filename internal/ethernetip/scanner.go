@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/rbe"
+	"github.com/joyautomation/tentacle/internal/topics"
 	"github.com/joyautomation/tentacle/types"
 )
 
@@ -33,17 +34,18 @@ type DeviceConnection struct {
 
 // CachedVar holds the cached state of a single tag.
 type CachedVar struct {
-	TagName    string
-	Datatype   string
-	CipType    string
-	Value      interface{}
-	Quality    string
-	LastRead   int64
-	TagHandle  *PlcTag
+	TagName     string
+	Datatype    string
+	CipType     string
+	Value       interface{}
+	Quality     string
+	LastRead    int64
+	LastChanged int64
+	TagHandle   *PlcTag
 	CreateFails int
-	Deadband   *types.DeadBandConfig
-	DisableRBE bool
-	rbeState   rbe.State
+	Deadband    *types.DeadBandConfig
+	DisableRBE  bool
+	rbeState    rbe.State
 }
 
 const maxCreateRetries = 3
@@ -52,6 +54,7 @@ const maxCreateRetries = 3
 type Scanner struct {
 	b           bus.Bus
 	moduleID    string
+	log         *slog.Logger
 	connections map[string]*DeviceConnection
 	mu          sync.RWMutex
 	enabled     atomic.Bool
@@ -66,10 +69,11 @@ type Scanner struct {
 }
 
 // NewScanner creates a new EtherNet/IP scanner.
-func NewScanner(b bus.Bus, moduleID string) *Scanner {
+func NewScanner(b bus.Bus, moduleID string, log *slog.Logger) *Scanner {
 	s := &Scanner{
 		b:           b,
 		moduleID:    moduleID,
+		log:         log,
 		connections: make(map[string]*DeviceConnection),
 	}
 	s.enabled.Store(true)
@@ -136,9 +140,9 @@ func (s *Scanner) SetEnabled(enabled bool) {
 	was := s.enabled.Swap(enabled)
 	if was != enabled {
 		if enabled {
-			slog.Info("eip: scanner ENABLED — resuming polling")
+			s.log.Info("eip: scanner ENABLED — resuming polling")
 		} else {
-			slog.Info("eip: scanner DISABLED — pausing polling (connections preserved)")
+			s.log.Info("eip: scanner DISABLED — pausing polling (connections preserved)")
 		}
 	}
 }
@@ -148,7 +152,7 @@ func (s *Scanner) Start() {
 	subscribe := func(subject string, handler bus.MessageHandler) {
 		sub, err := s.b.Subscribe(subject, handler)
 		if err != nil {
-			slog.Error("eip: failed to subscribe", "subject", subject, "error", err)
+			s.log.Error("eip: failed to subscribe", "subject", subject, "error", err)
 			return
 		}
 		s.subs = append(s.subs, sub)
@@ -160,7 +164,33 @@ func (s *Scanner) Start() {
 	subscribe("ethernetip.variables", s.handleVariables)
 	subscribe("ethernetip.command.>", s.handleCommand)
 
-	slog.Info("eip: listening for browse/subscribe/variables/command requests")
+	// Watch scanner config KV bucket for subscription configs written by
+	// controllers (gateway, plc). This decouples startup ordering — the
+	// scanner picks up configs whenever it starts, regardless of whether
+	// the controller wrote them before or after.
+	bucket := topics.BucketScannerEthernetIP
+	if err := s.b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
+		s.log.Warn("eip: failed to create scanner config bucket", "error", err)
+	}
+	kvSub, err := s.b.KVWatchAll(bucket, func(key string, value []byte, op bus.KVOperation) {
+		if op == bus.KVOpPut {
+			s.handleSubscribe("", value, nil)
+		} else if op == bus.KVOpDelete {
+			// Key format: {subscriberId}.{deviceId} — extract and unsubscribe
+			parts := strings.SplitN(key, ".", 2)
+			if len(parts) == 2 {
+				unsubReq, _ := json.Marshal(UnsubscribeRequest{SubscriberID: parts[0], DeviceID: parts[1]})
+				s.handleUnsubscribe("", unsubReq, nil)
+			}
+		}
+	})
+	if err != nil {
+		s.log.Error("eip: failed to watch scanner config bucket", "error", err)
+	} else {
+		s.subs = append(s.subs, kvSub)
+	}
+
+	s.log.Info("eip: listening for browse/subscribe/variables/command requests")
 }
 
 // ActiveDevice describes a currently connected device for heartbeat metadata.
@@ -211,7 +241,7 @@ func (s *Scanner) Stop() {
 		conn.mu.Unlock()
 	}
 	s.connections = make(map[string]*DeviceConnection)
-	slog.Info("eip: all connections closed")
+	s.log.Info("eip: all connections closed")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -246,18 +276,18 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 	go func() {
 		result, err := browseDevice(req.Host, req.Port, req.DeviceID, s.moduleID, browseID, publishProgress)
 		if err != nil {
-			slog.Error("eip: browse failed", "device", req.DeviceID, "error", err)
+			s.log.Error("eip: browse failed", "device", req.DeviceID, "error", err)
 			publishProgress(types.BrowseProgressMessage{
 				BrowseID:  browseID,
 				ModuleID:  s.moduleID,
 				DeviceID:  req.DeviceID,
 				Phase:     "failed",
 				Message:   fmt.Sprintf("Browse failed: %v", err),
-				Timestamp: time.Now().UnixMilli(),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
 			})
 			return
 		}
-		slog.Info("eip: browse complete", "device", req.DeviceID, "vars", len(result.Variables), "udts", len(result.Udts))
+		s.log.Info("eip: browse complete", "device", req.DeviceID, "vars", len(result.Variables), "udts", len(result.Udts))
 		resultSubject := fmt.Sprintf("ethernetip.browse.result.%s", browseID)
 		resultData, _ := json.Marshal(result)
 		_ = s.b.Publish(resultSubject, resultData)
@@ -300,7 +330,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 			scanRateChanged: make(chan struct{}, 1),
 		}
 		s.connections[req.DeviceID] = conn
-		slog.Info("eip: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port)
+		s.log.Info("eip: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port)
 	}
 	s.mu.Unlock()
 
@@ -376,7 +406,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		go s.pollDevice(conn)
 	}
 
-	slog.Info("eip: subscriber added tags", "subscriber", req.SubscriberID, "device", req.DeviceID, "tags", len(req.Tags))
+	s.log.Info("eip: subscriber added tags", "subscriber", req.SubscriberID, "device", req.DeviceID, "tags", len(req.Tags))
 
 	s.respondJSON(reply, map[string]interface{}{
 		"success": true,
@@ -433,7 +463,7 @@ func (s *Scanner) handleUnsubscribe(subject string, data []byte, reply bus.Reply
 		conn.mu.Unlock()
 		delete(s.connections, req.DeviceID)
 		s.mu.Unlock()
-		slog.Info("eip: closed connection (no subscribers)", "device", req.DeviceID)
+		s.log.Info("eip: closed connection (no subscribers)", "device", req.DeviceID)
 	}
 
 	s.respondJSON(reply, map[string]interface{}{
@@ -463,7 +493,7 @@ func (s *Scanner) handleVariables(subject string, data []byte, reply bus.ReplyFu
 				CipType:     v.CipType,
 				Quality:     v.Quality,
 				Origin:      "plc",
-				LastUpdated: v.LastRead,
+				LastUpdated: v.LastChanged,
 			}
 			baseName := v.TagName
 			if dotIdx := strings.IndexByte(v.TagName, '.'); dotIdx != -1 {
@@ -511,7 +541,7 @@ func (s *Scanner) handleCommand(subj string, data []byte, reply bus.ReplyFunc) {
 	attrs := buildTagAttrs(targetConn.Gateway, targetConn.Port, tagName, 0)
 	tag, err := createTag(attrs, 10*time.Second)
 	if err != nil {
-		slog.Error("eip: failed to create tag for write", "tag", tagName, "error", err)
+		s.log.Error("eip: failed to create tag for write", "tag", tagName, "error", err)
 		return
 	}
 	defer tag.Close()
@@ -526,11 +556,11 @@ func (s *Scanner) handleCommand(subj string, data []byte, reply bus.ReplyFunc) {
 	targetConn.mu.RUnlock()
 
 	if err := writeTagValue(tag, cipType, valueStr); err != nil {
-		slog.Error("eip: failed to write", "tag", tagName, "error", err)
+		s.log.Error("eip: failed to write", "tag", tagName, "error", err)
 		return
 	}
 
-	slog.Info("eip: wrote tag", "tag", tagName, "value", valueStr)
+	s.log.Info("eip: wrote tag", "tag", tagName, "value", valueStr)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -538,7 +568,7 @@ func (s *Scanner) handleCommand(subj string, data []byte, reply bus.ReplyFunc) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (s *Scanner) pollDevice(conn *DeviceConnection) {
-	slog.Info("eip: starting poll loop", "device", conn.DeviceID, "rate", conn.ScanRate)
+	s.log.Info("eip: starting poll loop", "device", conn.DeviceID, "rate", conn.ScanRate)
 
 	ticker := time.NewTicker(conn.ScanRate)
 	defer ticker.Stop()
@@ -546,7 +576,7 @@ func (s *Scanner) pollDevice(conn *DeviceConnection) {
 	for {
 		select {
 		case <-conn.stopChan:
-			slog.Info("eip: poll loop stopped", "device", conn.DeviceID)
+			s.log.Info("eip: poll loop stopped", "device", conn.DeviceID)
 			return
 		case <-conn.scanRateChanged:
 			conn.mu.RLock()
@@ -684,6 +714,7 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 
 		if ok {
 			rbe.RecordPublish(&v.rbeState, r.value, now)
+			v.LastChanged = now
 		}
 		conn.mu.Unlock()
 
@@ -819,10 +850,10 @@ func (s *Scanner) respondJSON(reply bus.ReplyFunc, v interface{}) {
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		slog.Error("eip: failed to marshal response", "error", err)
+		s.log.Error("eip: failed to marshal response", "error", err)
 		return
 	}
 	if err := reply(data); err != nil {
-		slog.Error("eip: failed to respond", "error", err)
+		s.log.Error("eip: failed to respond", "error", err)
 	}
 }

@@ -62,7 +62,7 @@ func checkInternet() bool {
 
 // resolveLatestVersion fetches the latest release tag from GitHub.
 // Results are cached for config.LatestCacheTtlMs.
-func resolveLatestVersion(entry *otypes.ModuleRegistryEntry, config *OrchestratorConfig) string {
+func resolveLatestVersion(entry *otypes.ModuleRegistryEntry, config *OrchestratorConfig, log *slog.Logger) string {
 	latestCacheMu.RLock()
 	cached, ok := latestCache[entry.Repo]
 	latestCacheMu.RUnlock()
@@ -76,7 +76,7 @@ func resolveLatestVersion(entry *otypes.ModuleRegistryEntry, config *Orchestrato
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		slog.Warn("download: failed to create request", "repo", entry.Repo, "error", err)
+		log.Warn("download: failed to create request", "repo", entry.Repo, "error", err)
 		return ""
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
@@ -87,13 +87,13 @@ func resolveLatestVersion(entry *otypes.ModuleRegistryEntry, config *Orchestrato
 
 	resp, err := client.Do(req)
 	if err != nil {
-		slog.Warn("download: failed to resolve latest version", "repo", entry.Repo, "error", err)
+		log.Warn("download: failed to resolve latest version", "repo", entry.Repo, "error", err)
 		return ""
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		slog.Warn("download: failed to resolve latest version", "repo", entry.Repo, "status", resp.StatusCode)
+		log.Warn("download: failed to resolve latest version", "repo", entry.Repo, "status", resp.StatusCode)
 		return ""
 	}
 
@@ -101,7 +101,7 @@ func resolveLatestVersion(entry *otypes.ModuleRegistryEntry, config *Orchestrato
 		TagName string `json:"tag_name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		slog.Warn("download: failed to parse release", "repo", entry.Repo, "error", err)
+		log.Warn("download: failed to parse release", "repo", entry.Repo, "error", err)
 		return ""
 	}
 
@@ -110,19 +110,19 @@ func resolveLatestVersion(entry *otypes.ModuleRegistryEntry, config *Orchestrato
 	latestCache[entry.Repo] = latestCacheEntry{version: version, resolvedAt: time.Now()}
 	latestCacheMu.Unlock()
 
-	slog.Debug("download: resolved latest version", "repo", entry.Repo, "version", version)
+	log.Debug("download: resolved latest version", "repo", entry.Repo, "version", version)
 	return version
 }
 
 // resolveVersion resolves the desired version string.
 // If "latest", tries GitHub then falls back to the highest local version.
-func resolveVersion(entry *otypes.ModuleRegistryEntry, desiredVersion string, config *OrchestratorConfig) string {
+func resolveVersion(entry *otypes.ModuleRegistryEntry, desiredVersion string, config *OrchestratorConfig, log *slog.Logger) string {
 	if desiredVersion != "latest" {
 		return desiredVersion
 	}
 
 	// Try GitHub first
-	if resolved := resolveLatestVersion(entry, config); resolved != "" {
+	if resolved := resolveLatestVersion(entry, config, log); resolved != "" {
 		return resolved
 	}
 
@@ -148,7 +148,7 @@ func resolveVersion(entry *otypes.ModuleRegistryEntry, desiredVersion string, co
 	})
 
 	highest := versions[len(versions)-1]
-	slog.Debug("download: offline fallback", "moduleId", entry.ModuleID, "version", highest)
+	log.Debug("download: offline fallback", "moduleId", entry.ModuleID, "version", highest)
 	return highest
 }
 
@@ -193,13 +193,13 @@ func getDownloadURL(entry *otypes.ModuleRegistryEntry, version string, config *O
 }
 
 // downloadFile downloads a URL to a local path.
-func downloadFile(url, destPath string, config *OrchestratorConfig) bool {
-	slog.Info("download: downloading", "url", url)
+func downloadFile(url, destPath string, config *OrchestratorConfig, log *slog.Logger) bool {
+	log.Info("download: downloading", "url", url)
 
 	client := &http.Client{Timeout: 120 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		slog.Error("download: failed to create request", "error", err)
+		log.Error("download: failed to create request", "error", err)
 		return false
 	}
 	req.Header.Set("User-Agent", "tentacle-orchestrator")
@@ -209,31 +209,31 @@ func downloadFile(url, destPath string, config *OrchestratorConfig) bool {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		slog.Error("download: failed", "url", url, "error", err)
+		log.Error("download: failed", "url", url, "error", err)
 		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		slog.Error("download: HTTP error", "status", resp.StatusCode, "url", url)
+		log.Error("download: HTTP error", "status", resp.StatusCode, "url", url)
 		return false
 	}
 
 	f, err := os.Create(destPath)
 	if err != nil {
-		slog.Error("download: failed to create file", "path", destPath, "error", err)
+		log.Error("download: failed to create file", "path", destPath, "error", err)
 		return false
 	}
 	defer f.Close()
 
 	n, err := io.Copy(f, resp.Body)
 	if err != nil {
-		slog.Error("download: failed to write file", "path", destPath, "error", err)
+		log.Error("download: failed to write file", "path", destPath, "error", err)
 		os.Remove(destPath)
 		return false
 	}
 
-	slog.Debug("download: complete", "bytes", n, "path", destPath)
+	log.Debug("download: complete", "bytes", n, "path", destPath)
 	return true
 }
 
@@ -294,41 +294,41 @@ func getActiveVersion(entry *otypes.ModuleRegistryEntry, config *OrchestratorCon
 }
 
 // installVersion downloads and installs a specific version of a module.
-func installVersion(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig) bool {
+func installVersion(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig, log *slog.Logger) bool {
 	versionDir := config.VersionsDir + "/" + entry.ModuleID + "/" + version
 	if err := os.MkdirAll(versionDir, 0755); err != nil {
-		slog.Error("install: failed to create version dir", "path", versionDir, "error", err)
+		log.Error("install: failed to create version dir", "path", versionDir, "error", err)
 		return false
 	}
 
 	url := getDownloadURL(entry, version, config)
 	if url == "" {
-		slog.Error("install: unknown runtime", "runtime", entry.Runtime)
+		log.Error("install: unknown runtime", "runtime", entry.Runtime)
 		return false
 	}
 
 	switch entry.Runtime {
 	case "go":
 		binaryPath := versionDir + "/" + entry.ModuleID
-		if !downloadFile(url, binaryPath, config) {
+		if !downloadFile(url, binaryPath, config, log) {
 			os.RemoveAll(versionDir)
 			return false
 		}
 		if err := os.Chmod(binaryPath, 0755); err != nil {
-			slog.Warn("install: failed to chmod", "path", binaryPath, "error", err)
+			log.Warn("install: failed to chmod", "path", binaryPath, "error", err)
 		}
 		return true
 
 	case "deno", "deno-web":
 		tmpDir, err := os.MkdirTemp("", "tentacle-install-*")
 		if err != nil {
-			slog.Error("install: failed to create temp dir", "error", err)
+			log.Error("install: failed to create temp dir", "error", err)
 			return false
 		}
 		defer os.RemoveAll(tmpDir)
 
 		tarPath := tmpDir + "/pkg.tar.gz"
-		if !downloadFile(url, tarPath, config) {
+		if !downloadFile(url, tarPath, config, log) {
 			os.RemoveAll(versionDir)
 			return false
 		}
@@ -336,7 +336,7 @@ func installVersion(entry *otypes.ModuleRegistryEntry, version string, config *O
 		// Extract tarball
 		cmd := exec.Command("tar", "xzf", tarPath, "-C", tmpDir)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			slog.Error("install: failed to extract tarball", "output", string(out))
+			log.Error("install: failed to extract tarball", "output", string(out))
 			os.RemoveAll(versionDir)
 			return false
 		}
@@ -346,45 +346,45 @@ func installVersion(entry *otypes.ModuleRegistryEntry, version string, config *O
 		buildDir := tmpDir + "/build"
 
 		if info, err := os.Stat(repoDir); err == nil && info.IsDir() {
-			if !moveContents(repoDir, versionDir) {
+			if !moveContents(repoDir, versionDir, log) {
 				os.RemoveAll(versionDir)
 				return false
 			}
 		} else if info, err := os.Stat(buildDir); err == nil && info.IsDir() {
 			buildDest := versionDir + "/build"
 			os.MkdirAll(buildDest, 0755)
-			if !moveContents(buildDir, buildDest) {
+			if !moveContents(buildDir, buildDest, log) {
 				os.RemoveAll(versionDir)
 				return false
 			}
 		} else {
-			slog.Error("install: unexpected tarball layout", "repo", entry.Repo)
+			log.Error("install: unexpected tarball layout", "repo", entry.Repo)
 			os.RemoveAll(versionDir)
 			return false
 		}
 
-		precacheDenoDeps(entry, version, config)
+		precacheDenoDeps(entry, version, config, log)
 		return true
 
 	default:
-		slog.Error("install: unknown runtime", "runtime", entry.Runtime)
+		log.Error("install: unknown runtime", "runtime", entry.Runtime)
 		return false
 	}
 }
 
 // moveContents copies all files from src to dest using cp -a.
-func moveContents(src, dest string) bool {
+func moveContents(src, dest string, log *slog.Logger) bool {
 	cmd := exec.Command("bash", "-c",
 		`cp -a "`+src+`/"* "`+dest+`/" 2>/dev/null; cp -a "`+src+`/".[^.]* "`+dest+`/" 2>/dev/null; true`)
 	if err := cmd.Run(); err != nil {
-		slog.Error("install: failed to move contents", "src", src, "dest", dest, "error", err)
+		log.Error("install: failed to move contents", "src", src, "dest", dest, "error", err)
 		return false
 	}
 	return true
 }
 
 // precacheDenoDeps runs deno install --entrypoint to cache dependencies.
-func precacheDenoDeps(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig) {
+func precacheDenoDeps(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig, log *slog.Logger) {
 	versionDir := config.VersionsDir + "/" + entry.ModuleID + "/" + version
 	denoDir := config.CacheDir + "/deno/versions/" + entry.ModuleID + "/" + version
 	os.MkdirAll(denoDir, 0755)
@@ -399,18 +399,18 @@ func precacheDenoDeps(entry *otypes.ModuleRegistryEntry, version string, config 
 		entrypoint = versionDir + "/build/index.js"
 	}
 
-	slog.Debug("install: pre-caching deps", "moduleId", entry.ModuleID, "version", version)
+	log.Debug("install: pre-caching deps", "moduleId", entry.ModuleID, "version", version)
 	denoPath := findDeno(config)
 	cmd := exec.Command(denoPath, "install", "--entrypoint", entrypoint)
 	cmd.Env = append(os.Environ(), "DENO_DIR="+denoDir)
 	cmd.Dir = versionDir
 	if out, err := cmd.CombinedOutput(); err != nil {
-		slog.Warn("install: failed to cache deps", "moduleId", entry.ModuleID, "version", version, "output", string(out))
+		log.Warn("install: failed to cache deps", "moduleId", entry.ModuleID, "version", version, "output", string(out))
 	}
 }
 
 // updateSymlink creates or updates the symlink for a module version.
-func updateSymlink(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig) bool {
+func updateSymlink(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig, log *slog.Logger) bool {
 	var linkPath, target string
 
 	if entry.Runtime == "go" {
@@ -425,16 +425,16 @@ func updateSymlink(entry *otypes.ModuleRegistryEntry, version string, config *Or
 	os.Remove(linkPath)
 
 	if err := os.Symlink(target, linkPath); err != nil {
-		slog.Error("install: failed to create symlink", "link", linkPath, "target", target, "error", err)
+		log.Error("install: failed to create symlink", "link", linkPath, "target", target, "error", err)
 		return false
 	}
-	slog.Debug("install: symlink created", "link", linkPath, "target", target)
+	log.Debug("install: symlink created", "link", linkPath, "target", target)
 	return true
 }
 
 // ensureDeps installs apt packages and builds source dependencies for a module.
 // Returns true if all deps are satisfied (already present or newly installed).
-func ensureDeps(entry *otypes.ModuleRegistryEntry) bool {
+func ensureDeps(entry *otypes.ModuleRegistryEntry, log *slog.Logger) bool {
 	if len(entry.AptDeps) == 0 && len(entry.BuildDeps) == 0 {
 		return true
 	}
@@ -456,13 +456,13 @@ func ensureDeps(entry *otypes.ModuleRegistryEntry) bool {
 	}
 
 	if len(aptDeps) > 0 {
-		if !installAptDeps(aptDeps) {
+		if !installAptDeps(aptDeps, log) {
 			return false
 		}
 	}
 
 	for _, dep := range entry.BuildDeps {
-		if !ensureBuildDep(dep) {
+		if !ensureBuildDep(dep, log) {
 			return false
 		}
 	}
@@ -471,7 +471,7 @@ func ensureDeps(entry *otypes.ModuleRegistryEntry) bool {
 }
 
 // installAptDeps installs one or more apt packages if not already present.
-func installAptDeps(packages []string) bool {
+func installAptDeps(packages []string, log *slog.Logger) bool {
 	// Check which packages are missing
 	var missing []string
 	for _, pkg := range packages {
@@ -484,34 +484,34 @@ func installAptDeps(packages []string) bool {
 		return true
 	}
 
-	slog.Info("deps: installing apt packages", "packages", missing)
+	log.Info("deps: installing apt packages", "packages", missing)
 	_, stderr, ok := runCmd("apt-get", "update", "-qq")
 	if !ok {
-		slog.Error("deps: apt-get update failed", "stderr", stderr)
+		log.Error("deps: apt-get update failed", "stderr", stderr)
 		return false
 	}
 
 	args := append([]string{"install", "-y", "-qq"}, missing...)
 	_, stderr, ok = runCmd("apt-get", args...)
 	if !ok {
-		slog.Error("deps: apt-get install failed", "stderr", stderr)
+		log.Error("deps: apt-get install failed", "stderr", stderr)
 		return false
 	}
 	return true
 }
 
 // ensureBuildDep checks if a source-built library is present, and builds it if not.
-func ensureBuildDep(dep otypes.BuildDep) bool {
+func ensureBuildDep(dep otypes.BuildDep, log *slog.Logger) bool {
 	// Test if already installed
 	if dep.TestCmd != "" {
 		_, _, ok := runCmd("bash", "-c", dep.TestCmd)
 		if ok {
-			slog.Debug("deps: already installed", "name", dep.Name)
+			log.Debug("deps: already installed", "name", dep.Name)
 			return true
 		}
 	}
 
-	slog.Info("deps: building from source", "name", dep.Name, "version", dep.Version)
+	log.Info("deps: building from source", "name", dep.Name, "version", dep.Version)
 
 	buildDir := fmt.Sprintf("/tmp/%s-build", dep.Name)
 	os.RemoveAll(buildDir)
@@ -519,7 +519,7 @@ func ensureBuildDep(dep otypes.BuildDep) bool {
 	// Clone
 	_, stderr, ok := runCmd("git", "clone", "--depth=1", "--branch", dep.Version, dep.Repo, buildDir)
 	if !ok {
-		slog.Error("deps: failed to clone", "name", dep.Name, "stderr", stderr)
+		log.Error("deps: failed to clone", "name", dep.Name, "stderr", stderr)
 		return false
 	}
 
@@ -529,7 +529,7 @@ func ensureBuildDep(dep otypes.BuildDep) bool {
 	_, stderr, ok = runCmd("cmake", "-S", buildDir, "-B", cmakeBuildDir,
 		"-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=/usr/local")
 	if !ok {
-		slog.Error("deps: cmake configure failed", "name", dep.Name, "stderr", stderr)
+		log.Error("deps: cmake configure failed", "name", dep.Name, "stderr", stderr)
 		os.RemoveAll(buildDir)
 		return false
 	}
@@ -537,7 +537,7 @@ func ensureBuildDep(dep otypes.BuildDep) bool {
 	// Build
 	_, stderr, ok = runCmd("cmake", "--build", cmakeBuildDir, "--parallel")
 	if !ok {
-		slog.Error("deps: cmake build failed", "name", dep.Name, "stderr", stderr)
+		log.Error("deps: cmake build failed", "name", dep.Name, "stderr", stderr)
 		os.RemoveAll(buildDir)
 		return false
 	}
@@ -545,7 +545,7 @@ func ensureBuildDep(dep otypes.BuildDep) bool {
 	// Install
 	_, stderr, ok = runCmd("cmake", "--install", cmakeBuildDir)
 	if !ok {
-		slog.Error("deps: cmake install failed", "name", dep.Name, "stderr", stderr)
+		log.Error("deps: cmake install failed", "name", dep.Name, "stderr", stderr)
 		os.RemoveAll(buildDir)
 		return false
 	}
@@ -554,6 +554,6 @@ func ensureBuildDep(dep otypes.BuildDep) bool {
 	runCmd("ldconfig")
 
 	os.RemoveAll(buildDir)
-	slog.Info("deps: successfully installed", "name", dep.Name, "version", dep.Version)
+	log.Info("deps: successfully installed", "name", dep.Name, "version", dep.Version)
 	return true
 }

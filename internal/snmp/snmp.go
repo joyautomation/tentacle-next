@@ -31,6 +31,7 @@ type Module struct {
 	subs         []bus.Subscription
 	b            bus.Bus
 	trapPort     int
+	log          *slog.Logger
 }
 
 // New creates a new SNMP module.
@@ -50,6 +51,7 @@ func (m *Module) ServiceType() string { return defaultServiceType }
 // Start initializes the scanner, trap listener, heartbeat, and enabled state watcher.
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.b = b
+	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
 
 	// Read trap port from environment
 	if p := os.Getenv("SNMP_TRAP_PORT"); p != "" {
@@ -61,7 +63,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	// Ensure KV buckets exist
 	for _, bucket := range []string{topics.BucketHeartbeats, topics.BucketServiceEnabled} {
 		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
-			slog.Warn("snmp: failed to create bucket", "bucket", bucket, "error", err)
+			m.log.Warn("snmp: failed to create bucket", "bucket", bucket, "error", err)
 		}
 	}
 
@@ -85,20 +87,20 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 	var mibTree *MibTree
 	if mibDirs != "" {
-		slog.Info("snmp: loading MIBs", "dirs", mibDirs)
+		m.log.Info("snmp: loading MIBs", "dirs", mibDirs)
 		mibTree = LoadMibDirs(mibDirs)
-		slog.Info("snmp: loaded OID definitions from MIBs", "count", len(mibTree.ByOID))
+		m.log.Info("snmp: loaded OID definitions from MIBs", "count", len(mibTree.ByOID))
 	} else {
-		slog.Info("snmp: no MIB directories found — OIDs will not be resolved to names")
+		m.log.Info("snmp: no MIB directories found — OIDs will not be resolved to names")
 		mibTree = EmptyMibTree()
 	}
 
 	// Create and start scanner
-	m.scanner = NewScanner(b, m.moduleID, mibTree)
+	m.scanner = NewScanner(b, m.moduleID, mibTree, m.log)
 	m.scanner.Start()
 
 	// Create and start trap listener
-	m.trapListener = NewTrapListener(b, m.moduleID, m.trapPort)
+	m.trapListener = NewTrapListener(b, m.moduleID, m.trapPort, m.log)
 	go m.trapListener.Start()
 
 	// Start heartbeat
@@ -117,7 +119,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		var state types.ServiceEnabledKV
 		if json.Unmarshal(data, &state) == nil {
 			m.scanner.SetEnabled(state.Enabled)
-			slog.Info("snmp: initial enabled state", "enabled", state.Enabled)
+			m.log.Info("snmp: initial enabled state", "enabled", state.Enabled)
 		}
 	}
 
@@ -132,20 +134,20 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 	})
 	if err != nil {
-		slog.Warn("snmp: failed to watch service_enabled KV", "error", err)
+		m.log.Warn("snmp: failed to watch service_enabled KV", "error", err)
 	} else {
 		m.subs = append(m.subs, enabledSub)
 	}
 
 	// Listen for shutdown via Bus
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("snmp: received shutdown command via Bus")
+		m.log.Info("snmp: received shutdown command via Bus")
 		m.Stop()
 		os.Exit(0)
 	})
 	m.subs = append(m.subs, shutdownSub)
 
-	slog.Info("snmp: service running", "moduleId", m.moduleID, "trapPort", m.trapPort)
+	m.log.Info("snmp: service running", "moduleId", m.moduleID, "trapPort", m.trapPort)
 
 	// Block until context cancelled or signal
 	sigChan := make(chan os.Signal, 1)
@@ -172,6 +174,6 @@ func (m *Module) Stop() error {
 		_ = sub.Unsubscribe()
 	}
 	m.subs = nil
-	slog.Info("snmp: shutdown complete")
+	m.log.Info("snmp: shutdown complete")
 	return nil
 }

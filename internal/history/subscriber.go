@@ -5,7 +5,6 @@ package history
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -50,7 +49,7 @@ func (h *History) handleDataMessage(subject string, data []byte) {
 
 	var msg types.PlcDataMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
-		slog.Debug("history: failed to parse PlcDataMessage", "subject", subject, "error", err)
+		h.log.Debug("history: failed to parse PlcDataMessage", "subject", subject, "error", err)
 		return
 	}
 

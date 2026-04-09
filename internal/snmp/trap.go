@@ -23,14 +23,16 @@ type TrapListener struct {
 	listener *gosnmp.TrapListener
 	mu       sync.RWMutex
 	running  bool
+	log      *slog.Logger
 }
 
 // NewTrapListener creates a new trap listener.
-func NewTrapListener(b bus.Bus, moduleID string, port int) *TrapListener {
+func NewTrapListener(b bus.Bus, moduleID string, port int, log *slog.Logger) *TrapListener {
 	return &TrapListener{
 		b:        b,
 		moduleID: moduleID,
 		port:     port,
+		log:      log,
 	}
 }
 
@@ -42,7 +44,7 @@ func (t *TrapListener) Start() error {
 	t.listener.Params.Logger = gosnmp.NewLogger(&trapLogAdapter{})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", t.port)
-	slog.Info("snmp: starting trap listener", "addr", addr)
+	t.log.Info("snmp: starting trap listener", "addr", addr)
 
 	t.mu.Lock()
 	t.running = true
@@ -53,7 +55,7 @@ func (t *TrapListener) Start() error {
 		t.mu.Lock()
 		t.running = false
 		t.mu.Unlock()
-		slog.Error("snmp: trap listener error", "error", err)
+		t.log.Error("snmp: trap listener error", "error", err)
 		return err
 	}
 	return nil
@@ -67,14 +69,14 @@ func (t *TrapListener) Stop() {
 	if t.running && t.listener != nil {
 		t.listener.Close()
 		t.running = false
-		slog.Info("snmp: trap listener stopped")
+		t.log.Info("snmp: trap listener stopped")
 	}
 }
 
 // handleTrap processes an incoming SNMP trap.
 func (t *TrapListener) handleTrap(packet *gosnmp.SnmpPacket, addr *net.UDPAddr) {
 	deviceID := addr.IP.String()
-	slog.Info("snmp: received trap", "device", deviceID, "version", versionToString(packet.Version))
+	t.log.Info("snmp: received trap", "device", deviceID, "version", versionToString(packet.Version))
 
 	// Extract trap OID (SNMPv2-MIB::snmpTrapOID.0 = .1.3.6.1.6.3.1.1.4.1.0)
 	trapOID := ""
@@ -119,17 +121,17 @@ func (t *TrapListener) handleTrap(packet *gosnmp.SnmpPacket, addr *net.UDPAddr) 
 
 	data, err := json.Marshal(trapMsg)
 	if err != nil {
-		slog.Error("snmp: failed to marshal trap message", "error", err)
+		t.log.Error("snmp: failed to marshal trap message", "error", err)
 		return
 	}
 
 	subject := topics.SnmpTrap(sanitizeOidForSubject(deviceID))
 	if err := t.b.Publish(subject, data); err != nil {
-		slog.Error("snmp: failed to publish trap", "error", err)
+		t.log.Error("snmp: failed to publish trap", "error", err)
 		return
 	}
 
-	slog.Info("snmp: published trap", "device", deviceID, "trapOid", trapOID, "varbinds", len(variables))
+	t.log.Info("snmp: published trap", "device", deviceID, "trapOid", trapOID, "varbinds", len(variables))
 }
 
 // trapLogAdapter suppresses gosnmp's internal logging.

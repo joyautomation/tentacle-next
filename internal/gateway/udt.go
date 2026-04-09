@@ -4,16 +4,15 @@ package gateway
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
 	"sync"
 	"time"
 
+	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/rbe"
+	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/types"
-
-	"github.com/joyautomation/tentacle/internal/bus"
 )
 
 const udtDebounceDuration = 100 * time.Millisecond
@@ -171,7 +170,7 @@ func (a *UdtAssembler) publish() {
 		return
 	}
 
-	subject := fmt.Sprintf("plc.data.%s.%s", a.gatewayID, types.SanitizeForSubject(a.variableID))
+	subject := topics.Data(a.gatewayID, types.SanitizeForSubject(a.config.DeviceID), types.SanitizeForSubject(a.variableID))
 	_ = a.b.Publish(subject, data)
 }
 

@@ -27,6 +27,8 @@ const serviceType = "history"
 type History struct {
 	moduleID string
 
+	log *slog.Logger
+
 	mu  sync.Mutex
 	b   bus.Bus
 	db  *sql.DB
@@ -66,10 +68,11 @@ func (h *History) ServiceType() string { return serviceType }
 // starts the heartbeat, subscribes to data topics, and blocks until shutdown.
 func (h *History) Start(ctx context.Context, b bus.Bus) error {
 	h.b = b
+	h.log = slog.Default().With("serviceType", h.ServiceType(), "moduleID", h.ModuleID())
 
 	// Load configuration from environment variables.
 	cfg := loadConfigFromEnv()
-	slog.Info("history: loaded config",
+	h.log.Info("history: loaded config",
 		"host", cfg.DBHost,
 		"port", cfg.DBPort,
 		"db", cfg.DBName,
@@ -83,24 +86,24 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 		return err
 	}
 	h.db = db
-	slog.Info("history: connected to PostgreSQL")
+	h.log.Info("history: connected to PostgreSQL")
 
 	// Ensure schema exists.
-	if err := ensureSchema(db); err != nil {
+	if err := ensureSchema(db, h.log); err != nil {
 		h.db.Close()
 		return err
 	}
 
 	// Optionally enable TimescaleDB features.
 	if cfg.EnableHyper {
-		if enableHypertable(db) {
+		if enableHypertable(db, h.log) {
 			h.hyperEnabled = true
 
-			if err := enableCompressionPolicy(db); err != nil {
-				slog.Warn("history: failed to enable compression policy", "error", err)
+			if err := enableCompressionPolicy(db, h.log); err != nil {
+				h.log.Warn("history: failed to enable compression policy", "error", err)
 			}
-			if err := enableRetentionPolicy(db, cfg.RetentionDays); err != nil {
-				slog.Warn("history: failed to enable retention policy", "error", err)
+			if err := enableRetentionPolicy(db, cfg.RetentionDays, h.log); err != nil {
+				h.log.Warn("history: failed to enable retention policy", "error", err)
 			}
 
 			// Start hourly compression goroutine.
@@ -122,7 +125,7 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 		h.handleDataMessage(subject, data)
 	})
 	if err != nil {
-		slog.Error("history: failed to subscribe to data topics", "error", err)
+		h.log.Error("history: failed to subscribe to data topics", "error", err)
 		h.cleanup()
 		return err
 	}
@@ -130,7 +133,7 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 
 	// Listen for shutdown via bus.
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(h.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("history: received shutdown command via Bus")
+		h.log.Info("history: received shutdown command via Bus")
 		h.Stop()
 		os.Exit(0)
 	})
@@ -142,7 +145,7 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 	h.stopFlusher = make(chan struct{})
 	go h.flushLoop()
 
-	slog.Info("history: module started", "moduleID", h.moduleID)
+	h.log.Info("history: module started", "moduleID", h.moduleID)
 
 	// Block until context cancelled or signal.
 	sigChan := make(chan os.Signal, 1)
@@ -156,7 +159,7 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 
 // Stop gracefully shuts down the history module.
 func (h *History) Stop() error {
-	slog.Info("history: stopping", "moduleID", h.moduleID)
+	h.log.Info("history: stopping", "moduleID", h.moduleID)
 
 	// Stop the periodic flusher.
 	if h.stopFlusher != nil {
@@ -172,7 +175,7 @@ func (h *History) Stop() error {
 	h.flushBatch()
 
 	h.cleanup()
-	slog.Info("history: stopped", "moduleID", h.moduleID)
+	h.log.Info("history: stopped", "moduleID", h.moduleID)
 	return nil
 }
 
@@ -224,8 +227,8 @@ func (h *History) compressionLoop() {
 			return
 		case <-ticker.C:
 			if h.db != nil {
-				if err := compressEligibleChunks(h.db); err != nil {
-					slog.Warn("history: hourly compression failed", "error", err)
+				if err := compressEligibleChunks(h.db, h.log); err != nil {
+					h.log.Warn("history: hourly compression failed", "error", err)
 				}
 			}
 		}
@@ -244,17 +247,17 @@ func (h *History) flushBatch() {
 	h.mu.Unlock()
 
 	if db == nil {
-		slog.Warn("history: database not available, dropping batch", "count", len(records))
+		h.log.Warn("history: database not available, dropping batch", "count", len(records))
 		return
 	}
 
 	if err := insertBatch(db, records); err != nil {
-		slog.Error("history: batch insert failed", "count", len(records), "error", err)
+		h.log.Error("history: batch insert failed", "count", len(records), "error", err)
 		return
 	}
 
 	now := time.Now().UnixMilli()
 	h.stats.addBatch(int64(len(records)))
 	h.stats.setLastFlush(now)
-	slog.Debug("history: flushed batch", "count", len(records))
+	h.log.Debug("history: flushed batch", "count", len(records))
 }

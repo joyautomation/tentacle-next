@@ -28,6 +28,7 @@ type Module struct {
 	stopHB   func()
 	subs     []bus.Subscription
 	b        bus.Bus
+	log      *slog.Logger
 }
 
 // New creates a new Modbus server module.
@@ -47,16 +48,17 @@ func (m *Module) ServiceType() string { return defaultServiceType }
 // Start initializes the manager, heartbeat, and enabled state watcher.
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.b = b
+	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
 
 	// Ensure required KV buckets exist
 	for _, bucket := range []string{topics.BucketHeartbeats, topics.BucketServiceEnabled} {
 		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
-			slog.Warn("modbusserver: failed to create bucket", "bucket", bucket, "error", err)
+			m.log.Warn("modbusserver: failed to create bucket", "bucket", bucket, "error", err)
 		}
 	}
 
 	// Create and start manager
-	m.manager = NewServerManager(b, m.moduleID)
+	m.manager = NewServerManager(b, m.moduleID, m.log)
 	m.manager.Start()
 
 	// Start heartbeat
@@ -71,36 +73,36 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		var state types.ServiceEnabledKV
 		if json.Unmarshal(data, &state) == nil {
 			if !state.Enabled {
-				slog.Info("modbusserver: service disabled via KV", "moduleId", m.moduleID)
+				m.log.Info("modbusserver: service disabled via KV", "moduleId", m.moduleID)
 			}
 		}
 	}
 
 	enabledSub, err := b.KVWatch(topics.BucketServiceEnabled, m.moduleID, func(key string, value []byte, op bus.KVOperation) {
 		if op == bus.KVOpDelete {
-			slog.Info("modbusserver: enabled key deleted, defaulting to enabled")
+			m.log.Info("modbusserver: enabled key deleted, defaulting to enabled")
 			return
 		}
 		var state types.ServiceEnabledKV
 		if json.Unmarshal(value, &state) == nil {
-			slog.Info("modbusserver: enabled state changed", "enabled", state.Enabled)
+			m.log.Info("modbusserver: enabled state changed", "enabled", state.Enabled)
 		}
 	})
 	if err != nil {
-		slog.Warn("modbusserver: failed to watch service_enabled KV", "error", err)
+		m.log.Warn("modbusserver: failed to watch service_enabled KV", "error", err)
 	} else {
 		m.subs = append(m.subs, enabledSub)
 	}
 
 	// Listen for shutdown via bus
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("modbusserver: received shutdown command via bus")
+		m.log.Info("modbusserver: received shutdown command via bus")
 		_ = m.Stop()
 		os.Exit(0)
 	})
 	m.subs = append(m.subs, shutdownSub)
 
-	slog.Info("modbusserver: service running", "moduleId", m.moduleID)
+	m.log.Info("modbusserver: service running", "moduleId", m.moduleID)
 
 	// Block until context cancelled or signal
 	sigChan := make(chan os.Signal, 1)

@@ -7,6 +7,7 @@ type MqttBridgeConfig struct {
 	GroupID          string `json:"groupId"`
 	EdgeNode         string `json:"edgeNode"`
 	DeviceID         string `json:"deviceId,omitempty"`
+	PerSourceDevice  bool   `json:"perSourceDevice,omitempty"` // When true, each source device becomes its own Sparkplug device
 	Username         string `json:"username,omitempty"`
 	Password         string `json:"password,omitempty"`
 	Keepalive        int    `json:"keepalive,omitempty"`
@@ -23,12 +24,13 @@ type MqttBridgeConfig struct {
 
 // MqttMetricInfo describes a single metric published by the Sparkplug bridge.
 type MqttMetricInfo struct {
-	Name         string `json:"name"`
-	SparkplugType string `json:"sparkplugType"` // "double", "boolean", "string", "template"
+	Name         string      `json:"name"`
+	SparkplugType string     `json:"sparkplugType"` // "double", "boolean", "string", "template"
 	Value        interface{} `json:"value,omitempty"`
-	ModuleID     string `json:"moduleId"`
-	Datatype     string `json:"datatype"` // "number", "boolean", "string", "udt"
-	TemplateRef  string `json:"templateRef,omitempty"`
+	ModuleID     string      `json:"moduleId"`
+	Datatype     string      `json:"datatype"` // "number", "boolean", "string", "udt"
+	TemplateRef  string      `json:"templateRef,omitempty"`
+	LastUpdated  int64       `json:"lastUpdated,omitempty"`
 }
 
 // MqttMetricsResponse is the reply to mqtt.metrics request.

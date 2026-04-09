@@ -26,6 +26,7 @@ const serviceType = "nftables"
 type Module struct {
 	b        bus.Bus
 	moduleID string
+	log      *slog.Logger
 
 	mu   sync.RWMutex
 	subs []bus.Subscription
@@ -52,6 +53,7 @@ func (m *Module) ServiceType() string { return serviceType }
 // command handler, state handler, and shutdown handler.
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.b = b
+	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
 
 	// Start heartbeat.
 	m.stopHeartbeat = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
@@ -130,7 +132,7 @@ func (m *Module) publishLoop() {
 func (m *Module) publishRules() {
 	cfg, err := loadConfig()
 	if err != nil {
-		slog.Warn("nftables: failed to load config for publish", "error", err)
+		m.log.Warn("nftables: failed to load config for publish", "error", err)
 		return
 	}
 
@@ -140,7 +142,7 @@ func (m *Module) publishRules() {
 	}
 
 	// Include the raw ruleset if available.
-	if raw, err := getRuleset(); err == nil {
+	if raw, err := getRuleset(m.log); err == nil {
 		msg.RawRuleset = raw
 	}
 
@@ -149,11 +151,11 @@ func (m *Module) publishRules() {
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		slog.Warn("nftables: failed to marshal state message", "error", err)
+		m.log.Warn("nftables: failed to marshal state message", "error", err)
 		return
 	}
 	if err := m.b.Publish(topics.NftablesRules, data); err != nil {
-		slog.Warn("nftables: failed to publish rules", "error", err)
+		m.log.Warn("nftables: failed to publish rules", "error", err)
 	}
 }
 
@@ -171,7 +173,7 @@ func (m *Module) setupCommandHandler() {
 				Error:     "invalid request: " + err.Error(),
 				Timestamp: time.Now().UnixMilli(),
 			}
-			replyJSON(reply, resp)
+			replyJSON(m.log, reply,resp)
 			return
 		}
 
@@ -187,11 +189,11 @@ func (m *Module) setupCommandHandler() {
 				Error:     "unknown action: " + req.Action,
 				Timestamp: time.Now().UnixMilli(),
 			}
-			replyJSON(reply, resp)
+			replyJSON(m.log, reply,resp)
 		}
 	})
 	if err != nil {
-		slog.Error("nftables: failed to subscribe to command", "subject", topics.NftablesCommand, "error", err)
+		m.log.Error("nftables: failed to subscribe to command", "subject", topics.NftablesCommand, "error", err)
 		return
 	}
 	m.mu.Lock()
@@ -209,7 +211,7 @@ func (m *Module) handleGetConfig(req itypes.NftablesCommandRequest, reply bus.Re
 			Error:     "failed to load config: " + err.Error(),
 			Timestamp: time.Now().UnixMilli(),
 		}
-		replyJSON(reply, resp)
+		replyJSON(m.log, reply,resp)
 		return
 	}
 	resp := itypes.NftablesCommandResponse{
@@ -218,7 +220,7 @@ func (m *Module) handleGetConfig(req itypes.NftablesCommandRequest, reply bus.Re
 		Config:    cfg,
 		Timestamp: time.Now().UnixMilli(),
 	}
-	replyJSON(reply, resp)
+	replyJSON(m.log, reply,resp)
 }
 
 // handleApplyConfig saves the config, generates nft rules, applies them,
@@ -227,14 +229,14 @@ func (m *Module) handleApplyConfig(req itypes.NftablesCommandRequest, reply bus.
 	cfg := &itypes.NftablesConfig{NatRules: req.NatRules}
 
 	// Save config to disk.
-	if err := saveConfig(cfg); err != nil {
+	if err := saveConfig(m.log, cfg); err != nil {
 		resp := itypes.NftablesCommandResponse{
 			RequestID: req.RequestID,
 			Success:   false,
 			Error:     "failed to save config: " + err.Error(),
 			Timestamp: time.Now().UnixMilli(),
 		}
-		replyJSON(reply, resp)
+		replyJSON(m.log, reply,resp)
 		return
 	}
 
@@ -247,31 +249,31 @@ func (m *Module) handleApplyConfig(req itypes.NftablesCommandRequest, reply bus.
 			Error:     "failed to write rules file: " + err.Error(),
 			Timestamp: time.Now().UnixMilli(),
 		}
-		replyJSON(reply, resp)
+		replyJSON(m.log, reply,resp)
 		return
 	}
 
 	// Apply rules via nft.
-	if err := applyRules(); err != nil {
+	if err := applyRules(m.log); err != nil {
 		resp := itypes.NftablesCommandResponse{
 			RequestID: req.RequestID,
 			Success:   false,
 			Error:     "failed to apply rules: " + err.Error(),
 			Timestamp: time.Now().UnixMilli(),
 		}
-		replyJSON(reply, resp)
+		replyJSON(m.log, reply,resp)
 		return
 	}
 
 	// Sync IP aliases (delegate to network module).
-	if err := syncAliases(m.b, cfg.NatRules); err != nil {
-		slog.Warn("nftables: alias sync had errors", "error", err)
+	if err := syncAliases(m.log, m.b, cfg.NatRules); err != nil {
+		m.log.Warn("nftables: alias sync had errors", "error", err)
 		// Non-fatal: rules are already applied.
 	}
 
 	// Enable IPv4 forwarding.
-	if err := enableForwarding(); err != nil {
-		slog.Warn("nftables: failed to enable forwarding", "error", err)
+	if err := enableForwarding(m.log); err != nil {
+		m.log.Warn("nftables: failed to enable forwarding", "error", err)
 		// Non-fatal: rules are already applied.
 	}
 
@@ -281,7 +283,7 @@ func (m *Module) handleApplyConfig(req itypes.NftablesCommandRequest, reply bus.
 		Config:    cfg,
 		Timestamp: time.Now().UnixMilli(),
 	}
-	replyJSON(reply, resp)
+	replyJSON(m.log, reply,resp)
 
 	// Immediately publish updated rules.
 	m.publishRules()
@@ -298,13 +300,13 @@ func (m *Module) setupStateHandler() {
 			ModuleID:  m.moduleID,
 			Timestamp: time.Now().UnixMilli(),
 		}
-		if raw, err := getRuleset(); err == nil {
+		if raw, err := getRuleset(m.log); err == nil {
 			msg.RawRuleset = raw
 		}
-		replyJSON(reply, msg)
+		replyJSON(m.log, reply,msg)
 	})
 	if err != nil {
-		slog.Error("nftables: failed to subscribe to state", "subject", topics.NftablesState, "error", err)
+		m.log.Error("nftables: failed to subscribe to state", "subject", topics.NftablesState, "error", err)
 		return
 	}
 	m.mu.Lock()
@@ -315,12 +317,12 @@ func (m *Module) setupStateHandler() {
 // setupShutdownHandler listens for a directed shutdown command.
 func (m *Module) setupShutdownHandler() {
 	sub, err := m.b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("nftables: received shutdown command via Bus")
+		m.log.Info("nftables: received shutdown command via Bus")
 		m.Stop()
 		os.Exit(0)
 	})
 	if err != nil {
-		slog.Error("nftables: failed to subscribe to shutdown", "error", err)
+		m.log.Error("nftables: failed to subscribe to shutdown", "error", err)
 		return
 	}
 	m.mu.Lock()
@@ -329,13 +331,13 @@ func (m *Module) setupShutdownHandler() {
 }
 
 // replyJSON marshals v and sends it via the reply function.
-func replyJSON(reply bus.ReplyFunc, v interface{}) {
+func replyJSON(log *slog.Logger, reply bus.ReplyFunc, v interface{}) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		slog.Error("nftables: failed to marshal reply", "error", err)
+		log.Error("nftables: failed to marshal reply", "error", err)
 		return
 	}
 	if err := reply(data); err != nil {
-		slog.Warn("nftables: failed to send reply", "error", err)
+		log.Warn("nftables: failed to send reply", "error", err)
 	}
 }

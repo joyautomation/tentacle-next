@@ -20,6 +20,7 @@ type reconcilerContext struct {
 	b      bus.Bus
 	config *OrchestratorConfig
 	mod    *Module // back-reference for monolith mode
+	log    *slog.Logger
 }
 
 // dispatchReconcile routes to the correct reconciler based on mode.
@@ -35,7 +36,7 @@ func dispatchReconcile(desired otypes.DesiredServiceKV, rctx *reconcilerContext)
 func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 	entry := getRegistryEntry(desired.ModuleID)
 	if entry == nil {
-		slog.Warn("reconcile: unknown module in desired_services", "moduleId", desired.ModuleID)
+		rctx.log.Warn("reconcile: unknown module in desired_services", "moduleId", desired.ModuleID)
 		return
 	}
 
@@ -45,7 +46,7 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 			SystemdState:   "not-found",
 			ReconcileState: "error",
 			LastError:      fmt.Sprintf("Module %q not compiled into this binary", desired.ModuleID),
-		})
+		}, rctx.log)
 		return
 	}
 
@@ -53,7 +54,7 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 	if len(entry.RequiredConfig) > 0 && desired.Running {
 		moduleConfig, err := getModuleConfig(rctx.b, entry.ModuleID)
 		if err != nil {
-			slog.Warn("reconcile: failed to read config", "moduleId", entry.ModuleID, "error", err)
+			rctx.log.Warn("reconcile: failed to read config", "moduleId", entry.ModuleID, "error", err)
 		}
 
 		var missing []string
@@ -73,7 +74,7 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 				SystemdState:      "inactive",
 				ReconcileState:    "needs_config",
 				LastError:         fmt.Sprintf("Missing required config: %v", missing),
-			})
+			}, rctx.log)
 			return
 		}
 	}
@@ -91,10 +92,10 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 		rctx.mod.running[desired.ModuleID] = &runningModule{mod: mod, cancel: cancel}
 		rctx.mod.mu.Unlock()
 
-		slog.Info("reconcile: starting in-process module", "moduleId", desired.ModuleID)
+		rctx.log.Info("reconcile: starting in-process module", "moduleId", desired.ModuleID)
 		go func() {
 			if err := mod.Start(ctx, rctx.b); err != nil {
-				slog.Error("reconcile: in-process module failed", "moduleId", desired.ModuleID, "error", err)
+				rctx.log.Error("reconcile: in-process module failed", "moduleId", desired.ModuleID, "error", err)
 			}
 			rctx.mod.mu.Lock()
 			delete(rctx.mod.running, desired.ModuleID)
@@ -106,17 +107,17 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 			ActiveVersion:     "embedded",
 			SystemdState:      "active",
 			ReconcileState:    "ok",
-		})
+		}, rctx.log)
 	} else if !desired.Running && isRunning {
 		// Stop module
-		slog.Info("reconcile: stopping in-process module", "moduleId", desired.ModuleID)
+		rctx.log.Info("reconcile: stopping in-process module", "moduleId", desired.ModuleID)
 		rctx.mod.mu.Lock()
 		rm := rctx.mod.running[desired.ModuleID]
 		delete(rctx.mod.running, desired.ModuleID)
 		rctx.mod.mu.Unlock()
 
 		if err := rm.mod.Stop(); err != nil {
-			slog.Warn("reconcile: module stop error", "moduleId", desired.ModuleID, "error", err)
+			rctx.log.Warn("reconcile: module stop error", "moduleId", desired.ModuleID, "error", err)
 		}
 		rm.cancel()
 
@@ -125,7 +126,7 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 			ActiveVersion:     "embedded",
 			SystemdState:      "inactive",
 			ReconcileState:    "ok",
-		})
+		}, rctx.log)
 	} else {
 		// Already in desired state
 		state := "inactive"
@@ -137,7 +138,7 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 			ActiveVersion:     "embedded",
 			SystemdState:      state,
 			ReconcileState:    "ok",
-		})
+		}, rctx.log)
 	}
 }
 
@@ -145,23 +146,23 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 	entry := getRegistryEntry(desired.ModuleID)
 	if entry == nil {
-		slog.Warn("reconcile: unknown module in desired_services", "moduleId", desired.ModuleID)
+		rctx.log.Warn("reconcile: unknown module in desired_services", "moduleId", desired.ModuleID)
 		return
 	}
 
 	// Self-update is handled specially
 	if desired.ModuleID == selfModuleID {
 		currentVersion := getActiveVersion(&selfEntry, rctx.config)
-		resolvedVersion := resolveVersion(&selfEntry, desired.Version, rctx.config)
+		resolvedVersion := resolveVersion(&selfEntry, desired.Version, rctx.config, rctx.log)
 		if resolvedVersion != "" && resolvedVersion != currentVersion {
-			slog.Info("reconcile: self-update requested", "from", currentVersion, "to", resolvedVersion)
-			selfUpdate(resolvedVersion, rctx.config)
+			rctx.log.Info("reconcile: self-update requested", "from", currentVersion, "to", resolvedVersion)
+			selfUpdate(resolvedVersion, rctx.config, rctx.log)
 		}
 		return
 	}
 
 	// Step 1: Resolve version
-	resolvedVersion := resolveVersion(entry, desired.Version, rctx.config)
+	resolvedVersion := resolveVersion(entry, desired.Version, rctx.config, rctx.log)
 	if resolvedVersion == "" {
 		reportStatus(rctx.b, entry, statusOpts{
 			InstalledVersions: listInstalledVersions(entry.ModuleID, rctx.config),
@@ -169,7 +170,7 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 			SystemdState:      getSystemdState(entry.ModuleID),
 			ReconcileState:    "version_unavailable",
 			LastError:         fmt.Sprintf("Cannot resolve version %q (offline?)", desired.Version),
-		})
+		}, rctx.log)
 		return
 	}
 
@@ -182,7 +183,7 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 				SystemdState:      getSystemdState(entry.ModuleID),
 				ReconcileState:    "version_unavailable",
 				LastError:         fmt.Sprintf("Version %s not installed and no internet", resolvedVersion),
-			})
+			}, rctx.log)
 			return
 		}
 
@@ -191,16 +192,16 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 			ActiveVersion:     getActiveVersion(entry, rctx.config),
 			SystemdState:      getSystemdState(entry.ModuleID),
 			ReconcileState:    "downloading",
-		})
+		}, rctx.log)
 
-		if !installVersion(entry, resolvedVersion, rctx.config) {
+		if !installVersion(entry, resolvedVersion, rctx.config, rctx.log) {
 			reportStatus(rctx.b, entry, statusOpts{
 				InstalledVersions: listInstalledVersions(entry.ModuleID, rctx.config),
 				ActiveVersion:     getActiveVersion(entry, rctx.config),
 				SystemdState:      getSystemdState(entry.ModuleID),
 				ReconcileState:    "error",
 				LastError:         fmt.Sprintf("Failed to download/install %s", resolvedVersion),
-			})
+			}, rctx.log)
 			return
 		}
 	}
@@ -212,15 +213,15 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 			ActiveVersion:     getActiveVersion(entry, rctx.config),
 			SystemdState:      getSystemdState(entry.ModuleID),
 			ReconcileState:    "installing_deps",
-		})
-		if !ensureDeps(entry) {
+		}, rctx.log)
+		if !ensureDeps(entry, rctx.log) {
 			reportStatus(rctx.b, entry, statusOpts{
 				InstalledVersions: listInstalledVersions(entry.ModuleID, rctx.config),
 				ActiveVersion:     getActiveVersion(entry, rctx.config),
 				SystemdState:      getSystemdState(entry.ModuleID),
 				ReconcileState:    "error",
 				LastError:         "Failed to install system dependencies",
-			})
+			}, rctx.log)
 			return
 		}
 	}
@@ -233,28 +234,28 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 			ActiveVersion:     currentActiveVersion,
 			SystemdState:      getSystemdState(entry.ModuleID),
 			ReconcileState:    "installing",
-		})
+		}, rctx.log)
 
 		// Stop service if running before switching
 		if getSystemdState(entry.ModuleID) == "active" {
-			systemctlStop(entry.ModuleID)
+			systemctlStop(entry.ModuleID, rctx.log)
 		}
 
-		if !updateSymlink(entry, resolvedVersion, rctx.config) {
+		if !updateSymlink(entry, resolvedVersion, rctx.config, rctx.log) {
 			reportStatus(rctx.b, entry, statusOpts{
 				InstalledVersions: listInstalledVersions(entry.ModuleID, rctx.config),
 				ActiveVersion:     currentActiveVersion,
 				SystemdState:      getSystemdState(entry.ModuleID),
 				ReconcileState:    "error",
 				LastError:         "Failed to update symlink",
-			})
+			}, rctx.log)
 			return
 		}
 
 		// Regenerate systemd unit (DENO_DIR path changes per version)
-		writeSystemdUnit(entry, resolvedVersion, rctx.config)
-		systemctlDaemonReload()
-		systemctlEnable(entry.ModuleID)
+		writeSystemdUnit(entry, resolvedVersion, rctx.config, rctx.log)
+		systemctlDaemonReload(rctx.log)
+		systemctlEnable(entry.ModuleID, rctx.log)
 	}
 
 	// Step 3.5: Check required config is present before starting
@@ -263,7 +264,7 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 		var err error
 		moduleConfig, err = getModuleConfig(rctx.b, entry.ModuleID)
 		if err != nil {
-			slog.Warn("reconcile: failed to read config", "moduleId", entry.ModuleID, "error", err)
+			rctx.log.Warn("reconcile: failed to read config", "moduleId", entry.ModuleID, "error", err)
 		}
 
 		var missing []string
@@ -284,7 +285,7 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 				SystemdState:      getSystemdState(entry.ModuleID),
 				ReconcileState:    "needs_config",
 				LastError:         fmt.Sprintf("Missing required config: %v", missing),
-			})
+			}, rctx.log)
 			return
 		}
 	}
@@ -294,16 +295,16 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 
 	if desired.Running && systemdState != "active" {
 		// Always regenerate the unit before starting to pick up config/dependency changes
-		writeSystemdUnit(entry, resolvedVersion, rctx.config, moduleConfig)
-		systemctlDaemonReload()
+		writeSystemdUnit(entry, resolvedVersion, rctx.config, rctx.log, moduleConfig)
+		systemctlDaemonReload(rctx.log)
 
 		reportStatus(rctx.b, entry, statusOpts{
 			InstalledVersions: listInstalledVersions(entry.ModuleID, rctx.config),
 			ActiveVersion:     resolvedVersion,
 			SystemdState:      systemdState,
 			ReconcileState:    "starting",
-		})
-		if !systemctlStart(entry.ModuleID) {
+		}, rctx.log)
+		if !systemctlStart(entry.ModuleID, rctx.log) {
 			finalState := getSystemdState(entry.ModuleID)
 			reportStatus(rctx.b, entry, statusOpts{
 				InstalledVersions: listInstalledVersions(entry.ModuleID, rctx.config),
@@ -311,7 +312,7 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 				SystemdState:      finalState,
 				ReconcileState:    "error",
 				LastError:         fmt.Sprintf("Failed to start %s", unitName(entry.ModuleID)),
-			})
+			}, rctx.log)
 			return
 		}
 	} else if !desired.Running && systemdState == "active" {
@@ -320,8 +321,8 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 			ActiveVersion:     resolvedVersion,
 			SystemdState:      systemdState,
 			ReconcileState:    "stopping",
-		})
-		systemctlStop(entry.ModuleID)
+		}, rctx.log)
+		systemctlStop(entry.ModuleID, rctx.log)
 	}
 
 	// Final status report
@@ -330,7 +331,7 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 		ActiveVersion:     resolvedVersion,
 		SystemdState:      getSystemdState(entry.ModuleID),
 		ReconcileState:    "ok",
-	})
+	}, rctx.log)
 }
 
 // fullSweep reads all desired_services entries and reconciles each one,
@@ -338,10 +339,10 @@ func reconcileModule(desired otypes.DesiredServiceKV, rctx *reconcilerContext) {
 func fullSweep(rctx *reconcilerContext) {
 	desired, err := getAllDesiredServices(rctx.b)
 	if err != nil {
-		slog.Error("reconcile: failed to read desired services", "error", err)
+		rctx.log.Error("reconcile: failed to read desired services", "error", err)
 		return
 	}
-	slog.Debug("reconcile: sweep", "count", len(desired))
+	rctx.log.Debug("reconcile: sweep", "count", len(desired))
 
 	desiredSet := make(map[string]bool, len(desired))
 	for _, d := range desired {
@@ -349,7 +350,7 @@ func fullSweep(rctx *reconcilerContext) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					slog.Error("reconcile: panic", "moduleId", d.ModuleID, "recover", r)
+					rctx.log.Error("reconcile: panic", "moduleId", d.ModuleID, "recover", r)
 				}
 			}()
 			dispatchReconcile(d, rctx)
@@ -361,9 +362,9 @@ func fullSweep(rctx *reconcilerContext) {
 	if err == nil {
 		for _, key := range statusKeys {
 			if !desiredSet[key] {
-				slog.Info("reconcile: cleaning up orphaned status", "moduleId", key)
+				rctx.log.Info("reconcile: cleaning up orphaned status", "moduleId", key)
 				if err := rctx.b.KVDelete(topics.BucketServiceStatus, key); err != nil {
-					slog.Warn("reconcile: failed to delete orphaned status", "moduleId", key, "error", err)
+					rctx.log.Warn("reconcile: failed to delete orphaned status", "moduleId", key, "error", err)
 				}
 			}
 		}
@@ -400,7 +401,7 @@ func startReconciler(rctx *reconcilerContext) context.CancelFunc {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Warn("reconcile: KV watch ended, retrying in 5s")
+			rctx.log.Warn("reconcile: KV watch ended, retrying in 5s")
 			time.Sleep(5 * time.Second)
 		}
 	}()
@@ -417,7 +418,7 @@ func startKvWatch(ctx context.Context, rctx *reconcilerContext) {
 
 	sub, err := rctx.b.KVWatchAll(topics.BucketDesiredServices, func(key string, value []byte, op bus.KVOperation) {
 		if op == bus.KVOpDelete {
-			slog.Info("reconcile: module removed from desired_services, stopping and cleaning up", "moduleId", key)
+			rctx.log.Info("reconcile: module removed from desired_services, stopping and cleaning up", "moduleId", key)
 			if rctx.mod != nil && rctx.mod.IsMonolith() {
 				// Stop in-process module
 				rctx.mod.mu.Lock()
@@ -429,26 +430,26 @@ func startKvWatch(ctx context.Context, rctx *reconcilerContext) {
 				rctx.mod.mu.Unlock()
 			} else {
 				if getSystemdState(key) == "active" {
-					systemctlStop(key)
+					systemctlStop(key, rctx.log)
 				}
 			}
 			if err := rctx.b.KVDelete(topics.BucketServiceStatus, key); err != nil {
-				slog.Warn("reconcile: failed to delete service status", "moduleId", key, "error", err)
+				rctx.log.Warn("reconcile: failed to delete service status", "moduleId", key, "error", err)
 			}
 			return
 		}
 
 		var desired otypes.DesiredServiceKV
 		if err := json.Unmarshal(value, &desired); err != nil {
-			slog.Error("reconcile: failed to unmarshal desired service", "key", key, "error", err)
+			rctx.log.Error("reconcile: failed to unmarshal desired service", "key", key, "error", err)
 			return
 		}
 
-		slog.Info("reconcile: desired state changed", "moduleId", desired.ModuleID, "version", desired.Version, "running", desired.Running)
+		rctx.log.Info("reconcile: desired state changed", "moduleId", desired.ModuleID, "version", desired.Version, "running", desired.Running)
 		dispatchReconcile(desired, rctx)
 	})
 	if err != nil {
-		slog.Error("reconcile: failed to start KV watch", "error", err)
+		rctx.log.Error("reconcile: failed to start KV watch", "error", err)
 		return
 	}
 	defer sub.Unsubscribe()
@@ -461,13 +462,13 @@ func startKvWatch(ctx context.Context, rctx *reconcilerContext) {
 }
 
 // runMigration performs the full bootstrap migration on first boot.
-func runMigration(b bus.Bus, config *OrchestratorConfig) {
+func runMigration(b bus.Bus, config *OrchestratorConfig, log *slog.Logger) {
 	if isMigrated(config) {
-		slog.Debug("migration: already migrated, skipping bootstrap")
+		log.Debug("migration: already migrated, skipping bootstrap")
 		return
 	}
 
-	slog.Info("migration: running bootstrap migration")
+	log.Info("migration: running bootstrap migration")
 	migrated := 0
 
 	for i := range moduleRegistry {
@@ -476,7 +477,7 @@ func runMigration(b bus.Bus, config *OrchestratorConfig) {
 			continue
 		}
 
-		if !migrateModule(entry, config) {
+		if !migrateModule(entry, config, log) {
 			continue
 		}
 
@@ -490,17 +491,17 @@ func runMigration(b bus.Bus, config *OrchestratorConfig) {
 			UpdatedAt: time.Now().UnixMilli(),
 		}
 		if err := putDesiredService(b, desired); err != nil {
-			slog.Error("migration: failed to put desired service", "moduleId", entry.ModuleID, "error", err)
+			log.Error("migration: failed to put desired service", "moduleId", entry.ModuleID, "error", err)
 			continue
 		}
-		slog.Info("migration: populated desired_services", "moduleId", entry.ModuleID, "version", "unknown", "running", running)
+		log.Info("migration: populated desired_services", "moduleId", entry.ModuleID, "version", "unknown", "running", running)
 		migrated++
 	}
 
 	if err := writeMigrationMarker(config); err != nil {
-		slog.Warn("migration: failed to write marker", "error", err)
+		log.Warn("migration: failed to write marker", "error", err)
 	}
-	slog.Info("migration: bootstrap complete", "modulesAdopted", migrated)
+	log.Info("migration: bootstrap complete", "modulesAdopted", migrated)
 }
 
 const migrationMarker = ".orchestrator-migrated"
@@ -539,7 +540,7 @@ func isLegacyInstalled(entry *otypes.ModuleRegistryEntry, config *OrchestratorCo
 }
 
 // migrateModule moves a single module from legacy path to versioned storage.
-func migrateModule(entry *otypes.ModuleRegistryEntry, config *OrchestratorConfig) bool {
+func migrateModule(entry *otypes.ModuleRegistryEntry, config *OrchestratorConfig, log *slog.Logger) bool {
 	versionDir := config.VersionsDir + "/" + entry.ModuleID + "/unknown"
 	os.MkdirAll(versionDir, 0755)
 
@@ -548,27 +549,27 @@ func migrateModule(entry *otypes.ModuleRegistryEntry, config *OrchestratorConfig
 		newPath := versionDir + "/" + entry.ModuleID
 
 		if err := os.Rename(legacyPath, newPath); err != nil {
-			slog.Error("migration: failed to migrate", "moduleId", entry.ModuleID, "error", err)
+			log.Error("migration: failed to migrate", "moduleId", entry.ModuleID, "error", err)
 			return false
 		}
 		if err := os.Symlink(newPath, legacyPath); err != nil {
-			slog.Error("migration: failed to create symlink", "moduleId", entry.ModuleID, "error", err)
+			log.Error("migration: failed to create symlink", "moduleId", entry.ModuleID, "error", err)
 			return false
 		}
-		slog.Info("migration: migrated module", "moduleId", entry.ModuleID, "from", legacyPath, "to", newPath)
+		log.Info("migration: migrated module", "moduleId", entry.ModuleID, "from", legacyPath, "to", newPath)
 		return true
 	}
 
 	// Deno / deno-web
 	legacyPath := config.ServicesDir + "/" + entry.Repo
 	if err := os.Rename(legacyPath, versionDir); err != nil {
-		slog.Error("migration: failed to migrate", "moduleId", entry.ModuleID, "error", err)
+		log.Error("migration: failed to migrate", "moduleId", entry.ModuleID, "error", err)
 		return false
 	}
 	if err := os.Symlink(versionDir, legacyPath); err != nil {
-		slog.Error("migration: failed to create symlink", "moduleId", entry.ModuleID, "error", err)
+		log.Error("migration: failed to create symlink", "moduleId", entry.ModuleID, "error", err)
 		return false
 	}
-	slog.Info("migration: migrated module", "moduleId", entry.ModuleID, "from", legacyPath, "to", versionDir)
+	log.Info("migration: migrated module", "moduleId", entry.ModuleID, "from", legacyPath, "to", versionDir)
 	return true
 }

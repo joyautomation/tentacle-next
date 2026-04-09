@@ -22,6 +22,7 @@ type Manager struct {
 	udtDB     *UdtDatabase
 	server    *CIPServer
 	writeback chan WritebackEvent
+	log       *slog.Logger
 
 	// Track bus subscriptions for data sources
 	dataSubs map[string]bus.Subscription // Bus subject -> subscription
@@ -34,22 +35,23 @@ type Manager struct {
 }
 
 // NewManager creates a new manager.
-func NewManager(b bus.Bus, moduleID string) *Manager {
+func NewManager(b bus.Bus, moduleID string, log *slog.Logger) *Manager {
 	tagDB := NewTagDatabase()
 	udtDB := NewUdtDatabase()
 	writeback := make(chan WritebackEvent, 256)
 
-	provider := NewTentacleTagProvider(tagDB, udtDB, writeback)
+	provider := NewTentacleTagProvider(tagDB, udtDB, writeback, log)
 
 	return &Manager{
 		b:           b,
 		moduleID:    moduleID,
 		tagDB:       tagDB,
 		udtDB:       udtDB,
-		server:      NewCIPServer(provider, 44818),
+		server:      NewCIPServer(provider, 44818, log),
 		writeback:   writeback,
 		dataSubs:    make(map[string]bus.Subscription),
 		subscribers: make(map[string]*ServerSubscribeRequest),
+		log:         log,
 	}
 }
 
@@ -64,7 +66,7 @@ func (m *Manager) Start() {
 	// Start writeback processor
 	go m.processWritebacks()
 
-	slog.Info("eipserver: manager started, listening for requests", "prefix", m.moduleID)
+	m.log.Info("eipserver: manager started, listening for requests", "prefix", m.moduleID)
 }
 
 // Stop cleans up all subscriptions and stops the CIP server.
@@ -75,7 +77,7 @@ func (m *Manager) Stop() {
 	// Unsubscribe from all data sources
 	for subj, sub := range m.dataSubs {
 		if err := sub.Unsubscribe(); err != nil {
-			slog.Warn("eipserver: failed to unsubscribe from data source", "subject", subj, "error", err)
+			m.log.Warn("eipserver: failed to unsubscribe from data source", "subject", subj, "error", err)
 		}
 	}
 	m.dataSubs = make(map[string]bus.Subscription)
@@ -89,14 +91,14 @@ func (m *Manager) Stop() {
 	// Stop CIP server
 	m.server.Stop()
 
-	slog.Info("eipserver: manager stopped")
+	m.log.Info("eipserver: manager stopped")
 }
 
 // registerHandler subscribes to a bus subject and tracks the subscription.
 func (m *Manager) registerHandler(subject string, handler bus.MessageHandler) {
 	sub, err := m.b.Subscribe(subject, handler)
 	if err != nil {
-		slog.Error("eipserver: failed to subscribe", "subject", subject, "error", err)
+		m.log.Error("eipserver: failed to subscribe", "subject", subject, "error", err)
 		return
 	}
 	m.busSubs = append(m.busSubs, sub)
@@ -129,7 +131,7 @@ func (m *Manager) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 	// Register UDT types
 	for _, udt := range req.Udts {
 		m.udtDB.RegisterType(udt)
-		slog.Info("eipserver: registered UDT type", "name", udt.Name, "members", len(udt.Members))
+		m.log.Info("eipserver: registered UDT type", "name", udt.Name, "members", len(udt.Members))
 	}
 
 	// Register tags
@@ -147,7 +149,7 @@ func (m *Manager) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		var defaultVal interface{}
 		if isUdt {
 			if err := m.udtDB.CreateInstance(tag.Name, tag.CipType); err != nil {
-				slog.Warn("eipserver: failed to create UDT instance", "tag", tag.Name, "error", err)
+				m.log.Warn("eipserver: failed to create UDT instance", "tag", tag.Name, "error", err)
 				continue
 			}
 			defaultVal = m.udtDB.ReadAll(tag.Name)
@@ -175,22 +177,22 @@ func (m *Manager) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		// Subscribe to source bus subject if not already subscribed
 		if tag.Source != "" {
 			if err := m.subscribeToSource(tag.Name, tag.Source, tag.CipType, isUdt); err != nil {
-				slog.Warn("eipserver: failed to subscribe to source", "source", tag.Source, "tag", tag.Name, "error", err)
+				m.log.Warn("eipserver: failed to subscribe to source", "source", tag.Source, "tag", tag.Name, "error", err)
 			}
 		}
 
 		tagsAdded++
-		slog.Debug("eipserver: registered tag", "name", tag.Name, "type", tag.CipType, "source", tag.Source, "writable", tag.Writable, "udt", isUdt)
+		m.log.Debug("eipserver: registered tag", "name", tag.Name, "type", tag.CipType, "source", tag.Source, "writable", tag.Writable, "udt", isUdt)
 	}
 
 	// Start CIP server if not running
 	if err := m.server.Start(); err != nil {
-		slog.Error("eipserver: failed to start CIP server", "error", err)
+		m.log.Error("eipserver: failed to start CIP server", "error", err)
 		m.sendReply(reply, map[string]interface{}{"error": fmt.Sprintf("failed to start CIP server: %v", err)})
 		return
 	}
 
-	slog.Info("eipserver: subscriber registered", "subscriberId", req.SubscriberID, "tags", tagsAdded, "udts", len(req.Udts), "port", listenPort)
+	m.log.Info("eipserver: subscriber registered", "subscriberId", req.SubscriberID, "tags", tagsAdded, "udts", len(req.Udts), "port", listenPort)
 
 	m.sendReply(reply, map[string]interface{}{
 		"success":  true,
@@ -227,7 +229,7 @@ func (m *Manager) handleUnsubscribe(subject string, data []byte, reply bus.Reply
 			delete(m.dataSubs, subj)
 		}
 		m.server.Stop()
-		slog.Info("eipserver: all subscribers removed, CIP server stopped")
+		m.log.Info("eipserver: all subscribers removed, CIP server stopped")
 	}
 
 	m.sendReply(reply, map[string]interface{}{"success": true})
@@ -320,7 +322,7 @@ func (m *Manager) subscribeToSource(tagName, source, cipType string, isUdt bool)
 func (m *Manager) handleScalarUpdate(tagName, cipType string, data []byte) {
 	var msg types.PlcDataMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
-		slog.Debug("eipserver: failed to unmarshal data", "tag", tagName, "error", err)
+		m.log.Debug("eipserver: failed to unmarshal data", "tag", tagName, "error", err)
 		return
 	}
 
@@ -341,7 +343,7 @@ func (m *Manager) handleUdtMemberUpdate(tagName, baseSource, subject string, dat
 
 	var msg types.PlcDataMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
-		slog.Debug("eipserver: failed to unmarshal UDT member data", "tag", tagName, "member", memberPath, "error", err)
+		m.log.Debug("eipserver: failed to unmarshal UDT member data", "tag", tagName, "member", memberPath, "error", err)
 		return
 	}
 
@@ -357,7 +359,7 @@ func (m *Manager) handleUdtMemberUpdate(tagName, baseSource, subject string, dat
 func (m *Manager) handleUdtWholeUpdate(tagName string, data []byte) {
 	var msg types.PlcDataMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
-		slog.Debug("eipserver: failed to unmarshal whole UDT data", "tag", tagName, "error", err)
+		m.log.Debug("eipserver: failed to unmarshal whole UDT data", "tag", tagName, "error", err)
 		return
 	}
 
@@ -423,7 +425,7 @@ func (m *Manager) processWritebacks() {
 		// source: "plc.data.project1.MyVar" -> command: "plc.command.project1.MyVar"
 		cmdSubject := deriveCommandSubject(entry.Source)
 		if cmdSubject == "" {
-			slog.Warn("eipserver: cannot derive command subject", "tag", event.TagName, "source", entry.Source)
+			m.log.Warn("eipserver: cannot derive command subject", "tag", event.TagName, "source", entry.Source)
 			continue
 		}
 
@@ -444,14 +446,14 @@ func (m *Manager) processWritebacks() {
 
 		data, err := json.Marshal(cmdMsg)
 		if err != nil {
-			slog.Warn("eipserver: failed to marshal writeback", "tag", event.TagName, "error", err)
+			m.log.Warn("eipserver: failed to marshal writeback", "tag", event.TagName, "error", err)
 			continue
 		}
 
 		if err := m.b.Publish(cmdSubject, data); err != nil {
-			slog.Warn("eipserver: failed to publish writeback", "tag", event.TagName, "subject", cmdSubject, "error", err)
+			m.log.Warn("eipserver: failed to publish writeback", "tag", event.TagName, "subject", cmdSubject, "error", err)
 		} else {
-			slog.Debug("eipserver: CIP write -> bus", "tag", event.TagName, "value", event.Value, "subject", cmdSubject)
+			m.log.Debug("eipserver: CIP write -> bus", "tag", event.TagName, "value", event.Value, "subject", cmdSubject)
 		}
 	}
 }
@@ -477,10 +479,10 @@ func (m *Manager) sendReply(reply bus.ReplyFunc, payload interface{}) {
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		slog.Warn("eipserver: failed to marshal reply", "error", err)
+		m.log.Warn("eipserver: failed to marshal reply", "error", err)
 		return
 	}
 	if err := reply(data); err != nil {
-		slog.Warn("eipserver: failed to send reply", "error", err)
+		m.log.Warn("eipserver: failed to send reply", "error", err)
 	}
 }

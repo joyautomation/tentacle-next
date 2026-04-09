@@ -63,52 +63,52 @@ func normalizeSystemdState(state string) string {
 	}
 }
 
-func systemctlStart(modID string) bool {
-	slog.Info("systemd: starting unit", "unit", unitName(modID))
+func systemctlStart(modID string, log *slog.Logger) bool {
+	log.Info("systemd: starting unit", "unit", unitName(modID))
 	_, stderr, ok := runCmd("systemctl", "start", unitName(modID))
 	if !ok {
-		slog.Error("systemd: failed to start", "unit", unitName(modID), "stderr", stderr)
+		log.Error("systemd: failed to start", "unit", unitName(modID), "stderr", stderr)
 	}
 	return ok
 }
 
-func systemctlStop(modID string) bool {
-	slog.Info("systemd: stopping unit", "unit", unitName(modID))
+func systemctlStop(modID string, log *slog.Logger) bool {
+	log.Info("systemd: stopping unit", "unit", unitName(modID))
 	_, stderr, ok := runCmd("systemctl", "stop", unitName(modID))
 	if !ok {
-		slog.Error("systemd: failed to stop", "unit", unitName(modID), "stderr", stderr)
+		log.Error("systemd: failed to stop", "unit", unitName(modID), "stderr", stderr)
 	}
 	return ok
 }
 
-func systemctlRestart(modID string) bool {
-	slog.Info("systemd: restarting unit", "unit", unitName(modID))
+func systemctlRestart(modID string, log *slog.Logger) bool {
+	log.Info("systemd: restarting unit", "unit", unitName(modID))
 	_, stderr, ok := runCmd("systemctl", "restart", unitName(modID))
 	if !ok {
-		slog.Error("systemd: failed to restart", "unit", unitName(modID), "stderr", stderr)
+		log.Error("systemd: failed to restart", "unit", unitName(modID), "stderr", stderr)
 	}
 	return ok
 }
 
-func systemctlDaemonReload() bool {
-	slog.Debug("systemd: reloading daemon")
+func systemctlDaemonReload(log *slog.Logger) bool {
+	log.Debug("systemd: reloading daemon")
 	_, stderr, ok := runCmd("systemctl", "daemon-reload")
 	if !ok {
-		slog.Error("systemd: failed to reload", "stderr", stderr)
+		log.Error("systemd: failed to reload", "stderr", stderr)
 	}
 	return ok
 }
 
-func systemctlEnable(modID string) bool {
+func systemctlEnable(modID string, log *slog.Logger) bool {
 	_, stderr, ok := runCmd("systemctl", "enable", unitName(modID))
 	if !ok {
-		slog.Warn("systemd: failed to enable", "unit", unitName(modID), "stderr", stderr)
+		log.Warn("systemd: failed to enable", "unit", unitName(modID), "stderr", stderr)
 	}
 	return ok
 }
 
 // writeSystemdUnit generates and writes a systemd unit file for a module.
-func writeSystemdUnit(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig, moduleConfig ...map[string]string) bool {
+func writeSystemdUnit(entry *otypes.ModuleRegistryEntry, version string, config *OrchestratorConfig, log *slog.Logger, moduleConfig ...map[string]string) bool {
 	unitPath := config.SystemdDir + "/" + unitName(entry.ModuleID)
 	envFile := config.ConfigDir + "/tentacle.env"
 	natsUnit := config.NatsUnitName
@@ -140,7 +140,7 @@ func writeSystemdUnit(entry *otypes.ModuleRegistryEntry, version string, config 
 		workingDir = config.ServicesDir + "/" + entry.Repo
 		denoDir = fmt.Sprintf("%s/deno/versions/%s/%s", config.CacheDir, entry.ModuleID, version)
 	default:
-		slog.Error("systemd: unknown runtime", "runtime", entry.Runtime, "moduleId", entry.ModuleID)
+		log.Error("systemd: unknown runtime", "runtime", entry.Runtime, "moduleId", entry.ModuleID)
 		return false
 	}
 
@@ -210,9 +210,9 @@ WantedBy=multi-user.target
 `, entry.ModuleID, depLines, envFile, envSection, workingDirLine, execStart, entry.ModuleID)
 
 	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
-		slog.Error("systemd: failed to write unit", "path", unitPath, "error", err)
+		log.Error("systemd: failed to write unit", "path", unitPath, "error", err)
 		return false
 	}
-	slog.Debug("systemd: wrote unit file", "path", unitPath)
+	log.Debug("systemd: wrote unit file", "path", unitPath)
 	return true
 }

@@ -93,6 +93,39 @@ func (m *Module) handleListGateways(w http.ResponseWriter, r *http.Request) {
 
 // ─── 2. Get Gateway ────────────────────────────────────────────────────────
 
+// gatewayDeviceResponse is a device config with its ID included.
+type gatewayDeviceResponse struct {
+	DeviceID string `json:"deviceId"`
+	itypes.GatewayDeviceConfig
+}
+
+// gatewayVariableResponse is a variable config with its ID included.
+type gatewayVariableResponse struct {
+	ID string `json:"id"`
+	itypes.GatewayVariableConfig
+}
+
+// gatewayUdtTemplateResponse wraps a UDT template config for the frontend.
+type gatewayUdtTemplateResponse struct {
+	itypes.GatewayUdtTemplateConfig
+}
+
+// gatewayUdtVariableResponse wraps a UDT variable config for the frontend.
+type gatewayUdtVariableResponse struct {
+	itypes.GatewayUdtVariableConfig
+}
+
+// gatewayResponse transforms the map-based KV storage into arrays for the frontend.
+type gatewayResponse struct {
+	GatewayID          string                        `json:"gatewayId"`
+	Devices            []gatewayDeviceResponse       `json:"devices"`
+	Variables          []gatewayVariableResponse     `json:"variables"`
+	UdtTemplates       []gatewayUdtTemplateResponse  `json:"udtTemplates"`
+	UdtVariables       []gatewayUdtVariableResponse  `json:"udtVariables"`
+	AvailableProtocols []string                      `json:"availableProtocols"`
+	UpdatedAt          int64                         `json:"updatedAt"`
+}
+
 func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
 	cfg, err := m.getGatewayConfig(gatewayID)
@@ -100,7 +133,62 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg)
+
+	// Convert device map to array
+	devices := make([]gatewayDeviceResponse, 0, len(cfg.Devices))
+	for id, dev := range cfg.Devices {
+		devices = append(devices, gatewayDeviceResponse{DeviceID: id, GatewayDeviceConfig: dev})
+	}
+
+	// Convert variable map to array
+	variables := make([]gatewayVariableResponse, 0, len(cfg.Variables))
+	for id, v := range cfg.Variables {
+		variables = append(variables, gatewayVariableResponse{ID: id, GatewayVariableConfig: v})
+	}
+
+	// Convert UDT template map to array
+	udtTemplates := make([]gatewayUdtTemplateResponse, 0, len(cfg.UdtTemplates))
+	for _, t := range cfg.UdtTemplates {
+		udtTemplates = append(udtTemplates, gatewayUdtTemplateResponse{GatewayUdtTemplateConfig: t})
+	}
+
+	// Convert UDT variable map to array
+	udtVariables := make([]gatewayUdtVariableResponse, 0, len(cfg.UdtVariables))
+	for _, uv := range cfg.UdtVariables {
+		udtVariables = append(udtVariables, gatewayUdtVariableResponse{GatewayUdtVariableConfig: uv})
+	}
+
+	// Determine which protocol modules are running by checking heartbeats.
+	protocolTypes := []string{"ethernetip", "opcua", "snmp", "modbus"}
+	var available []string
+	keys, _ := m.bus.KVKeys(topics.BucketHeartbeats)
+	for _, key := range keys {
+		data, _, err := m.bus.KVGet(topics.BucketHeartbeats, key)
+		if err != nil {
+			continue
+		}
+		var hb ttypes.ServiceHeartbeat
+		if err := json.Unmarshal(data, &hb); err != nil {
+			continue
+		}
+		for _, pt := range protocolTypes {
+			if hb.ServiceType == pt {
+				available = append(available, pt)
+				break
+			}
+		}
+	}
+
+	resp := gatewayResponse{
+		GatewayID:          cfg.GatewayID,
+		Devices:            devices,
+		Variables:          variables,
+		UdtTemplates:       udtTemplates,
+		UdtVariables:       udtVariables,
+		AvailableProtocols: available,
+		UpdatedAt:          cfg.UpdatedAt,
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ─── 3. Set Gateway Device ─────────────────────────────────────────────────
@@ -505,8 +593,8 @@ func (m *Module) handleUpdateGatewayUdtConfig(w http.ResponseWriter, r *http.Req
 	var body struct {
 		// MemberUpdates maps member name → new default deadband.
 		MemberUpdates map[string]*ttypes.DeadBandConfig `json:"memberUpdates"`
-		// InstanceUpdates maps udtVariableId → member-level deadband overrides.
-		InstanceUpdates map[string]map[string]ttypes.DeadBandConfig `json:"instanceUpdates"`
+		// InstanceUpdates maps udtVariableId → member-level deadband overrides (sparse).
+		InstanceUpdates map[string]map[string]ttypes.DeadBandOverride `json:"instanceUpdates"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
@@ -533,15 +621,11 @@ func (m *Module) handleUpdateGatewayUdtConfig(w http.ResponseWriter, r *http.Req
 		cfg.UdtTemplates[templateName] = tmpl
 	}
 
-	// Update UDT variable instance overrides.
+	// Update UDT variable instance overrides — replace entire map so cleared
+	// overrides (sent as empty {}) actually remove old entries.
 	for udtVarID, memberDeadbands := range body.InstanceUpdates {
 		if uv, ok := cfg.UdtVariables[udtVarID]; ok {
-			if uv.MemberDeadbands == nil {
-				uv.MemberDeadbands = make(map[string]ttypes.DeadBandConfig)
-			}
-			for memberName, db := range memberDeadbands {
-				uv.MemberDeadbands[memberName] = db
-			}
+			uv.MemberDeadbands = memberDeadbands
 			cfg.UdtVariables[udtVarID] = uv
 		}
 	}
@@ -565,8 +649,20 @@ func (m *Module) handleGetGatewayBrowseCache(w http.ResponseWriter, r *http.Requ
 	result, ok := m.browseCache[cacheKey]
 	m.browseMu.RUnlock()
 
+	// Fall back to KV if not in memory (e.g. after restart).
 	if !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("no browse cache for %s", cacheKey))
+		if data, _, err := m.bus.KVGet(topics.BucketBrowseCache, cacheKey); err == nil && len(data) > 0 {
+			result = data
+			ok = true
+			// Repopulate in-memory cache.
+			m.browseMu.Lock()
+			m.browseCache[cacheKey] = data
+			m.browseMu.Unlock()
+		}
+	}
+
+	if !ok {
+		writeJSON(w, http.StatusOK, nil)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

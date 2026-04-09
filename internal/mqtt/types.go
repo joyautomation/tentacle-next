@@ -14,6 +14,7 @@ type PlcVariable struct {
 	Description     string
 	Datatype        string // "number", "boolean", "string", "udt"
 	Value           interface{}
+	LastUpdated     int64  // timestamp of last value change
 	ModuleID        string // source module (ethernetip, plc, gateway, etc.)
 	DeviceID        string
 	Deadband        *types.DeadBandConfig

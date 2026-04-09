@@ -19,6 +19,7 @@ import (
 type ServerManager struct {
 	b        bus.Bus
 	moduleID string
+	log      *slog.Logger
 
 	mu      sync.Mutex
 	devices map[string]*VirtualDevice // deviceId -> VirtualDevice
@@ -26,10 +27,11 @@ type ServerManager struct {
 }
 
 // NewServerManager creates a new server manager.
-func NewServerManager(b bus.Bus, moduleID string) *ServerManager {
+func NewServerManager(b bus.Bus, moduleID string, log *slog.Logger) *ServerManager {
 	return &ServerManager{
 		b:        b,
 		moduleID: moduleID,
+		log:      log,
 		devices:  make(map[string]*VirtualDevice),
 	}
 }
@@ -40,7 +42,7 @@ func (m *ServerManager) Start() {
 	m.registerHandler(topics.ModbusServerUnsubscribe, m.handleUnsubscribe)
 	m.registerHandler(topics.ModbusServerVariables, m.handleVariables)
 
-	slog.Info("modbusserver: manager started, listening for requests")
+	m.log.Info("modbusserver: manager started, listening for requests")
 }
 
 // Stop cleans up all virtual devices and bus subscriptions.
@@ -57,7 +59,7 @@ func (m *ServerManager) Stop() {
 	}
 	m.busSubs = nil
 
-	slog.Info("modbusserver: manager stopped")
+	m.log.Info("modbusserver: manager stopped")
 }
 
 // DeviceCount returns the number of active virtual devices.
@@ -71,7 +73,7 @@ func (m *ServerManager) DeviceCount() int {
 func (m *ServerManager) registerHandler(subject string, handler bus.MessageHandler) {
 	sub, err := m.b.Subscribe(subject, handler)
 	if err != nil {
-		slog.Error("modbusserver: failed to subscribe", "subject", subject, "error", err)
+		m.log.Error("modbusserver: failed to subscribe", "subject", subject, "error", err)
 		return
 	}
 	m.busSubs = append(m.busSubs, sub)
@@ -110,7 +112,7 @@ func (m *ServerManager) handleSubscribe(_ string, data []byte, reply bus.ReplyFu
 
 	// If device already exists, tear it down first
 	if _, exists := m.devices[req.DeviceID]; exists {
-		slog.Info("modbusserver: replacing existing device", "deviceId", req.DeviceID)
+		m.log.Info("modbusserver: replacing existing device", "deviceId", req.DeviceID)
 		m.stopDeviceLocked(req.DeviceID)
 	}
 
@@ -128,7 +130,7 @@ func (m *ServerManager) handleSubscribe(_ string, data []byte, reply bus.ReplyFu
 			return
 		}
 		if !result.Writable {
-			slog.Warn("modbusserver: write rejected, tag is read-only",
+			m.log.Warn("modbusserver: write rejected, tag is read-only",
 				"variableId", result.VariableID, "address", address)
 			return
 		}
@@ -145,22 +147,22 @@ func (m *ServerManager) handleSubscribe(_ string, data []byte, reply bus.ReplyFu
 		}
 		payload, err := json.Marshal(cmdMsg)
 		if err != nil {
-			slog.Warn("modbusserver: failed to marshal write command", "error", err)
+			m.log.Warn("modbusserver: failed to marshal write command", "error", err)
 			return
 		}
 		if err := m.b.Publish(cmdSubject, payload); err != nil {
-			slog.Warn("modbusserver: failed to publish write command",
+			m.log.Warn("modbusserver: failed to publish write command",
 				"subject", cmdSubject, "error", err)
 		} else {
-			slog.Debug("modbusserver: Modbus write -> bus",
+			m.log.Debug("modbusserver: Modbus write -> bus",
 				"variableId", result.VariableID, "value", result.Value, "subject", cmdSubject)
 		}
 	}
 
 	// Start TCP server
-	server := NewTCPServer(port, unitID, store, onWrite)
+	server := NewTCPServer(port, unitID, store, onWrite, m.log)
 	if err := server.Start(); err != nil {
-		slog.Error("modbusserver: failed to start TCP server",
+		m.log.Error("modbusserver: failed to start TCP server",
 			"deviceId", req.DeviceID, "port", port, "error", err)
 		m.sendReply(reply, itypes.ModbusServerSubscribeResponse{
 			Success: false,
@@ -181,7 +183,7 @@ func (m *ServerManager) handleSubscribe(_ string, data []byte, reply bus.ReplyFu
 		}
 	})
 	if err != nil {
-		slog.Warn("modbusserver: failed to subscribe to data topic",
+		m.log.Warn("modbusserver: failed to subscribe to data topic",
 			"subject", dataSubject, "error", err)
 	}
 
@@ -194,7 +196,7 @@ func (m *ServerManager) handleSubscribe(_ string, data []byte, reply bus.ReplyFu
 	}
 	m.devices[req.DeviceID] = device
 
-	slog.Info("modbusserver: device active",
+	m.log.Info("modbusserver: device active",
 		"deviceId", req.DeviceID, "port", port, "unitId", unitID,
 		"tags", len(req.Tags), "source", sourceModuleID)
 
@@ -255,7 +257,7 @@ func (m *ServerManager) stopDeviceLocked(deviceID string) {
 	dev.Server.Stop()
 	delete(m.devices, deviceID)
 
-	slog.Info("modbusserver: device stopped", "deviceId", deviceID)
+	m.log.Info("modbusserver: device stopped", "deviceId", deviceID)
 }
 
 // sendReply marshals a payload and sends it via the reply function.
@@ -265,11 +267,11 @@ func (m *ServerManager) sendReply(reply bus.ReplyFunc, payload interface{}) {
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		slog.Warn("modbusserver: failed to marshal reply", "error", err)
+		m.log.Warn("modbusserver: failed to marshal reply", "error", err)
 		return
 	}
 	if err := reply(data); err != nil {
-		slog.Warn("modbusserver: failed to send reply", "error", err)
+		m.log.Warn("modbusserver: failed to send reply", "error", err)
 	}
 }
 

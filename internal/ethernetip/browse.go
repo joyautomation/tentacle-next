@@ -240,7 +240,7 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 		DeviceID:  deviceID,
 		Phase:     "discovering",
 		Message:   "Listing all tags...",
-		Timestamp: time.Now().UnixMilli(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
 	tags, err := listTags(gateway, port)
@@ -253,9 +253,9 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 		ModuleID:  moduleID,
 		DeviceID:  deviceID,
 		Phase:     "discovering",
-		TotalTags: len(tags),
+		TotalCount: len(tags),
 		Message:   fmt.Sprintf("Found %d tags", len(tags)),
-		Timestamp: time.Now().UnixMilli(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
 	// Collect unique UDT template IDs
@@ -271,9 +271,9 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 		ModuleID:  moduleID,
 		DeviceID:  deviceID,
 		Phase:     "expanding",
-		TotalTags: len(tags),
+		TotalCount: len(tags),
 		Message:   fmt.Sprintf("Reading %d UDT templates...", len(templateIDs)),
-		Timestamp: time.Now().UnixMilli(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
 	templates := make(map[uint16]*UdtTemplate)
@@ -330,10 +330,10 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 		ModuleID:      moduleID,
 		DeviceID:      deviceID,
 		Phase:         "reading",
-		TotalTags:     len(tags),
-		CompletedTags: len(tags),
+		TotalCount:     len(tags),
+		DiscoveredCount: len(tags),
 		Message:       "Building browse result...",
-		Timestamp:     time.Now().UnixMilli(),
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	})
 
 	var atomicVars []VariableInfo
@@ -414,10 +414,10 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 		ModuleID:      moduleID,
 		DeviceID:      deviceID,
 		Phase:         "completed",
-		TotalTags:     len(variables),
-		CompletedTags: len(variables),
+		TotalCount:     len(variables),
+		DiscoveredCount: len(variables),
 		Message:       fmt.Sprintf("Browse complete: %d variables, %d UDTs", len(variables), len(udts)),
-		Timestamp:     time.Now().UnixMilli(),
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	})
 
 	return result, nil
@@ -514,10 +514,10 @@ func filterReadable(candidates []candidateVar, gateway string, port int, publish
 				ModuleID:      moduleID,
 				DeviceID:      deviceID,
 				Phase:         "reading",
-				TotalTags:     len(candidates),
-				CompletedTags: completed,
+				TotalCount:     len(candidates),
+				DiscoveredCount: completed,
 				Message:       fmt.Sprintf("Tested %d/%d tag paths", completed, len(candidates)),
-				Timestamp:     time.Now().UnixMilli(),
+				Timestamp:     time.Now().UTC().Format(time.RFC3339),
 			})
 		}
 	}

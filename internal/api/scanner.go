@@ -3,6 +3,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -63,7 +64,7 @@ func (m *Module) handleStreamBrowseProgress(w http.ResponseWriter, r *http.Reque
 	<-r.Context().Done()
 }
 
-// handleStartGatewayBrowse initiates a browse for a specific gateway.
+// handleStartGatewayBrowse initiates an async browse for a specific gateway device.
 // POST /api/v1/gateways/{gatewayId}/browse
 func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
@@ -88,44 +89,217 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Browse can be slow, use a longer timeout.
-	resp, err := m.bus.Request(topics.Browse(protocol), body, 30*time.Second)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "browse request failed: "+err.Error())
-		return
+	deviceID, _ := params["deviceId"].(string)
+
+	// Generate a browseId if not provided.
+	browseID, _ := params["browseId"].(string)
+	if browseID == "" {
+		b := make([]byte, 8)
+		rand.Read(b)
+		browseID = fmt.Sprintf("%x", b)
 	}
 
-	// Track browse state and cache result.
-	deviceID, _ := params["deviceId"].(string)
-	browseID, _ := params["browseId"].(string)
-	async, _ := params["async"].(bool)
+	// Inject browseId and async flag into the request body for the scanner.
+	params["browseId"] = browseID
+	params["async"] = true
+	enrichedBody, _ := json.Marshal(params)
 
 	cacheKey := gatewayID + ":" + deviceID
 
+	// Record browse as in-progress.
 	m.browseMu.Lock()
-	m.browseCache[cacheKey] = json.RawMessage(resp)
-	if browseID != "" {
+	m.browseStates[browseID] = &BrowseState{
+		BrowseID:  browseID,
+		GatewayID: gatewayID,
+		DeviceID:  deviceID,
+		Protocol:  protocol,
+		Status:    "browsing",
+		StartedAt: time.Now().UnixMilli(),
+	}
+	m.browseMu.Unlock()
+
+	// Subscribe to the browse result subject before sending the request.
+	resultSubject := fmt.Sprintf("%s.browse.result.%s", protocol, browseID)
+	m.log.Info("api: subscribing to browse result", "subject", resultSubject)
+	resultSub, err := m.bus.Subscribe(resultSubject, func(_ string, data []byte, _ bus.ReplyFunc) {
+		m.log.Info("api: received browse result", "subject", resultSubject, "bytes", len(data))
+		m.browseMu.Lock()
+		defer m.browseMu.Unlock()
+
+		startedAt := m.browseStates[browseID].StartedAt
+
+		// Transform scanner result into frontend BrowseCache shape.
+		cacheJSON := transformBrowseResult(data, deviceID, protocol)
+		m.browseCache[cacheKey] = cacheJSON
+
+		// Persist to KV so cache survives restart.
+		if _, err := m.bus.KVPut(topics.BucketBrowseCache, cacheKey, cacheJSON); err != nil {
+			m.log.Warn("failed to persist browse cache to KV", "key", cacheKey, "error", err)
+		}
 		m.browseStates[browseID] = &BrowseState{
 			BrowseID:  browseID,
 			GatewayID: gatewayID,
 			DeviceID:  deviceID,
 			Protocol:  protocol,
 			Status:    "completed",
-			StartedAt: time.Now().UnixMilli(),
-			Result:    json.RawMessage(resp),
+			StartedAt: startedAt,
+			Result:    cacheJSON,
 		}
-	}
-	m.browseMu.Unlock()
-
-	if async {
-		// For async browse, return just the browseId.
-		writeJSON(w, http.StatusOK, map[string]string{"browseId": browseID})
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to subscribe to browse result: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write(resp)
+	// Also subscribe to progress to detect failures.
+	progressSubject := fmt.Sprintf("%s.browse.progress.%s", protocol, browseID)
+	progressSub, _ := m.bus.Subscribe(progressSubject, func(_ string, data []byte, _ bus.ReplyFunc) {
+		var progress struct {
+			Phase string `json:"phase"`
+		}
+		if err := json.Unmarshal(data, &progress); err != nil {
+			return
+		}
+		if progress.Phase == "failed" {
+			m.browseMu.Lock()
+			defer m.browseMu.Unlock()
+			startedAt := m.browseStates[browseID].StartedAt
+			m.browseStates[browseID] = &BrowseState{
+				BrowseID:  browseID,
+				GatewayID: gatewayID,
+				DeviceID:  deviceID,
+				Protocol:  protocol,
+				Status:    "failed",
+				StartedAt: startedAt,
+			}
+		}
+	})
+
+	// Auto-cleanup subscriptions after 5 minutes.
+	go func() {
+		time.Sleep(5 * time.Minute)
+		resultSub.Unsubscribe()
+		if progressSub != nil {
+			progressSub.Unsubscribe()
+		}
+	}()
+
+	// Send the browse request to the scanner (scanner replies immediately with browseId).
+	_, err = m.bus.Request(topics.Browse(protocol), enrichedBody, 10*time.Second)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "browse request failed: "+err.Error())
+		resultSub.Unsubscribe()
+		if progressSub != nil {
+			progressSub.Unsubscribe()
+		}
+		return
+	}
+
+	// Return immediately with the browseId.
+	writeJSON(w, http.StatusOK, map[string]string{"browseId": browseID, "deviceId": deviceID})
+}
+
+// transformBrowseResult converts a scanner BrowseResult into the frontend BrowseCache shape.
+func transformBrowseResult(raw []byte, deviceID, protocol string) json.RawMessage {
+	// Parse the scanner response generically (supports both EtherNet/IP and SNMP shapes).
+	var scanner struct {
+		Variables  []json.RawMessage          `json:"variables"`
+		OIDs       []json.RawMessage          `json:"oids"`
+		Udts       map[string]json.RawMessage `json:"udts"`
+		StructTags map[string]string          `json:"structTags"`
+	}
+	if err := json.Unmarshal(raw, &scanner); err != nil {
+		return raw // fallback to raw
+	}
+
+	// Transform variables/oids → items
+	type browseCacheItem struct {
+		Tag          string      `json:"tag"`
+		Name         string      `json:"name"`
+		Datatype     string      `json:"datatype"`
+		Value        interface{} `json:"value"`
+		ProtocolType string      `json:"protocolType"`
+	}
+
+	// EtherNet/IP / OPC UA: uses "variables" with variableId
+	items := make([]browseCacheItem, 0, len(scanner.Variables)+len(scanner.OIDs))
+	for _, v := range scanner.Variables {
+		var vi struct {
+			VariableID string      `json:"variableId"`
+			Datatype   string      `json:"datatype"`
+			Value      interface{} `json:"value"`
+			CipType    string      `json:"cipType"`
+		}
+		if err := json.Unmarshal(v, &vi); err != nil {
+			continue
+		}
+		items = append(items, browseCacheItem{
+			Tag:          vi.VariableID,
+			Name:         vi.VariableID,
+			Datatype:     vi.Datatype,
+			Value:        vi.Value,
+			ProtocolType: vi.CipType,
+		})
+	}
+
+	// SNMP: uses "oids" with oid/name/snmpType
+	for _, o := range scanner.OIDs {
+		var oi struct {
+			OID      string      `json:"oid"`
+			Name     string      `json:"name"`
+			Datatype string      `json:"datatype"`
+			Value    interface{} `json:"value"`
+			SnmpType string      `json:"snmpType"`
+		}
+		if err := json.Unmarshal(o, &oi); err != nil {
+			continue
+		}
+		tag := oi.OID
+		name := oi.Name
+		if name == "" {
+			name = oi.OID
+		}
+		items = append(items, browseCacheItem{
+			Tag:          tag,
+			Name:         name,
+			Datatype:     oi.Datatype,
+			Value:        oi.Value,
+			ProtocolType: oi.SnmpType,
+		})
+	}
+
+	// Convert udts map → array (member shape already matches frontend)
+	udts := make([]json.RawMessage, 0, len(scanner.Udts))
+	for _, u := range scanner.Udts {
+		udts = append(udts, u)
+	}
+
+	structTags := scanner.StructTags
+	if structTags == nil {
+		structTags = make(map[string]string)
+	}
+
+	cache := struct {
+		DeviceID   string            `json:"deviceId"`
+		Protocol   string            `json:"protocol"`
+		Items      []browseCacheItem `json:"items"`
+		Udts       []json.RawMessage `json:"udts"`
+		StructTags map[string]string `json:"structTags"`
+		CachedAt   string            `json:"cachedAt"`
+	}{
+		DeviceID:   deviceID,
+		Protocol:   protocol,
+		Items:      items,
+		Udts:       udts,
+		StructTags: structTags,
+		CachedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+
+	result, err := json.Marshal(cache)
+	if err != nil {
+		return raw
+	}
+	return result
 }
 
 // handleStreamGatewayBrowseProgress streams gateway browse progress events via SSE.

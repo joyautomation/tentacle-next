@@ -45,7 +45,7 @@ func putDesiredService(b bus.Bus, desired otypes.DesiredServiceKV) error {
 }
 
 // reportStatus builds and publishes a ServiceStatusKV entry.
-func reportStatus(b bus.Bus, entry *otypes.ModuleRegistryEntry, opts statusOpts) {
+func reportStatus(b bus.Bus, entry *otypes.ModuleRegistryEntry, opts statusOpts, log *slog.Logger) {
 	status := otypes.ServiceStatusKV{
 		ModuleID:          entry.ModuleID,
 		InstalledVersions: opts.InstalledVersions,
@@ -60,11 +60,11 @@ func reportStatus(b bus.Bus, entry *otypes.ModuleRegistryEntry, opts statusOpts)
 	}
 	data, err := json.Marshal(status)
 	if err != nil {
-		slog.Warn("status: failed to marshal", "moduleId", entry.ModuleID, "error", err)
+		log.Warn("status: failed to marshal", "moduleId", entry.ModuleID, "error", err)
 		return
 	}
 	if _, err := b.KVPut(topics.BucketServiceStatus, status.ModuleID, data); err != nil {
-		slog.Warn("status: failed to report", "moduleId", entry.ModuleID, "error", err)
+		log.Warn("status: failed to report", "moduleId", entry.ModuleID, "error", err)
 	}
 }
 

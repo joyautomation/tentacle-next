@@ -24,19 +24,19 @@ var selfEntry = otypes.ModuleRegistryEntry{
 // selfUpdate downloads a new version and spawns a restart script.
 // Since we're a Go binary, the download is a single binary, and the
 // restart script atomically swaps the symlink and restarts via systemd.
-func selfUpdate(version string, config *OrchestratorConfig) bool {
+func selfUpdate(version string, config *OrchestratorConfig, log *slog.Logger) bool {
 	// Download the new version if not already present
 	if !isVersionInstalled(selfModuleID, version, config) {
-		slog.Info("self-update: downloading new version", "version", version)
-		if !installVersion(&selfEntry, version, config) {
-			slog.Error("self-update: failed to download", "version", version)
+		log.Info("self-update: downloading new version", "version", version)
+		if !installVersion(&selfEntry, version, config, log) {
+			log.Error("self-update: failed to download", "version", version)
 			return false
 		}
 	}
 
 	// Update the symlink
-	if !updateSymlink(&selfEntry, version, config) {
-		slog.Error("self-update: failed to update symlink")
+	if !updateSymlink(&selfEntry, version, config, log) {
+		log.Error("self-update: failed to update symlink")
 		return false
 	}
 
@@ -51,11 +51,11 @@ rm -f "$0"
 `, unitName(selfModuleID))
 
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
-		slog.Error("self-update: failed to write update script", "error", err)
+		log.Error("self-update: failed to write update script", "error", err)
 		return false
 	}
 
-	slog.Info("self-update: spawning restart script", "version", version)
+	log.Info("self-update: spawning restart script", "version", version)
 
 	// Fire-and-forget
 	cmd := exec.Command("bash", scriptPath)
@@ -63,7 +63,7 @@ rm -f "$0"
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	if err := cmd.Start(); err != nil {
-		slog.Error("self-update: failed to execute script", "error", err)
+		log.Error("self-update: failed to execute script", "error", err)
 		return false
 	}
 

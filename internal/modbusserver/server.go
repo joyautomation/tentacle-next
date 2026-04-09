@@ -23,6 +23,7 @@ type TCPServer struct {
 	store    *RegisterStore
 	onWrite  WriteCallback
 	listener net.Listener
+	log      *slog.Logger
 
 	mu      sync.Mutex
 	conns   map[net.Conn]struct{}
@@ -30,12 +31,13 @@ type TCPServer struct {
 }
 
 // NewTCPServer creates a Modbus TCP server (not yet listening).
-func NewTCPServer(port, unitID int, store *RegisterStore, onWrite WriteCallback) *TCPServer {
+func NewTCPServer(port, unitID int, store *RegisterStore, onWrite WriteCallback, log *slog.Logger) *TCPServer {
 	return &TCPServer{
 		port:    port,
 		unitID:  unitID,
 		store:   store,
 		onWrite: onWrite,
+		log:     log,
 		conns:   make(map[net.Conn]struct{}),
 	}
 }
@@ -57,7 +59,7 @@ func (s *TCPServer) Start() error {
 	s.listener = ln
 	s.stopped = false
 
-	slog.Info("modbusserver: TCP server listening", "port", s.port, "unitId", s.unitID)
+	s.log.Info("modbusserver: TCP server listening", "port", s.port, "unitId", s.unitID)
 
 	go s.acceptLoop()
 	return nil
@@ -81,7 +83,7 @@ func (s *TCPServer) Stop() {
 	}
 	s.conns = make(map[net.Conn]struct{})
 
-	slog.Info("modbusserver: TCP server stopped", "port", s.port)
+	s.log.Info("modbusserver: TCP server stopped", "port", s.port)
 }
 
 // Port returns the port the server is configured to listen on.
@@ -106,7 +108,7 @@ func (s *TCPServer) acceptLoop() {
 			stopped = s.stopped
 			s.mu.Unlock()
 			if !stopped {
-				slog.Warn("modbusserver: accept error", "error", err)
+				s.log.Warn("modbusserver: accept error", "error", err)
 			}
 			return
 		}

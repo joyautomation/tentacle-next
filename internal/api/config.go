@@ -3,10 +3,13 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joyautomation/tentacle/internal/config"
 	"github.com/joyautomation/tentacle/internal/topics"
 )
 
@@ -103,4 +106,26 @@ func (m *Module) handleUpdateServiceConfig(w http.ResponseWriter, r *http.Reques
 		EnvVar:   envVar,
 		Value:    body.Value,
 	})
+}
+
+// handleGetConfigSchema returns the config field definitions for a module by
+// sending a bus request to "{moduleId}.config.schema".
+// GET /api/v1/config/{moduleId}/schema
+func (m *Module) handleGetConfigSchema(w http.ResponseWriter, r *http.Request) {
+	moduleID := chi.URLParam(r, "moduleId")
+	subject := topics.ConfigSchema(moduleID)
+
+	resp, err := m.bus.Request(subject, nil, 3*time.Second)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []config.FieldDef{})
+		return
+	}
+
+	var fields []config.FieldDef
+	if err := json.Unmarshal(resp, &fields); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to parse schema: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, fields)
 }

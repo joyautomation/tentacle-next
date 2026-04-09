@@ -23,6 +23,7 @@ type Bridge struct {
 	mu sync.RWMutex
 
 	b        bus.Bus
+	log      *slog.Logger
 	node     *SparkplugNode
 	sf       *StoreForwardBuffer
 	config   itypes.MqttBridgeConfig
@@ -48,9 +49,10 @@ type Bridge struct {
 }
 
 // NewBridge creates a new NATS-to-MQTT bridge.
-func NewBridge(b bus.Bus, moduleID string, config itypes.MqttBridgeConfig) *Bridge {
+func NewBridge(b bus.Bus, moduleID string, config itypes.MqttBridgeConfig, log *slog.Logger) *Bridge {
 	return &Bridge{
 		b:         b,
+		log:       log,
 		moduleID:  moduleID,
 		config:    config,
 		variables: make(map[string]*PlcVariable),
@@ -61,14 +63,14 @@ func NewBridge(b bus.Bus, moduleID string, config itypes.MqttBridgeConfig) *Brid
 
 // Start connects to MQTT and begins bridging data.
 func (br *Bridge) Start() error {
-	br.node = NewSparkplugNode(br.config)
+	br.node = NewSparkplugNode(br.config, br.log)
 
 	// Set up DCMD callback
 	br.node.OnDeviceCommand(br.handleDeviceCommand)
 	br.node.OnNodeCommand(br.handleNodeCommand)
 
 	// Set up store-forward
-	br.sf = NewStoreForwardBuffer(br.config.StoreForwardMax, br.config.StoreForwardSize, br.config.DrainRate)
+	br.sf = NewStoreForwardBuffer(br.config.StoreForwardMax, br.config.StoreForwardSize, br.config.DrainRate, br.log)
 	if br.config.PrimaryHostID != "" {
 		br.node.OnHostState(br.handleHostState)
 	}
@@ -120,7 +122,7 @@ func (br *Bridge) SetEnabled(enabled bool) {
 	br.mu.Lock()
 	br.enabled = enabled
 	br.mu.Unlock()
-	slog.Info("mqtt: bridge enabled state changed", "enabled", enabled)
+	br.log.Info("mqtt: bridge enabled state changed", "enabled", enabled)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -128,12 +130,13 @@ func (br *Bridge) SetEnabled(enabled bool) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (br *Bridge) subscribeToData() {
-	// Subscribe to all data: *.data.>
-	sub, err := br.b.Subscribe(topics.AllData(), func(subject string, data []byte, reply bus.ReplyFunc) {
+	// Subscribe only to gateway module data — the gateway applies config
+	// transforms (UDT assembly, deadbands, etc.) before re-publishing.
+	sub, err := br.b.Subscribe(topics.DataWildcard("gateway"), func(subject string, data []byte, reply bus.ReplyFunc) {
 		br.handleDataMessage(subject, data)
 	})
 	if err != nil {
-		slog.Error("mqtt: failed to subscribe to data", "error", err)
+		br.log.Error("mqtt: failed to subscribe to data", "error", err)
 		return
 	}
 	br.mu.Lock()
@@ -186,6 +189,7 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 	}
 
 	pv.Value = msg.Value
+	pv.LastUpdated = msg.Timestamp
 
 	// Update deadband if changed
 	if msg.Deadband != nil {
@@ -218,7 +222,14 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 	}
 
 	// Convert to Sparkplug metric and publish
-	deviceID := br.sparkplugDeviceID()
+	// Device ID resolution: explicit config → source device from message → module ID fallback
+	deviceID := br.config.DeviceID
+	if deviceID == "" && msg.DeviceID != "" {
+		deviceID = msg.DeviceID
+	}
+	if deviceID == "" {
+		deviceID = br.moduleID
+	}
 	metric := br.valueToMetric(pv, msg.Value, nowMs)
 
 	if br.sf.State() == SFOffline {
@@ -233,7 +244,7 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 
 	// Publish DDATA
 	if err := br.node.PublishDeviceData(deviceID, []sparkplug.Metric{metric}); err != nil {
-		slog.Debug("mqtt: failed to publish DDATA", "error", err)
+		br.log.Debug("mqtt: failed to publish DDATA", "error", err)
 		return
 	}
 	br.sf.RecordPublish(1)
@@ -282,9 +293,6 @@ func (br *Bridge) shouldPublishUDT(pv *PlcVariable, value interface{}, nowMs int
 // valueToMetric converts a PlcVariable value to a Sparkplug metric.
 func (br *Bridge) valueToMetric(pv *PlcVariable, value interface{}, nowMs int64) sparkplug.Metric {
 	name := pv.ID
-	if pv.ModuleID != "" {
-		name = pv.ModuleID + "/" + pv.ID
-	}
 
 	if pv.Datatype == "udt" && br.config.UseTemplates && pv.UdtTemplate != nil {
 		return br.udtToTemplateMetric(pv, value, nowMs)
@@ -316,9 +324,6 @@ func (br *Bridge) valueToMetric(pv *PlcVariable, value interface{}, nowMs int64)
 func (br *Bridge) udtToTemplateMetric(pv *PlcVariable, value interface{}, nowMs int64) sparkplug.Metric {
 	tmplName := pv.UdtTemplate.Name
 	name := pv.ID
-	if pv.ModuleID != "" {
-		name = pv.ModuleID + "/" + pv.ID
-	}
 
 	members, _ := value.(map[string]interface{})
 	var tmplMetrics []sparkplug.Metric
@@ -372,7 +377,7 @@ func (br *Bridge) registerTemplate(tmpl *types.UdtTemplateDefinition) {
 	}
 	br.templates.Register(tmpl.Name, spTmpl)
 
-	slog.Info("mqtt: registered template", "name", tmpl.Name, "members", len(tmpl.Members))
+	br.log.Info("mqtt: registered template", "name", tmpl.Name, "members", len(tmpl.Members))
 
 	// Schedule rebirth to include new template definition in NBIRTH
 	br.scheduleRebirth()
@@ -430,7 +435,7 @@ func (br *Bridge) handleNodeCommand(metrics []sparkplug.Metric) {
 		if m.Name == "Node Control/Rebirth" {
 			continue // Handled by the node itself
 		}
-		slog.Info("mqtt: received NCMD", "metric", m.Name)
+		br.log.Info("mqtt: received NCMD", "metric", m.Name)
 	}
 }
 
@@ -441,15 +446,14 @@ func (br *Bridge) routeCommand(m sparkplug.Metric) {
 	// Find the source variable by metric name
 	var sourceVar *PlcVariable
 	for _, pv := range br.variables {
-		fullName := pv.ModuleID + "/" + pv.ID
-		if fullName == m.Name || pv.ID == m.Name {
+		if pv.ID == m.Name {
 			sourceVar = pv
 			break
 		}
 	}
 
 	if sourceVar == nil {
-		// Try matching just the last segment
+		// Try matching just the last segment (for folder/name patterns)
 		lastSeg := m.Name
 		if idx := strings.LastIndex(m.Name, "/"); idx >= 0 {
 			lastSeg = m.Name[idx+1:]
@@ -463,7 +467,7 @@ func (br *Bridge) routeCommand(m sparkplug.Metric) {
 	}
 
 	if sourceVar == nil {
-		slog.Warn("mqtt: DCMD for unknown variable", "name", m.Name)
+		br.log.Warn("mqtt: DCMD for unknown variable", "name", m.Name)
 		return
 	}
 
@@ -491,10 +495,10 @@ func (br *Bridge) routeCommand(m sparkplug.Metric) {
 
 func (br *Bridge) handleHostState(hostID string, online bool) {
 	if online {
-		slog.Info("mqtt: primary host online", "host", hostID)
+		br.log.Info("mqtt: primary host online", "host", hostID)
 		br.sf.SetOnline()
 	} else {
-		slog.Info("mqtt: primary host offline", "host", hostID)
+		br.log.Info("mqtt: primary host offline", "host", hostID)
 		br.sf.SetOffline()
 	}
 }
@@ -511,7 +515,7 @@ func (br *Bridge) drainLoop() {
 			records := br.sf.Drain()
 			for _, rec := range records {
 				if err := br.node.PublishDeviceDataPayload(rec.DeviceID, rec.Payload); err != nil {
-					slog.Warn("mqtt: drain publish failed", "error", err)
+					br.log.Warn("mqtt: drain publish failed", "error", err)
 				}
 			}
 		}
@@ -523,56 +527,46 @@ func (br *Bridge) drainLoop() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (br *Bridge) loadInitialVariables() {
-	// Query all heartbeats to find running modules
-	keys, err := br.b.KVKeys(topics.BucketHeartbeats)
+	// Only load variables from the gateway module, since the bridge subscribes
+	// exclusively to gateway.data.> for runtime data.
+	const gatewayModuleID = "gateway"
+
+	subject := topics.Variables(gatewayModuleID)
+	resp, err := br.b.Request(subject, nil, 3*time.Second)
 	if err != nil {
-		slog.Warn("mqtt: failed to list heartbeats", "error", err)
+		br.log.Warn("mqtt: no variables response from gateway (will auto-discover from data stream)", "error", err)
 		return
 	}
 
-	for _, moduleID := range keys {
-		if moduleID == br.moduleID {
-			continue // Skip self
-		}
-
-		// Request variables from each module
-		subject := topics.Variables(moduleID)
-		resp, err := br.b.Request(subject, nil, 3*time.Second)
-		if err != nil {
-			slog.Debug("mqtt: no variables response from module", "module", moduleID)
-			continue
-		}
-
-		var vars []types.VariableInfo
-		if err := json.Unmarshal(resp, &vars); err != nil {
-			slog.Warn("mqtt: failed to parse variables from module", "module", moduleID, "error", err)
-			continue
-		}
-
-		for _, v := range vars {
-			varKey := variableKey(v.ModuleID, v.DeviceID, v.VariableID)
-			pv := &PlcVariable{
-				ID:            v.VariableID,
-				ModuleID:      v.ModuleID,
-				DeviceID:      v.DeviceID,
-				Description:   v.Description,
-				Datatype:      v.Datatype,
-				Value:         v.Value,
-				Deadband:      v.Deadband,
-				DisableRBE:    v.DisableRBE,
-				SparkplugType: sparkplug.NatsToSparkplugType(v.Datatype),
-			}
-			if v.UdtTemplate != nil {
-				pv.UdtTemplate = v.UdtTemplate
-				br.registerTemplate(v.UdtTemplate)
-			}
-			br.mu.Lock()
-			br.variables[varKey] = pv
-			br.mu.Unlock()
-		}
-
-		slog.Info("mqtt: loaded initial variables", "module", moduleID, "count", len(vars))
+	var vars []types.VariableInfo
+	if err := json.Unmarshal(resp, &vars); err != nil {
+		br.log.Warn("mqtt: failed to parse variables from gateway", "error", err)
+		return
 	}
+
+	for _, v := range vars {
+		varKey := variableKey(v.ModuleID, v.DeviceID, v.VariableID)
+		pv := &PlcVariable{
+			ID:            v.VariableID,
+			ModuleID:      v.ModuleID,
+			DeviceID:      v.DeviceID,
+			Description:   v.Description,
+			Datatype:      v.Datatype,
+			Value:         v.Value,
+			Deadband:      v.Deadband,
+			DisableRBE:    v.DisableRBE,
+			SparkplugType: sparkplug.NatsToSparkplugType(v.Datatype),
+		}
+		if v.UdtTemplate != nil {
+			pv.UdtTemplate = v.UdtTemplate
+			br.registerTemplate(v.UdtTemplate)
+		}
+		br.mu.Lock()
+		br.variables[varKey] = pv
+		br.mu.Unlock()
+	}
+
+	br.log.Info("mqtt: loaded initial variables from gateway", "count", len(vars))
 
 	// Build initial device metrics for DBIRTH
 	br.buildDeviceMetrics()
@@ -582,19 +576,27 @@ func (br *Bridge) buildDeviceMetrics() {
 	br.mu.RLock()
 	defer br.mu.RUnlock()
 
-	deviceID := br.sparkplugDeviceID()
 	nowMs := time.Now().UnixMilli()
 
-	var metrics []sparkplug.Metric
+	// Group metrics by resolved device ID.
+	// When DeviceID is configured, all metrics go under that single device.
+	// Otherwise, metrics are grouped by their source device ID.
+	byDevice := make(map[string][]sparkplug.Metric)
 	for _, pv := range br.variables {
+		devID := br.config.DeviceID
+		if devID == "" && pv.DeviceID != "" {
+			devID = pv.DeviceID
+		}
+		if devID == "" {
+			devID = br.moduleID
+		}
 		m := br.valueToMetric(pv, pv.Value, nowMs)
-		metrics = append(metrics, m)
+		byDevice[devID] = append(byDevice[devID], m)
 	}
-
-	if len(metrics) > 0 {
-		isNew := br.node.SetDeviceMetrics(deviceID, metrics)
+	for devID, metrics := range byDevice {
+		isNew := br.node.SetDeviceMetrics(devID, metrics)
 		if isNew && br.node.State() == StateBorn {
-			br.node.PublishDeviceBirth(deviceID)
+			br.node.PublishDeviceBirth(devID)
 		}
 	}
 }
@@ -620,6 +622,7 @@ func (br *Bridge) subscribeToMetricsRequest() {
 				Value:        pv.Value,
 				ModuleID:     pv.ModuleID,
 				Datatype:     pv.Datatype,
+				LastUpdated:  pv.LastUpdated,
 			}
 			if pv.UdtTemplate != nil {
 				info.TemplateRef = pv.UdtTemplate.Name
@@ -657,7 +660,7 @@ func (br *Bridge) subscribeToMetricsRequest() {
 		_ = reply(respData)
 	})
 	if err != nil {
-		slog.Error("mqtt: failed to subscribe to metrics request", "error", err)
+		br.log.Error("mqtt: failed to subscribe to metrics request", "error", err)
 		return
 	}
 	br.mu.Lock()
@@ -671,6 +674,7 @@ func (br *Bridge) subscribeToSFStatus() {
 			return
 		}
 		status := br.sf.Status()
+		status.PrimaryHostID = br.config.PrimaryHostID
 		respData, err := json.Marshal(status)
 		if err != nil {
 			return
@@ -678,7 +682,7 @@ func (br *Bridge) subscribeToSFStatus() {
 		_ = reply(respData)
 	})
 	if err != nil {
-		slog.Error("mqtt: failed to subscribe to store-forward status request", "error", err)
+		br.log.Error("mqtt: failed to subscribe to store-forward status request", "error", err)
 		return
 	}
 	br.mu.Lock()

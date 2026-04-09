@@ -25,6 +25,7 @@ func browseAddressSpace(
 	startNodeID string,
 	maxDepth int,
 	progress BrowseProgressFunc,
+	log *slog.Logger,
 ) ([]BrowseVariableInfo, error) {
 	var discovered []BrowseVariableInfo
 	visited := make(map[string]bool)
@@ -55,7 +56,7 @@ func browseAddressSpace(
 
 		parsedID, err := ua.ParseNodeID(nodeID)
 		if err != nil {
-			slog.Debug("opcua: invalid NodeID", "nodeId", nodeID, "error", err)
+			log.Debug("opcua: invalid NodeID", "nodeId", nodeID, "error", err)
 			return nil
 		}
 
@@ -73,7 +74,7 @@ func browseAddressSpace(
 
 		resp, err := client.Browse(ctx, req)
 		if err != nil {
-			slog.Debug("opcua: browse failed", "nodeId", nodeID, "error", err)
+			log.Debug("opcua: browse failed", "nodeId", nodeID, "error", err)
 			return nil
 		}
 
@@ -90,7 +91,7 @@ func browseAddressSpace(
 				ContinuationPoints: [][]byte{result.ContinuationPoint},
 			})
 			if err != nil {
-				slog.Debug("opcua: BrowseNext failed", "nodeId", nodeID, "error", err)
+				log.Debug("opcua: BrowseNext failed", "nodeId", nodeID, "error", err)
 				break
 			}
 			if len(nextResp.Results) == 0 {
@@ -116,7 +117,7 @@ func browseAddressSpace(
 
 				readResp, err := client.Read(ctx, readReq)
 				if err != nil {
-					slog.Debug("opcua: failed to read DataType", "nodeId", childNodeID, "error", err)
+					log.Debug("opcua: failed to read DataType", "nodeId", childNodeID, "error", err)
 					continue
 				}
 
@@ -164,11 +165,11 @@ func browseAddressSpace(
 		return nil
 	}
 
-	slog.Info("opcua: starting address space browse", "startNodeId", startNodeID, "maxDepth", maxDepth)
+	log.Info("opcua: starting address space browse", "startNodeId", startNodeID, "maxDepth", maxDepth)
 	if err := browseRecursive(startNodeID, 0); err != nil {
 		return nil, err
 	}
-	slog.Info("opcua: browse complete", "variablesDiscovered", len(discovered))
+	log.Info("opcua: browse complete", "variablesDiscovered", len(discovered))
 
 	if progress != nil {
 		progress(len(discovered), startNodeID,

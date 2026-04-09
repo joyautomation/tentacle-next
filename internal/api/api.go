@@ -46,6 +46,9 @@ type Module struct {
 	browseMu     sync.RWMutex
 	browseCache  map[string]json.RawMessage // "gatewayId:deviceId" → result
 	browseStates map[string]*BrowseState    // browseId → state
+
+	// NATS traffic collector.
+	traffic *trafficCollector
 }
 
 // BrowseState tracks an in-progress or completed browse operation.
@@ -69,16 +72,26 @@ func New(moduleID string) *Module {
 	}
 	mode := os.Getenv("TENTACLE_MODE")
 	if mode == "" {
-		mode = "dev"
+		// Auto-detect deployment mode
+		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+			mode = "kubernetes"
+		} else if _, err := os.Stat("/.dockerenv"); err == nil {
+			mode = "docker"
+		} else if os.Getppid() == 1 || os.Getenv("INVOCATION_ID") != "" {
+			mode = "systemd"
+		} else {
+			mode = "dev"
+		}
 	}
 	return &Module{
 		moduleID:     moduleID,
 		port:         port,
-		log:          slog.Default().With("module", "api"),
+		log:          slog.Default(),
 		logBuf:       make([]ttypes.ServiceLogEntry, 0, 1000),
 		mode:         mode,
 		browseCache:  make(map[string]json.RawMessage),
 		browseStates: make(map[string]*BrowseState),
+		traffic:      newTrafficCollector(),
 	}
 }
 
@@ -87,10 +100,16 @@ func (m *Module) ServiceType() string { return "api" }
 
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.bus = b
+	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
 	ctx, m.cancel = context.WithCancel(ctx)
 
 	stopHB := heartbeat.Start(b, m.moduleID, m.ServiceType(), nil)
 	defer stopHB()
+
+	// Start NATS traffic collector.
+	if err := m.traffic.start(b); err != nil {
+		m.log.Warn("failed to start traffic collector", "error", err)
+	}
 
 	// Buffer service logs for the GET endpoint.
 	if sub, err := b.Subscribe("service.logs.>", func(_ string, data []byte, _ bus.ReplyFunc) {
@@ -132,6 +151,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 }
 
 func (m *Module) Stop() error {
+	m.traffic.stop()
 	if m.logSub != nil {
 		m.logSub.Unsubscribe()
 	}
@@ -208,6 +228,10 @@ func (m *Module) routes() http.Handler {
 		r.Put("/nftables/config", m.handleApplyNftablesConfig)
 		r.Get("/nftables/stream", m.handleStreamNftablesConfig)
 
+		// NATS Traffic
+		r.Get("/nats/traffic", m.handleGetNatsTraffic)
+		r.Get("/nats/traffic/stream", m.handleStreamNatsTraffic)
+
 		// MQTT
 		r.Get("/mqtt/metrics", m.handleGetMqttMetrics)
 		r.Get("/mqtt/store-forward", m.handleGetStoreForwardStatus)
@@ -219,6 +243,7 @@ func (m *Module) routes() http.Handler {
 
 		// Config
 		r.Get("/config", m.handleGetAllConfig)
+		r.Get("/config/{moduleId}/schema", m.handleGetConfigSchema)
 		r.Get("/config/{moduleId}", m.handleGetServiceConfig)
 		r.Put("/config/{moduleId}/{envVar}", m.handleUpdateServiceConfig)
 

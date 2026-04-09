@@ -46,6 +46,7 @@ type udtMemberRef struct {
 type Gateway struct {
 	b         bus.Bus
 	gatewayID string
+	log       *slog.Logger
 
 	mu        sync.RWMutex
 	config    *itypes.GatewayConfigKV
@@ -89,11 +90,16 @@ func (g *Gateway) ServiceType() string { return serviceType }
 // Start initializes the gateway module with the given Bus.
 func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 	g.b = b
+	g.log = slog.Default().With("serviceType", g.ServiceType(), "moduleID", g.ModuleID())
 
 	// Ensure required KV buckets exist
-	for _, bucket := range []string{topics.BucketGatewayConfig, topics.BucketServiceEnabled} {
+	for _, bucket := range []string{
+		topics.BucketGatewayConfig, topics.BucketServiceEnabled,
+		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
+		topics.BucketScannerModbus, topics.BucketScannerSNMP,
+	} {
 		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
-			slog.Warn("gateway: failed to create bucket", "bucket", bucket, "error", err)
+			g.log.Warn("gateway: failed to create bucket", "bucket", bucket, "error", err)
 		}
 	}
 
@@ -109,28 +115,41 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 	if data, _, err := b.KVGet(topics.BucketGatewayConfig, g.gatewayID); err == nil {
 		var config itypes.GatewayConfigKV
 		if err := json.Unmarshal(data, &config); err != nil {
-			slog.Error("gateway: failed to parse initial config", "error", err)
+			g.log.Error("gateway: failed to parse initial config", "error", err)
 		} else {
-			slog.Info("gateway: loaded initial config", "updatedAt", config.UpdatedAt)
+			g.log.Info("gateway: loaded initial config", "updatedAt", config.UpdatedAt)
 			g.ApplyConfig(&config)
 		}
 	} else {
-		slog.Info("gateway: no existing config found, waiting for configuration")
+		g.log.Info("gateway: no existing config found, seeding empty config")
+		emptyConfig := &itypes.GatewayConfigKV{
+			GatewayID:    g.gatewayID,
+			Devices:      make(map[string]itypes.GatewayDeviceConfig),
+			Variables:    make(map[string]itypes.GatewayVariableConfig),
+			UdtTemplates: make(map[string]itypes.GatewayUdtTemplateConfig),
+			UdtVariables: make(map[string]itypes.GatewayUdtVariableConfig),
+			UpdatedAt:    time.Now().UnixMilli(),
+		}
+		if data, err := json.Marshal(emptyConfig); err == nil {
+			if _, err := b.KVPut(topics.BucketGatewayConfig, g.gatewayID, data); err != nil {
+				g.log.Warn("gateway: failed to seed empty config", "error", err)
+			}
+		}
 	}
 
 	// Watch for config changes
 	configSub, err := b.KVWatch(topics.BucketGatewayConfig, g.gatewayID, func(key string, value []byte, op bus.KVOperation) {
 		if op == bus.KVOpDelete {
-			slog.Info("gateway: config deleted, stopping")
+			g.log.Info("gateway: config deleted, stopping")
 			g.ApplyConfig(nil)
 			return
 		}
 		var config itypes.GatewayConfigKV
 		if err := json.Unmarshal(value, &config); err != nil {
-			slog.Error("gateway: failed to parse updated config", "error", err)
+			g.log.Error("gateway: failed to parse updated config", "error", err)
 			return
 		}
-		slog.Info("gateway: config updated, rebuilding subscriptions",
+		g.log.Info("gateway: config updated, rebuilding subscriptions",
 			"devices", len(config.Devices),
 			"variables", len(config.Variables),
 			"udtTemplates", len(config.UdtTemplates),
@@ -138,7 +157,7 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 		g.ApplyConfig(&config)
 	})
 	if err != nil {
-		slog.Error("gateway: failed to watch config KV", "error", err)
+		g.log.Error("gateway: failed to watch config KV", "error", err)
 	} else {
 		g.mu.Lock()
 		g.subs = append(g.subs, configSub)
@@ -147,7 +166,7 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 
 	// Listen for shutdown via NATS
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(g.gatewayID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("gateway: received shutdown command via Bus")
+		g.log.Info("gateway: received shutdown command via Bus")
 		g.Stop()
 		os.Exit(0)
 	})
@@ -209,7 +228,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 	g.udtMemberIndex = make(map[string][]udtMemberRef)
 
 	if config == nil {
-		slog.Info("gateway: config cleared, no variables active")
+		g.log.Info("gateway: config cleared, no variables active")
 		return
 	}
 
@@ -217,7 +236,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 	for varID, varCfg := range config.Variables {
 		device, ok := config.Devices[varCfg.DeviceID]
 		if !ok {
-			slog.Warn("gateway: variable references unknown device", "variable", varID, "device", varCfg.DeviceID)
+			g.log.Warn("gateway: variable references unknown device", "variable", varID, "device", varCfg.DeviceID)
 			continue
 		}
 
@@ -270,12 +289,27 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 			if dt == "boolean" || dt == "string" || dt == "BOOL" || dt == "BOOLEAN" || dt == "STRING" {
 				continue
 			}
-			if instDb, ok := udtVar.MemberDeadbands[member.Name]; ok {
-				memberDeadbands[member.Name] = instDb
-			} else if member.DefaultDeadband != nil {
-				memberDeadbands[member.Name] = *member.DefaultDeadband
-			} else if device.Deadband != nil {
-				memberDeadbands[member.Name] = *device.Deadband
+			// Resolve base deadband: start from device default, overlay member default.
+			base := types.DeadBandConfig{}
+			if device.Deadband != nil {
+				base = *device.Deadband
+			}
+			if member.DefaultDeadband != nil {
+				// Member default overrides device default per-field.
+				// Value is always taken; MinTime/MaxTime only if non-zero (0 = disabled).
+				base.Value = member.DefaultDeadband.Value
+				if member.DefaultDeadband.MinTime != 0 {
+					base.MinTime = member.DefaultDeadband.MinTime
+				}
+				if member.DefaultDeadband.MaxTime != 0 {
+					base.MaxTime = member.DefaultDeadband.MaxTime
+				}
+			}
+			if override, ok := udtVar.MemberDeadbands[member.Name]; ok {
+				// Merge sparse per-field override on top of the base.
+				memberDeadbands[member.Name] = override.Merge(base)
+			} else {
+				memberDeadbands[member.Name] = base
 			}
 		}
 
@@ -294,7 +328,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 		udtVarCount++
 	}
 
-	slog.Info("gateway: config applied",
+	g.log.Info("gateway: config applied",
 		"atomicVars", len(g.variables),
 		"udtVars", udtVarCount,
 		"templates", len(config.UdtTemplates),
@@ -331,7 +365,7 @@ func (g *Gateway) unsubscribeDataLocked() {
 		a.Stop()
 	}
 	if g.config != nil {
-		g.sendUnsubscribeRequestsLocked()
+		g.deleteSubscriptionConfigsLocked()
 	}
 }
 
@@ -398,7 +432,7 @@ func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.Gateway
 		g.handleScannerData(subj, data, protocol, deviceID)
 	})
 	if err != nil {
-		slog.Error("gateway: failed to subscribe", "subject", subject, "error", err)
+		g.log.Error("gateway: failed to subscribe", "subject", subject, "error", err)
 	} else {
 		g.subs = append(g.subs, sub)
 	}
@@ -409,21 +443,26 @@ func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.Gateway
 		g.handleScannerBatchData(data, protocol, deviceID)
 	})
 	if err != nil {
-		slog.Error("gateway: failed to subscribe", "subject", batchSubject, "error", err)
+		g.log.Error("gateway: failed to subscribe", "subject", batchSubject, "error", err)
 	} else {
 		g.subs = append(g.subs, batchSub)
 	}
 
-	g.sendSubscribeRequest(deviceID, device, vars)
+	g.writeSubscriptionConfig(deviceID, device, vars)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Scanner subscribe/unsubscribe requests
 // ═══════════════════════════════════════════════════════════════════════════
 
-func (g *Gateway) sendSubscribeRequest(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
+func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
 	subscriberID := fmt.Sprintf("gateway-%s", g.gatewayID)
-	subject := fmt.Sprintf("%s.subscribe", device.Protocol)
+
+	bucket := topics.ScannerBucket(device.Protocol)
+	if bucket == "" {
+		g.log.Warn("gateway: unknown protocol", "protocol", device.Protocol, "device", deviceID)
+		return
+	}
 
 	var payload []byte
 	var err error
@@ -533,26 +572,24 @@ func (g *Gateway) sendSubscribeRequest(deviceID string, device itypes.GatewayDev
 			UnitID: unitID, Registers: registers, ScanRate: scanRate(1000),
 		}
 		payload, err = json.Marshal(req)
-
-	default:
-		slog.Warn("gateway: unknown protocol", "protocol", device.Protocol, "device", deviceID)
-		return
 	}
 
 	if err != nil {
-		slog.Error("gateway: failed to marshal subscribe request", "device", deviceID, "error", err)
+		g.log.Error("gateway: failed to marshal subscribe config", "device", deviceID, "error", err)
 		return
 	}
 
-	_, err = g.b.Request(subject, payload, 5*time.Second)
-	if err != nil {
-		slog.Warn("gateway: subscribe request failed (scanner may not be running)", "subject", subject, "device", deviceID, "error", err)
+	// Write to the scanner's KV bucket — fire and forget.
+	// The scanner watches this bucket and will pick it up whenever it's ready.
+	key := fmt.Sprintf("%s.%s", subscriberID, deviceID)
+	if _, err := g.b.KVPut(bucket, key, payload); err != nil {
+		g.log.Error("gateway: failed to write scanner config", "bucket", bucket, "key", key, "error", err)
 		return
 	}
-	slog.Info("gateway: subscribed to scanner", "protocol", device.Protocol, "device", deviceID)
+	g.log.Info("gateway: wrote scanner config", "protocol", device.Protocol, "device", deviceID, "bucket", bucket)
 }
 
-func (g *Gateway) sendUnsubscribeRequestsLocked() {
+func (g *Gateway) deleteSubscriptionConfigsLocked() {
 	subscriberID := fmt.Sprintf("gateway-%s", g.gatewayID)
 
 	type devKey struct{ protocol, deviceID string }
@@ -569,13 +606,32 @@ func (g *Gateway) sendUnsubscribeRequestsLocked() {
 		}
 		seen[dk] = true
 
-		subject := fmt.Sprintf("%s.unsubscribe", device.Protocol)
-		req := struct {
-			SubscriberID string `json:"subscriberId"`
-			DeviceID     string `json:"deviceId"`
-		}{subscriberID, varCfg.DeviceID}
-		data, _ := json.Marshal(req)
-		_, _ = g.b.Request(subject, data, 2*time.Second)
+		bucket := topics.ScannerBucket(device.Protocol)
+		if bucket == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s.%s", subscriberID, varCfg.DeviceID)
+		_ = g.b.KVDelete(bucket, key)
+	}
+
+	// Also clean up UDT variable devices
+	for _, udtVar := range g.config.UdtVariables {
+		device, ok := g.config.Devices[udtVar.DeviceID]
+		if !ok {
+			continue
+		}
+		dk := devKey{device.Protocol, udtVar.DeviceID}
+		if seen[dk] {
+			continue
+		}
+		seen[dk] = true
+
+		bucket := topics.ScannerBucket(device.Protocol)
+		if bucket == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s.%s", subscriberID, udtVar.DeviceID)
+		_ = g.b.KVDelete(bucket, key)
 	}
 }
 
@@ -657,7 +713,7 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 				continue
 			}
 
-			pubSubject := fmt.Sprintf("plc.data.%s.%s", g.gatewayID, types.SanitizeForSubject(varID))
+			pubSubject := topics.Data(g.gatewayID, types.SanitizeForSubject(tv.Config.DeviceID), types.SanitizeForSubject(varID))
 			_ = g.b.Publish(pubSubject, data)
 
 			rbe.RecordPublish(&tv.rbeState, value, nowMs)
@@ -722,7 +778,7 @@ func (g *Gateway) setupVariablesHandlerLocked() {
 		_ = reply(resp)
 	})
 	if err != nil {
-		slog.Error("gateway: failed to subscribe to variables", "subject", subject, "error", err)
+		g.log.Error("gateway: failed to subscribe to variables", "subject", subject, "error", err)
 		return
 	}
 	g.varSub = sub
@@ -760,7 +816,7 @@ func (g *Gateway) setupCommandRoutingLocked() {
 		_ = g.b.Publish(cmdSubject, data)
 	})
 	if err != nil {
-		slog.Error("gateway: failed to subscribe to commands", "subject", subject, "error", err)
+		g.log.Error("gateway: failed to subscribe to commands", "subject", subject, "error", err)
 		return
 	}
 	g.cmdSub = sub

@@ -27,6 +27,7 @@ const serviceType = "network"
 type Network struct {
 	b        bus.Bus
 	moduleID string
+	log      *slog.Logger
 
 	mu   sync.Mutex
 	subs []bus.Subscription
@@ -53,10 +54,11 @@ func (n *Network) ServiceType() string { return serviceType }
 // registers Bus handlers. It blocks until ctx is cancelled or a signal is received.
 func (n *Network) Start(ctx context.Context, b bus.Bus) error {
 	n.b = b
+	n.log = slog.Default().With("serviceType", n.ServiceType(), "moduleID", n.ModuleID())
 
 	// Start heartbeat.
 	n.stopHeartbeat = heartbeat.Start(b, n.moduleID, serviceType, func() map[string]interface{} {
-		ifaces, err := readInterfaces()
+		ifaces, err := readInterfaces(n.log)
 		if err != nil {
 			return map[string]interface{}{"interfaceCount": 0, "error": err.Error()}
 		}
@@ -66,7 +68,7 @@ func (n *Network) Start(ctx context.Context, b bus.Bus) error {
 	// Subscribe to network.state (request/reply).
 	stateSub, err := b.Subscribe(topics.NetworkState, n.handleState)
 	if err != nil {
-		slog.Error("network: failed to subscribe to state", "error", err)
+		n.log.Error("network: failed to subscribe to state", "error", err)
 	} else {
 		n.mu.Lock()
 		n.subs = append(n.subs, stateSub)
@@ -76,7 +78,7 @@ func (n *Network) Start(ctx context.Context, b bus.Bus) error {
 	// Subscribe to network.command (request/reply).
 	cmdSub, err := b.Subscribe(topics.NetworkCommand, n.handleCommand)
 	if err != nil {
-		slog.Error("network: failed to subscribe to command", "error", err)
+		n.log.Error("network: failed to subscribe to command", "error", err)
 	} else {
 		n.mu.Lock()
 		n.subs = append(n.subs, cmdSub)
@@ -85,7 +87,7 @@ func (n *Network) Start(ctx context.Context, b bus.Bus) error {
 
 	// Subscribe to shutdown.
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(n.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("network: received shutdown command via Bus")
+		n.log.Info("network: received shutdown command via Bus")
 		n.Stop()
 		os.Exit(0)
 	})
@@ -96,7 +98,7 @@ func (n *Network) Start(ctx context.Context, b bus.Bus) error {
 	// Start periodic interface publishing.
 	go n.publishLoop()
 
-	slog.Info("network: module started", "moduleID", n.moduleID)
+	n.log.Info("network: module started", "moduleID", n.moduleID)
 
 	// Block until context cancelled or signal.
 	sigChan := make(chan os.Signal, 1)
@@ -130,7 +132,7 @@ func (n *Network) Stop() error {
 		n.stopHeartbeat()
 	}
 
-	slog.Info("network: module stopped", "moduleID", n.moduleID)
+	n.log.Info("network: module stopped", "moduleID", n.moduleID)
 	return nil
 }
 
@@ -155,9 +157,9 @@ func (n *Network) publishLoop() {
 // publishInterfaces reads all network interfaces and publishes a
 // NetworkStateMessage to topics.NetworkInterfaces.
 func (n *Network) publishInterfaces() {
-	ifaces, err := readInterfaces()
+	ifaces, err := readInterfaces(n.log)
 	if err != nil {
-		slog.Warn("network: failed to read interfaces", "error", err)
+		n.log.Warn("network: failed to read interfaces", "error", err)
 		return
 	}
 
@@ -169,12 +171,12 @@ func (n *Network) publishInterfaces() {
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		slog.Warn("network: failed to marshal state", "error", err)
+		n.log.Warn("network: failed to marshal state", "error", err)
 		return
 	}
 
 	if err := n.b.Publish(topics.NetworkInterfaces, data); err != nil {
-		slog.Warn("network: failed to publish interfaces", "error", err)
+		n.log.Warn("network: failed to publish interfaces", "error", err)
 	}
 }
 
@@ -184,9 +186,9 @@ func (n *Network) handleState(subject string, data []byte, reply bus.ReplyFunc) 
 		return
 	}
 
-	ifaces, err := readInterfaces()
+	ifaces, err := readInterfaces(n.log)
 	if err != nil {
-		slog.Warn("network: failed to read interfaces for state request", "error", err)
+		n.log.Warn("network: failed to read interfaces for state request", "error", err)
 		resp, _ := json.Marshal(itypes.NetworkStateMessage{
 			ModuleID:  n.moduleID,
 			Timestamp: time.Now().UnixMilli(),
@@ -232,7 +234,7 @@ func (n *Network) handleCommand(subject string, data []byte, reply bus.ReplyFunc
 
 	switch req.Action {
 	case "get-config":
-		configs, err := readConfig()
+		configs, err := readConfig(n.log)
 		if err != nil {
 			cmdResp.Success = false
 			cmdResp.Error = err.Error()
@@ -242,7 +244,7 @@ func (n *Network) handleCommand(subject string, data []byte, reply bus.ReplyFunc
 		}
 
 	case "apply-config":
-		if err := applyConfig(req.Interfaces); err != nil {
+		if err := applyConfig(n.log, req.Interfaces); err != nil {
 			cmdResp.Success = false
 			cmdResp.Error = err.Error()
 		} else {
@@ -253,7 +255,7 @@ func (n *Network) handleCommand(subject string, data []byte, reply bus.ReplyFunc
 		if req.InterfaceName == "" || req.Address == "" {
 			cmdResp.Success = false
 			cmdResp.Error = "interfaceName and address are required"
-		} else if err := addAddress(req.InterfaceName, req.Address); err != nil {
+		} else if err := addAddress(n.log, req.InterfaceName, req.Address); err != nil {
 			cmdResp.Success = false
 			cmdResp.Error = err.Error()
 		} else {
@@ -264,7 +266,7 @@ func (n *Network) handleCommand(subject string, data []byte, reply bus.ReplyFunc
 		if req.InterfaceName == "" || req.Address == "" {
 			cmdResp.Success = false
 			cmdResp.Error = "interfaceName and address are required"
-		} else if err := removeAddress(req.InterfaceName, req.Address); err != nil {
+		} else if err := removeAddress(n.log, req.InterfaceName, req.Address); err != nil {
 			cmdResp.Success = false
 			cmdResp.Error = err.Error()
 		} else {
@@ -278,7 +280,7 @@ func (n *Network) handleCommand(subject string, data []byte, reply bus.ReplyFunc
 
 	resp, err := json.Marshal(cmdResp)
 	if err != nil {
-		slog.Warn("network: failed to marshal command response", "error", err)
+		n.log.Warn("network: failed to marshal command response", "error", err)
 		return
 	}
 	_ = reply(resp)

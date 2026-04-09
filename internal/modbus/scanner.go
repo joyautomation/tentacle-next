@@ -24,15 +24,17 @@ type Scanner struct {
 	mu       sync.Mutex
 	b        bus.Bus
 	moduleID string
+	log      *slog.Logger
 	devices  map[string]*DeviceState // deviceID -> state
 	subs     []bus.Subscription
 }
 
 // newScanner creates a new Scanner.
-func newScanner(b bus.Bus, moduleID string) *Scanner {
+func newScanner(b bus.Bus, moduleID string, log *slog.Logger) *Scanner {
 	return &Scanner{
 		b:        b,
 		moduleID: moduleID,
+		log:      log,
 		devices:  make(map[string]*DeviceState),
 	}
 }
@@ -75,7 +77,29 @@ func (s *Scanner) start() error {
 	}
 	s.subs = append(s.subs, cmdSub)
 
-	slog.Info("modbus: scanner started", "moduleId", s.moduleID)
+	// Watch scanner config KV bucket for subscription configs.
+	bucket := topics.BucketScannerModbus
+	if err := s.b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
+		s.log.Warn("modbus: failed to create scanner config bucket", "error", err)
+	}
+	kvSub, err := s.b.KVWatchAll(bucket, func(key string, value []byte, op bus.KVOperation) {
+		if op == bus.KVOpPut {
+			s.handleSubscribe(value, nil)
+		} else if op == bus.KVOpDelete {
+			parts := strings.SplitN(key, ".", 2)
+			if len(parts) == 2 {
+				unsubReq, _ := json.Marshal(itypes.ModbusScannerUnsubscribeRequest{SubscriberID: parts[0], DeviceID: parts[1]})
+				s.handleUnsubscribe(unsubReq, nil)
+			}
+		}
+	})
+	if err != nil {
+		s.log.Error("modbus: failed to watch scanner config bucket", "error", err)
+	} else {
+		s.subs = append(s.subs, kvSub)
+	}
+
+	s.log.Info("modbus: scanner started", "moduleId", s.moduleID)
 	return nil
 }
 
@@ -99,7 +123,7 @@ func (s *Scanner) stop() {
 func (s *Scanner) handleSubscribe(data []byte, reply bus.ReplyFunc) {
 	var req itypes.ModbusScannerSubscribeRequest
 	if err := json.Unmarshal(data, &req); err != nil {
-		slog.Error("modbus: failed to parse subscribe request", "error", err)
+		s.log.Error("modbus: failed to parse subscribe request", "error", err)
 		sendReply(reply, false, err.Error())
 		return
 	}
@@ -182,10 +206,10 @@ func (s *Scanner) handleSubscribe(data []byte, reply bus.ReplyFunc) {
 		go s.pollDevice(dev)
 	} else if wasRunning {
 		// Device is already polling; plan rebuild is picked up on next cycle.
-		slog.Info("modbus: updated subscriber", "device", req.DeviceID, "subscriber", req.SubscriberID)
+		s.log.Info("modbus: updated subscriber", "device", req.DeviceID, "subscriber", req.SubscriberID)
 	}
 
-	slog.Info("modbus: subscribed", "device", req.DeviceID, "subscriber", req.SubscriberID, "tags", len(tagConfigs))
+	s.log.Info("modbus: subscribed", "device", req.DeviceID, "subscriber", req.SubscriberID, "tags", len(tagConfigs))
 	sendReply(reply, true, "")
 }
 
@@ -193,7 +217,7 @@ func (s *Scanner) handleSubscribe(data []byte, reply bus.ReplyFunc) {
 func (s *Scanner) handleUnsubscribe(data []byte, reply bus.ReplyFunc) {
 	var req itypes.ModbusScannerUnsubscribeRequest
 	if err := json.Unmarshal(data, &req); err != nil {
-		slog.Error("modbus: failed to parse unsubscribe request", "error", err)
+		s.log.Error("modbus: failed to parse unsubscribe request", "error", err)
 		sendReply(reply, false, err.Error())
 		return
 	}
@@ -226,7 +250,7 @@ func (s *Scanner) handleUnsubscribe(data []byte, reply bus.ReplyFunc) {
 		stopDevice(dev)
 		delete(s.devices, req.DeviceID)
 		s.mu.Unlock()
-		slog.Info("modbus: device removed (no subscribers)", "device", req.DeviceID)
+		s.log.Info("modbus: device removed (no subscribers)", "device", req.DeviceID)
 		sendReply(reply, true, "")
 		return
 	}
@@ -235,7 +259,7 @@ func (s *Scanner) handleUnsubscribe(data []byte, reply bus.ReplyFunc) {
 	dev.mu.Unlock()
 	s.mu.Unlock()
 
-	slog.Info("modbus: unsubscribed", "device", req.DeviceID, "subscriber", req.SubscriberID)
+	s.log.Info("modbus: unsubscribed", "device", req.DeviceID, "subscriber", req.SubscriberID)
 	sendReply(reply, true, "")
 }
 
@@ -277,7 +301,7 @@ func (s *Scanner) handleCommand(subject string, data []byte) {
 	// Parse tag ID from subject: modbus.command.{tagId}
 	parts := strings.SplitN(subject, ".", 3)
 	if len(parts) < 3 {
-		slog.Warn("modbus: invalid command subject", "subject", subject)
+		s.log.Warn("modbus: invalid command subject", "subject", subject)
 		return
 	}
 	tagID := parts[2]
@@ -287,7 +311,7 @@ func (s *Scanner) handleCommand(subject string, data []byte) {
 		Value interface{} `json:"value"`
 	}
 	if err := json.Unmarshal(data, &cmdMsg); err != nil {
-		slog.Error("modbus: failed to parse command", "tag", tagID, "error", err)
+		s.log.Error("modbus: failed to parse command", "tag", tagID, "error", err)
 		return
 	}
 
@@ -313,7 +337,7 @@ func (s *Scanner) handleCommand(subject string, data []byte) {
 	s.mu.Unlock()
 
 	if !found {
-		slog.Warn("modbus: command for unknown or non-writable tag", "tag", tagID)
+		s.log.Warn("modbus: command for unknown or non-writable tag", "tag", tagID)
 		return
 	}
 
@@ -321,7 +345,7 @@ func (s *Scanner) handleCommand(subject string, data []byte) {
 	defer targetDev.mu.Unlock()
 
 	if targetDev.conn == nil {
-		slog.Warn("modbus: cannot write, no connection", "device", targetDev.DeviceID, "tag", tagID)
+		s.log.Warn("modbus: cannot write, no connection", "device", targetDev.DeviceID, "tag", tagID)
 		return
 	}
 
@@ -342,7 +366,7 @@ func (s *Scanner) handleCommand(subject string, data []byte) {
 		// Write coil using FC05
 		bval, ok := toBool(cmdMsg.Value)
 		if !ok {
-			slog.Error("modbus: invalid coil write value", "tag", tagID, "value", cmdMsg.Value)
+			s.log.Error("modbus: invalid coil write value", "tag", tagID, "value", cmdMsg.Value)
 			return
 		}
 		writeErr = writeSingleCoil(targetDev, addr, bval)
@@ -350,7 +374,7 @@ func (s *Scanner) handleCommand(subject string, data []byte) {
 		// Register write
 		encoded, regCount, err := encodeValue(cmdMsg.Value, targetTag.Datatype, byteOrder)
 		if err != nil {
-			slog.Error("modbus: encode error for write", "tag", tagID, "error", err)
+			s.log.Error("modbus: encode error for write", "tag", tagID, "error", err)
 			return
 		}
 		if regCount == 1 {
@@ -364,20 +388,20 @@ func (s *Scanner) handleCommand(subject string, data []byte) {
 	}
 
 	if writeErr != nil {
-		slog.Error("modbus: write failed", "device", targetDev.DeviceID, "tag", tagID, "error", writeErr)
+		s.log.Error("modbus: write failed", "device", targetDev.DeviceID, "tag", tagID, "error", writeErr)
 	} else {
-		slog.Info("modbus: write succeeded", "device", targetDev.DeviceID, "tag", tagID)
+		s.log.Info("modbus: write succeeded", "device", targetDev.DeviceID, "tag", tagID)
 	}
 }
 
 // pollDevice runs the polling loop for a single device.
 func (s *Scanner) pollDevice(dev *DeviceState) {
-	slog.Info("modbus: starting poll loop", "device", dev.DeviceID, "host", dev.Host, "port", dev.Port)
+	s.log.Info("modbus: starting poll loop", "device", dev.DeviceID, "host", dev.Host, "port", dev.Port)
 
 	for {
 		select {
 		case <-dev.stopChan:
-			slog.Info("modbus: poll loop stopped", "device", dev.DeviceID)
+			s.log.Info("modbus: poll loop stopped", "device", dev.DeviceID)
 			disconnect(dev)
 			return
 		default:
@@ -402,10 +426,10 @@ func (s *Scanner) pollDevice(dev *DeviceState) {
 			if err := connect(dev); err != nil {
 				dev.failures++
 				dev.mu.Unlock()
-				slog.Warn("modbus: connection failed", "device", dev.DeviceID, "error", err, "backoff", dev.backoffDuration())
+				s.log.Warn("modbus: connection failed", "device", dev.DeviceID, "error", err, "backoff", dev.backoffDuration())
 				continue
 			}
-			slog.Info("modbus: connected", "device", dev.DeviceID)
+			s.log.Info("modbus: connected", "device", dev.DeviceID)
 		}
 		blocks := make([]ReadBlock, len(dev.blocks))
 		copy(blocks, dev.blocks)
@@ -416,7 +440,7 @@ func (s *Scanner) pollDevice(dev *DeviceState) {
 		var readErr error
 		for _, block := range blocks {
 			dev.mu.Lock()
-			vals, err := readBlock(dev, block)
+			vals, err := readBlock(dev, block, s.log)
 			dev.mu.Unlock()
 			if err != nil {
 				readErr = err
@@ -432,7 +456,7 @@ func (s *Scanner) pollDevice(dev *DeviceState) {
 			dev.failures++
 			disconnect(dev)
 			dev.mu.Unlock()
-			slog.Warn("modbus: read failed", "device", dev.DeviceID, "error", readErr, "backoff", dev.backoffDuration())
+			s.log.Warn("modbus: read failed", "device", dev.DeviceID, "error", readErr, "backoff", dev.backoffDuration())
 			continue
 		}
 
@@ -494,7 +518,7 @@ func (s *Scanner) publishChanges(dev *DeviceState, values map[string]interface{}
 
 		subject := topics.Data("modbus", sanitizedDevice, sanitizedTag)
 		if err := s.b.Publish(subject, data); err != nil {
-			slog.Warn("modbus: publish failed", "subject", subject, "error", err)
+			s.log.Warn("modbus: publish failed", "subject", subject, "error", err)
 		}
 	}
 }

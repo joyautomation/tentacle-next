@@ -46,7 +46,7 @@ func loadConfig() (*itypes.NftablesConfig, error) {
 }
 
 // saveConfig writes the nftables configuration to disk as JSON.
-func saveConfig(cfg *itypes.NftablesConfig) error {
+func saveConfig(log *slog.Logger, cfg *itypes.NftablesConfig) error {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
@@ -57,7 +57,7 @@ func saveConfig(cfg *itypes.NftablesConfig) error {
 	if err := os.WriteFile(configPath(), data, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
-	slog.Info("nftables: config saved", "path", configPath(), "rules", len(cfg.NatRules))
+	log.Info("nftables: config saved", "path", configPath(), "rules", len(cfg.NatRules))
 	return nil
 }
 
@@ -186,23 +186,23 @@ func writeRulesFile(content string) error {
 }
 
 // applyRules loads the generated rules file into the kernel via nft.
-func applyRules() error {
+func applyRules(log *slog.Logger) error {
 	cmd := exec.Command("nft", "-f", rulesPath())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("nftables: failed to apply rules", "error", err, "output", string(out))
+		log.Error("nftables: failed to apply rules", "error", err, "output", string(out))
 		return fmt.Errorf("nft -f: %s: %w", strings.TrimSpace(string(out)), err)
 	}
-	slog.Info("nftables: rules applied successfully", "path", rulesPath())
+	log.Info("nftables: rules applied successfully", "path", rulesPath())
 	return nil
 }
 
 // getRuleset executes `nft -j list ruleset` and returns the raw JSON output.
-func getRuleset() (string, error) {
+func getRuleset(log *slog.Logger) (string, error) {
 	cmd := exec.Command("nft", "-j", "list", "ruleset")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Error("nftables: failed to list ruleset", "error", err, "output", string(out))
+		log.Error("nftables: failed to list ruleset", "error", err, "output", string(out))
 		return "", fmt.Errorf("nft list ruleset: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil

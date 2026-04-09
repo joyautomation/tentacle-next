@@ -55,17 +55,19 @@ type Scanner struct {
 	mibTree     *MibTree
 	enabled     atomic.Bool
 	mu          sync.RWMutex
+	log         *slog.Logger
 
 	subs []bus.Subscription
 }
 
 // NewScanner creates a new SNMP scanner.
-func NewScanner(b bus.Bus, moduleID string, mibTree *MibTree) *Scanner {
+func NewScanner(b bus.Bus, moduleID string, mibTree *MibTree, log *slog.Logger) *Scanner {
 	s := &Scanner{
 		b:           b,
 		moduleID:    moduleID,
 		connections: make(map[string]*DeviceConnection),
 		mibTree:     mibTree,
+		log:         log,
 	}
 	s.enabled.Store(true) // enabled by default
 	return s
@@ -82,9 +84,9 @@ func (s *Scanner) SetEnabled(enabled bool) {
 	was := s.enabled.Swap(enabled)
 	if was != enabled {
 		if enabled {
-			slog.Info("snmp: scanner ENABLED — resuming polling")
+			s.log.Info("snmp: scanner ENABLED — resuming polling")
 		} else {
-			slog.Info("snmp: scanner DISABLED — pausing polling (connections preserved)")
+			s.log.Info("snmp: scanner DISABLED — pausing polling (connections preserved)")
 		}
 	}
 }
@@ -94,7 +96,7 @@ func (s *Scanner) Start() {
 	subscribe := func(subject string, handler bus.MessageHandler) {
 		sub, err := s.b.Subscribe(subject, handler)
 		if err != nil {
-			slog.Error("snmp: failed to subscribe", "subject", subject, "error", err)
+			s.log.Error("snmp: failed to subscribe", "subject", subject, "error", err)
 			return
 		}
 		s.subs = append(s.subs, sub)
@@ -106,7 +108,29 @@ func (s *Scanner) Start() {
 	subscribe(topics.ScannerVariables("snmp"), s.handleVariables)
 	subscribe(topics.SnmpSet, s.handleSet)
 
-	slog.Info("snmp: listening for browse/subscribe/unsubscribe/variables/set requests")
+	// Watch scanner config KV bucket for subscription configs.
+	bucket := topics.BucketScannerSNMP
+	if err := s.b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
+		s.log.Warn("snmp: failed to create scanner config bucket", "error", err)
+	}
+	kvSub, err := s.b.KVWatchAll(bucket, func(key string, value []byte, op bus.KVOperation) {
+		if op == bus.KVOpPut {
+			s.handleSubscribe("", value, nil)
+		} else if op == bus.KVOpDelete {
+			parts := strings.SplitN(key, ".", 2)
+			if len(parts) == 2 {
+				unsubReq, _ := json.Marshal(UnsubscribeRequest{SubscriberID: parts[0], DeviceID: parts[1]})
+				s.handleUnsubscribe("", unsubReq, nil)
+			}
+		}
+	})
+	if err != nil {
+		s.log.Error("snmp: failed to watch scanner config bucket", "error", err)
+	} else {
+		s.subs = append(s.subs, kvSub)
+	}
+
+	s.log.Info("snmp: listening for browse/subscribe/unsubscribe/variables/set requests")
 }
 
 // ActiveDevices returns info about all currently connected devices.
@@ -145,7 +169,7 @@ func (s *Scanner) Stop() {
 		}
 	}
 	s.connections = make(map[string]*DeviceConnection)
-	slog.Info("snmp: all connections closed")
+	s.log.Info("snmp: all connections closed")
 }
 
 // =========================================================================
@@ -193,17 +217,27 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 		go func() {
 			result, err := s.browseDevice(client, req.DeviceID, req.RootOID, browseID, publishProgress)
 			if err != nil {
-				slog.Error("snmp: async browse failed", "device", req.DeviceID, "error", err)
+				s.log.Error("snmp: async browse failed", "device", req.DeviceID, "error", err)
 				publishProgress(types.BrowseProgressMessage{
 					BrowseID:  browseID,
 					ModuleID:  s.moduleID,
 					DeviceID:  req.DeviceID,
 					Phase:     "failed",
 					Message:   fmt.Sprintf("Browse failed: %v", err),
-					Timestamp: time.Now().UnixMilli(),
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
 				})
 			} else {
-				slog.Info("snmp: async browse complete", "device", req.DeviceID, "oids", len(result.OIDs))
+				s.log.Info("snmp: async browse complete", "device", req.DeviceID, "oids", len(result.OIDs))
+				resultSubject := fmt.Sprintf("snmp.browse.result.%s", browseID)
+				resultData, err := json.Marshal(result)
+				if err != nil {
+					s.log.Error("snmp: failed to marshal browse result", "error", err)
+				} else {
+					s.log.Info("snmp: publishing browse result", "subject", resultSubject, "bytes", len(resultData))
+					if err := s.b.Publish(resultSubject, resultData); err != nil {
+						s.log.Error("snmp: failed to publish browse result", "error", err)
+					}
+				}
 			}
 		}()
 		return
@@ -211,16 +245,22 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 
 	result, err := s.browseDevice(client, req.DeviceID, req.RootOID, browseID, publishProgress)
 	if err != nil {
-		slog.Error("snmp: browse failed", "device", req.DeviceID, "error", err)
+		s.log.Error("snmp: browse failed", "device", req.DeviceID, "error", err)
 		s.respondJSON(reply, BrowseResult{DeviceID: req.DeviceID, RootOID: req.RootOID, OIDs: []OidInfo{}})
 		return
 	}
 
-	slog.Info("snmp: browse complete", "device", req.DeviceID, "oids", len(result.OIDs))
+	s.log.Info("snmp: browse complete", "device", req.DeviceID, "oids", len(result.OIDs))
 	s.respondJSON(reply, result)
 }
 
 func (s *Scanner) browseDevice(client *gosnmp.GoSNMP, deviceID, rootOID, browseID string, publishProgress func(types.BrowseProgressMessage)) (*BrowseResult, error) {
+	// Disable OID increasing check — some devices (switches, etc.) return OIDs out of order.
+	if client.AppOpts == nil {
+		client.AppOpts = make(map[string]interface{})
+	}
+	client.AppOpts["c"] = true
+
 	if err := client.Connect(); err != nil {
 		return nil, fmt.Errorf("connect failed: %w", err)
 	}
@@ -232,7 +272,7 @@ func (s *Scanner) browseDevice(client *gosnmp.GoSNMP, deviceID, rootOID, browseI
 		DeviceID:  deviceID,
 		Phase:     "walking",
 		Message:   fmt.Sprintf("Walking from %s", rootOID),
-		Timestamp: time.Now().UnixMilli(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
 	var oids []OidInfo
@@ -260,10 +300,10 @@ func (s *Scanner) browseDevice(client *gosnmp.GoSNMP, deviceID, rootOID, browseI
 				ModuleID:      s.moduleID,
 				DeviceID:      deviceID,
 				Phase:         "walking",
-				TotalTags:     0,
-				CompletedTags: len(oids),
+				TotalCount:     0,
+				DiscoveredCount: len(oids),
 				Message:       fmt.Sprintf("Discovered %d OIDs so far", len(oids)),
-				Timestamp:     time.Now().UnixMilli(),
+				Timestamp:     time.Now().UTC().Format(time.RFC3339),
 			})
 		}
 		return nil
@@ -284,10 +324,10 @@ func (s *Scanner) browseDevice(client *gosnmp.GoSNMP, deviceID, rootOID, browseI
 		ModuleID:      s.moduleID,
 		DeviceID:      deviceID,
 		Phase:         "completed",
-		TotalTags:     len(oids),
-		CompletedTags: len(oids),
+		TotalCount:     len(oids),
+		DiscoveredCount: len(oids),
 		Message:       fmt.Sprintf("Walk complete: %d OIDs", len(oids)),
-		Timestamp:     time.Now().UnixMilli(),
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	})
 
 	// Detect table structures from walked OIDs using MIB table metadata
@@ -345,6 +385,8 @@ func (s *Scanner) detectTables(oids []OidInfo) (map[string]SnmpTableExport, map[
 			// Build instance key: tableName_instanceSuffix
 			instanceKey := SanitizeNameForKey(table.TableName + "." + instanceSuffix)
 			structTags[instanceKey] = table.TypeName
+			// Also map the raw OID so the frontend can filter it from atomic tags.
+			structTags[oid.OID] = table.TypeName
 
 			// Track seen columns
 			if _, ok := seenColumns[table.TypeName]; !ok {
@@ -428,7 +470,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		client := s.createClient(req.Host, req.Port, version, req.Community, req.V3Auth)
 		if err := client.Connect(); err != nil {
 			s.mu.Unlock()
-			slog.Error("snmp: failed to connect", "device", req.DeviceID, "host", req.Host, "port", req.Port, "error", err)
+			s.log.Error("snmp: failed to connect", "device", req.DeviceID, "host", req.Host, "port", req.Port, "error", err)
 			s.respondJSON(reply, map[string]interface{}{"success": false, "error": fmt.Sprintf("connect failed: %v", err)})
 			return
 		}
@@ -448,7 +490,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 			stopChan:    make(chan struct{}),
 		}
 		s.connections[req.DeviceID] = conn
-		slog.Info("snmp: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port, "version", req.Version)
+		s.log.Info("snmp: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port, "version", req.Version)
 	}
 	s.mu.Unlock()
 
@@ -472,7 +514,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		go s.pollDevice(conn)
 	}
 
-	slog.Info("snmp: subscriber added OIDs", "subscriber", req.SubscriberID, "count", len(req.OIDs), "device", req.DeviceID, "total", len(conn.Variables))
+	s.log.Info("snmp: subscriber added OIDs", "subscriber", req.SubscriberID, "count", len(req.OIDs), "device", req.DeviceID, "total", len(conn.Variables))
 
 	s.respondJSON(reply, map[string]interface{}{
 		"success": true,
@@ -521,7 +563,7 @@ func (s *Scanner) handleUnsubscribe(subject string, data []byte, reply bus.Reply
 		}
 		delete(s.connections, req.DeviceID)
 		s.mu.Unlock()
-		slog.Info("snmp: closed connection (no subscribers)", "device", req.DeviceID)
+		s.log.Info("snmp: closed connection (no subscribers)", "device", req.DeviceID)
 	}
 
 	s.respondJSON(reply, map[string]interface{}{
@@ -606,12 +648,12 @@ func (s *Scanner) handleSet(subject string, data []byte, reply bus.ReplyFunc) {
 
 	result, err := client.Set(pdus)
 	if err != nil {
-		slog.Error("snmp: SET failed", "device", req.DeviceID, "error", err)
+		s.log.Error("snmp: SET failed", "device", req.DeviceID, "error", err)
 		s.respondJSON(reply, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
 
-	slog.Info("snmp: SET success", "device", req.DeviceID, "count", len(pdus), "errorStatus", result.Error)
+	s.log.Info("snmp: SET success", "device", req.DeviceID, "count", len(pdus), "errorStatus", result.Error)
 	s.respondJSON(reply, map[string]interface{}{
 		"success":     result.Error == 0,
 		"errorStatus": result.Error,
@@ -624,7 +666,7 @@ func (s *Scanner) handleSet(subject string, data []byte, reply bus.ReplyFunc) {
 // =========================================================================
 
 func (s *Scanner) pollDevice(conn *DeviceConnection) {
-	slog.Info("snmp: starting poll loop", "device", conn.DeviceID, "scanRate", conn.ScanRate)
+	s.log.Info("snmp: starting poll loop", "device", conn.DeviceID, "scanRate", conn.ScanRate)
 
 	ticker := time.NewTicker(conn.ScanRate)
 	defer ticker.Stop()
@@ -632,7 +674,7 @@ func (s *Scanner) pollDevice(conn *DeviceConnection) {
 	for {
 		select {
 		case <-conn.stopChan:
-			slog.Info("snmp: poll loop stopped", "device", conn.DeviceID)
+			s.log.Info("snmp: poll loop stopped", "device", conn.DeviceID)
 			return
 		case <-ticker.C:
 			if !s.enabled.Load() {
@@ -675,10 +717,10 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 		}
 
 		if err != nil {
-			slog.Warn("snmp: poll failed", "device", conn.DeviceID, "error", err)
+			s.log.Warn("snmp: poll failed", "device", conn.DeviceID, "error", err)
 			// Try to reconnect
 			if reconnErr := s.reconnect(conn); reconnErr != nil {
-				slog.Warn("snmp: reconnect failed", "device", conn.DeviceID, "error", reconnErr)
+				s.log.Warn("snmp: reconnect failed", "device", conn.DeviceID, "error", reconnErr)
 			}
 			conn.mu.Lock()
 			for _, oid := range batch {
@@ -715,7 +757,7 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 			}
 
 			changed := v.Value != value
-			slog.Debug("snmp: poll result", "device", conn.DeviceID, "oid", pdu.Name, "value", value, "prev", v.Value, "type", snmpType, "changed", changed)
+			s.log.Debug("snmp: poll result", "device", conn.DeviceID, "oid", pdu.Name, "value", value, "prev", v.Value, "type", snmpType, "changed", changed)
 			v.Value = value
 			v.Datatype = datatype
 			v.SnmpType = snmpType
@@ -993,10 +1035,10 @@ func (s *Scanner) respondJSON(reply bus.ReplyFunc, v interface{}) {
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		slog.Error("snmp: failed to marshal response", "error", err)
+		s.log.Error("snmp: failed to marshal response", "error", err)
 		return
 	}
 	if err := reply(data); err != nil {
-		slog.Error("snmp: failed to respond", "error", err)
+		s.log.Error("snmp: failed to respond", "error", err)
 	}
 }

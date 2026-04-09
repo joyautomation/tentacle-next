@@ -14,6 +14,29 @@ type DeadBandConfig struct {
 	MaxTime int64   `json:"maxTime,omitempty"` // ms — force publish if exceeded, 0 = disabled
 }
 
+// DeadBandOverride stores sparse per-field overrides for instance-level deadband
+// configuration. Nil pointer means "inherit from template default."
+type DeadBandOverride struct {
+	Value   *float64 `json:"value,omitempty"`
+	MinTime *int64   `json:"minTime,omitempty"`
+	MaxTime *int64   `json:"maxTime,omitempty"`
+}
+
+// Merge applies non-nil override fields on top of a base DeadBandConfig.
+func (o DeadBandOverride) Merge(base DeadBandConfig) DeadBandConfig {
+	result := base
+	if o.Value != nil {
+		result.Value = *o.Value
+	}
+	if o.MinTime != nil {
+		result.MinTime = *o.MinTime
+	}
+	if o.MaxTime != nil {
+		result.MaxTime = *o.MaxTime
+	}
+	return result
+}
+
 // UdtMemberDefinition describes a single field in a UDT template.
 type UdtMemberDefinition struct {
 	Name        string `json:"name"`
@@ -60,15 +83,15 @@ type ServiceLogEntry struct {
 // BrowseProgressMessage is published during async browse operations
 // to {protocol}.browse.progress.{browseId}.
 type BrowseProgressMessage struct {
-	BrowseID      string `json:"browseId"`
-	ModuleID      string `json:"moduleId"`
-	DeviceID      string `json:"deviceId"`
-	Phase         string `json:"phase"` // "discovering", "expanding", "reading", "caching", "completed", "failed"
-	TotalTags     int    `json:"totalTags"`
-	CompletedTags int    `json:"completedTags"`
-	ErrorCount    int    `json:"errorCount"`
-	Message       string `json:"message,omitempty"`
-	Timestamp     int64  `json:"timestamp"`
+	BrowseID        string `json:"browseId"`
+	ModuleID        string `json:"moduleId"`
+	DeviceID        string `json:"deviceId"`
+	Phase           string `json:"phase"` // "discovering", "expanding", "reading", "caching", "completed", "failed"
+	TotalCount      int    `json:"totalCount"`
+	DiscoveredCount int    `json:"discoveredCount"`
+	ErrorCount      int    `json:"errorCount"`
+	Message         string `json:"message,omitempty"`
+	Timestamp       string `json:"timestamp"`
 }
 
 // HealthCheckMessage is published for service health monitoring.

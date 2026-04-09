@@ -30,6 +30,7 @@ type SparkplugNode struct {
 	mu sync.RWMutex
 
 	config itypes.MqttBridgeConfig
+	log    *slog.Logger
 	state  NodeState
 	client pahomqtt.Client
 
@@ -50,9 +51,10 @@ type SparkplugNode struct {
 }
 
 // NewSparkplugNode creates a new edge node but does not connect.
-func NewSparkplugNode(cfg itypes.MqttBridgeConfig) *SparkplugNode {
+func NewSparkplugNode(cfg itypes.MqttBridgeConfig, log *slog.Logger) *SparkplugNode {
 	return &SparkplugNode{
 		config:        cfg,
+		log:           log,
 		state:         StateDisconnected,
 		deviceMetrics: make(map[string][]sparkplug.Metric),
 	}
@@ -119,13 +121,13 @@ func (n *SparkplugNode) Connect() error {
 		SetWill(willTopic, string(willBytes), 0, false).
 		SetOnConnectHandler(n.onConnect).
 		SetConnectionLostHandler(func(c pahomqtt.Client, err error) {
-			slog.Warn("mqtt: connection lost", "error", err)
+			n.log.Warn("mqtt: connection lost", "error", err)
 			n.mu.Lock()
 			n.state = StateDisconnected
 			n.mu.Unlock()
 		}).
 		SetReconnectingHandler(func(c pahomqtt.Client, opts *pahomqtt.ClientOptions) {
-			slog.Info("mqtt: reconnecting...")
+			n.log.Info("mqtt: reconnecting...")
 		})
 
 	if n.config.Username != "" {
@@ -151,13 +153,13 @@ func (n *SparkplugNode) Connect() error {
 	n.client = client
 	n.state = StateDead
 
-	slog.Info("mqtt: connected to broker", "broker", n.config.BrokerURL)
+	n.log.Info("mqtt: connected to broker", "broker", n.config.BrokerURL)
 	return nil
 }
 
 // onConnect is called on initial connect and on reconnect.
 func (n *SparkplugNode) onConnect(c pahomqtt.Client) {
-	slog.Info("mqtt: (re)connected, subscribing to commands")
+	n.log.Info("mqtt: (re)connected, subscribing to commands")
 
 	// Subscribe to NCMD
 	ncmdTopic := n.topic("NCMD")
@@ -218,7 +220,7 @@ func (n *SparkplugNode) Birth() {
 
 	data, err := sparkplug.EncodePayload(payload)
 	if err != nil {
-		slog.Error("mqtt: failed to encode NBIRTH", "error", err)
+		n.log.Error("mqtt: failed to encode NBIRTH", "error", err)
 		return
 	}
 
@@ -226,12 +228,12 @@ func (n *SparkplugNode) Birth() {
 	token := n.client.Publish(topic, 0, false, data)
 	token.Wait()
 	if err := token.Error(); err != nil {
-		slog.Error("mqtt: failed to publish NBIRTH", "error", err)
+		n.log.Error("mqtt: failed to publish NBIRTH", "error", err)
 		return
 	}
 
 	n.state = StateBorn
-	slog.Info("mqtt: NBIRTH published", "metrics", len(metrics), "bdSeq", n.bdSeq)
+	n.log.Info("mqtt: NBIRTH published", "metrics", len(metrics), "bdSeq", n.bdSeq)
 
 	// Publish DBIRTH for each device
 	for deviceID, deviceMetrics := range n.deviceMetrics {
@@ -250,7 +252,7 @@ func (n *SparkplugNode) publishDeviceBirthLocked(deviceID string, metrics []spar
 
 	data, err := sparkplug.EncodePayload(payload)
 	if err != nil {
-		slog.Error("mqtt: failed to encode DBIRTH", "device", deviceID, "error", err)
+		n.log.Error("mqtt: failed to encode DBIRTH", "device", deviceID, "error", err)
 		return
 	}
 
@@ -258,11 +260,11 @@ func (n *SparkplugNode) publishDeviceBirthLocked(deviceID string, metrics []spar
 	token := n.client.Publish(topic, 0, false, data)
 	token.Wait()
 	if err := token.Error(); err != nil {
-		slog.Error("mqtt: failed to publish DBIRTH", "device", deviceID, "error", err)
+		n.log.Error("mqtt: failed to publish DBIRTH", "device", deviceID, "error", err)
 		return
 	}
 
-	slog.Info("mqtt: DBIRTH published", "device", deviceID, "metrics", len(metrics))
+	n.log.Info("mqtt: DBIRTH published", "device", deviceID, "metrics", len(metrics))
 }
 
 // PublishDeviceData publishes a DDATA message for a specific device.
@@ -383,7 +385,7 @@ func (n *SparkplugNode) Disconnect() {
 	n.client.Disconnect(250)
 	n.client = nil
 	n.state = StateDisconnected
-	slog.Info("mqtt: disconnected")
+	n.log.Info("mqtt: disconnected")
 }
 
 // Rebirth triggers a full rebirth sequence (NDEATH → NBIRTH + all DBIRTH).
@@ -417,7 +419,7 @@ func (n *SparkplugNode) deviceTopic(messageType, deviceID string) string {
 func (n *SparkplugNode) handleCommand(msg pahomqtt.Message, deviceID string) {
 	payload, err := sparkplug.DecodePayload(msg.Payload())
 	if err != nil {
-		slog.Warn("mqtt: failed to decode command", "topic", msg.Topic(), "error", err)
+		n.log.Warn("mqtt: failed to decode command", "topic", msg.Topic(), "error", err)
 		return
 	}
 
@@ -425,7 +427,7 @@ func (n *SparkplugNode) handleCommand(msg pahomqtt.Message, deviceID string) {
 	for _, m := range payload.Metrics {
 		if m.Name == "Node Control/Rebirth" {
 			if v, ok := m.Value.(bool); ok && v {
-				slog.Info("mqtt: rebirth requested via NCMD")
+				n.log.Info("mqtt: rebirth requested via NCMD")
 				go n.Rebirth()
 				return
 			}
@@ -552,9 +554,12 @@ func splitTopic(topic string) []string {
 
 // containsOnlineTrue is a simple check for {"online":true} in a JSON string.
 func containsOnlineTrue(s string) bool {
-	// Simple substring check; avoids pulling in encoding/json for a boolean
-	for i := 0; i < len(s)-12; i++ {
-		if s[i:i+13] == "\"online\":true" || s[i:i+14] == "\"online\": true" {
+	n := len(s)
+	for i := 0; i+13 <= n; i++ {
+		if s[i:i+13] == "\"online\":true" {
+			return true
+		}
+		if i+14 <= n && s[i:i+14] == "\"online\": true" {
 			return true
 		}
 	}

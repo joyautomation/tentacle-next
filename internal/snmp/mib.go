@@ -92,24 +92,30 @@ type rawDefinition struct {
 // Precompiled regexes for MIB parsing.
 var (
 	commentRe          = regexp.MustCompile(`--.*$`)
-	oidIdentRe         = regexp.MustCompile(`(\w+)\s+OBJECT\s+IDENTIFIER\s*::=\s*\{\s*(\w+)\s+(\d+)\s*\}`)
-	moduleIdentRe      = regexp.MustCompile(`(?s)(\w+)\s+MODULE-IDENTITY.*?::=\s*\{\s*(\w+)\s+(\d+)\s*\}`)
-	objectTypeRe       = regexp.MustCompile(`(?s)(\w+)\s+OBJECT-TYPE\s+(.*?)::=\s*\{\s*(\w+)\s+(\d+)\s*\}`)
-	objectIdentityRe   = regexp.MustCompile(`(?s)(\w+)\s+OBJECT-IDENTITY.*?::=\s*\{\s*(\w+)\s+(\d+)\s*\}`)
-	notificationTypeRe = regexp.MustCompile(`(?s)(\w+)\s+NOTIFICATION-TYPE.*?::=\s*\{\s*(\w+)\s+(\d+)\s*\}`)
+	oidIdentRe         = regexp.MustCompile(`([\w-]+)\s+OBJECT\s+IDENTIFIER\s*::=\s*\{\s*([\w-]+)\s+(\d+)\s*\}`)
+	moduleIdentRe      = regexp.MustCompile(`(?s)([\w-]+)\s+MODULE-IDENTITY.*?::=\s*\{\s*([\w-]+)\s+(\d+)\s*\}`)
+	objectTypeRe       = regexp.MustCompile(`(?s)([\w-]+)\s+OBJECT-TYPE\s+(.*?)::=\s*\{\s*([\w-]+)\s+(\d+)\s*\}`)
+	objectIdentityRe   = regexp.MustCompile(`(?s)([\w-]+)\s+OBJECT-IDENTITY.*?::=\s*\{\s*([\w-]+)\s+(\d+)\s*\}`)
+	notificationTypeRe = regexp.MustCompile(`(?s)([\w-]+)\s+NOTIFICATION-TYPE.*?::=\s*\{\s*([\w-]+)\s+(\d+)\s*\}`)
 	syntaxRe           = regexp.MustCompile(`SYNTAX\s+([\w().\-\s]+?)(?:\s+(?:MAX-ACCESS|ACCESS|STATUS|DESCRIPTION|INDEX|DEFVAL|AUGMENTS|REFERENCE)\s)`)
 	accessRe           = regexp.MustCompile(`(?:MAX-ACCESS|ACCESS)\s+([\w-]+)`)
 	sequenceOfRe       = regexp.MustCompile(`SEQUENCE\s+OF\s+(\w+)`)
 	indexRe            = regexp.MustCompile(`INDEX\s*\{\s*([\w\s,]+)\}`)
 )
 
-// preprocess strips MIB comments.
+// importsBlockRe matches IMPORTS ... ; blocks that can confuse the object parsers.
+var importsBlockRe = regexp.MustCompile(`(?s)\bIMPORTS\b.*?;`)
+
+// preprocess strips MIB comments and IMPORTS blocks.
 func preprocess(text string) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		lines[i] = commentRe.ReplaceAllString(line, "")
 	}
-	return strings.Join(lines, "\n")
+	cleaned := strings.Join(lines, "\n")
+	// Remove IMPORTS blocks so keywords listed as imports don't get matched as definitions.
+	cleaned = importsBlockRe.ReplaceAllString(cleaned, "")
+	return cleaned
 }
 
 // parseMibText extracts OID definitions from a single MIB file.

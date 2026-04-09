@@ -14,6 +14,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/api"
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/ethernetip"
+	"github.com/joyautomation/tentacle/internal/logger"
 	"github.com/joyautomation/tentacle/internal/ethernetipserver"
 	"github.com/joyautomation/tentacle/internal/gateway"
 	"github.com/joyautomation/tentacle/internal/history"
@@ -48,10 +49,19 @@ func main() {
 // Optional modules are managed by the orchestrator as in-process goroutines,
 // started/stopped via the desired_services KV bucket.
 func runMonolith(ctx context.Context) {
-	slog.Info("starting tentacle monolith")
-
-	b := bus.NewChannelBus()
+	// Use TENTACLE_DATA_DIR or default to /var/lib/tentacle for KV persistence.
+	dataDir := os.Getenv("TENTACLE_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "/var/lib/tentacle"
+	}
+	b := bus.NewChannelBus(dataDir)
 	defer b.Close()
+
+	// Install global slog handler that publishes to bus.
+	// Modules create child loggers with serviceType/moduleID attrs for per-module routing.
+	logger.SetGlobal(b)
+
+	slog.Info("starting tentacle monolith")
 
 	// Create KV buckets.
 	for name, cfg := range topics.BucketConfigs() {

@@ -27,6 +27,7 @@ type Module struct {
 	stopHB   func()
 	subs     []bus.Subscription
 	b        bus.Bus
+	log      *slog.Logger
 }
 
 // New creates a new OPC UA module.
@@ -43,11 +44,12 @@ func (m *Module) ServiceType() string { return defaultServiceType }
 // Start initializes the scanner, heartbeat, and enabled state watcher.
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.b = b
+	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
 
 	// Ensure KV buckets exist
 	for _, bucket := range []string{topics.BucketHeartbeats, topics.BucketServiceEnabled} {
 		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
-			slog.Warn("opcua: failed to create bucket", "bucket", bucket, "error", err)
+			m.log.Warn("opcua: failed to create bucket", "bucket", bucket, "error", err)
 		}
 	}
 
@@ -60,13 +62,13 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 	certFile, keyFile, err := ensureCertificate(pkiDir)
 	if err != nil {
-		slog.Error("opcua: certificate setup failed", "error", err)
+		m.log.Error("opcua: certificate setup failed", "error", err)
 		return err
 	}
-	slog.Info("opcua: certificate loaded", "certFile", certFile, "keyFile", keyFile)
+	m.log.Info("opcua: certificate loaded", "certFile", certFile, "keyFile", keyFile)
 
 	// Create and start scanner
-	m.scanner = NewScanner(b, m.moduleID, certFile, keyFile, pkiDir, autoAcceptCerts)
+	m.scanner = NewScanner(b, m.moduleID, certFile, keyFile, pkiDir, autoAcceptCerts, m.log)
 	m.scanner.Start()
 
 	// Start heartbeat
@@ -81,7 +83,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		var state types.ServiceEnabledKV
 		if json.Unmarshal(data, &state) == nil {
 			m.scanner.SetEnabled(state.Enabled)
-			slog.Info("opcua: initial enabled state", "enabled", state.Enabled)
+			m.log.Info("opcua: initial enabled state", "enabled", state.Enabled)
 		}
 	}
 
@@ -96,20 +98,20 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 	})
 	if err != nil {
-		slog.Warn("opcua: failed to watch service_enabled KV", "error", err)
+		m.log.Warn("opcua: failed to watch service_enabled KV", "error", err)
 	} else {
 		m.subs = append(m.subs, enabledSub)
 	}
 
 	// Listen for shutdown via Bus
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		slog.Info("opcua: received shutdown command via Bus")
+		m.log.Info("opcua: received shutdown command via Bus")
 		_ = m.Stop()
 		os.Exit(0)
 	})
 	m.subs = append(m.subs, shutdownSub)
 
-	slog.Info("opcua: service running", "moduleId", m.moduleID)
+	m.log.Info("opcua: service running", "moduleId", m.moduleID)
 
 	// Block until context cancelled or signal
 	sigChan := make(chan os.Signal, 1)

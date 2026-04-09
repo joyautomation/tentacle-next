@@ -21,7 +21,7 @@ const (
 
 // readConfig reads all netplan YAML files in /etc/netplan and returns a
 // merged list of interface configurations.
-func readConfig() ([]itypes.NetworkInterfaceConfig, error) {
+func readConfig(log *slog.Logger) ([]itypes.NetworkInterfaceConfig, error) {
 	entries, err := os.ReadDir(netplanDir)
 	if err != nil {
 		return nil, fmt.Errorf("readdir %s: %w", netplanDir, err)
@@ -40,13 +40,13 @@ func readConfig() ([]itypes.NetworkInterfaceConfig, error) {
 
 		data, err := os.ReadFile(filepath.Join(netplanDir, name))
 		if err != nil {
-			slog.Warn("network: failed to read netplan file", "file", name, "error", err)
+			log.Warn("network: failed to read netplan file", "file", name, "error", err)
 			continue
 		}
 
 		var cfg netplanConfig
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			slog.Warn("network: failed to parse netplan file", "file", name, "error", err)
+			log.Warn("network: failed to parse netplan file", "file", name, "error", err)
 			continue
 		}
 
@@ -72,7 +72,7 @@ func readConfig() ([]itypes.NetworkInterfaceConfig, error) {
 
 // applyConfig writes the given interface configurations to the tentacle
 // netplan file and runs `netplan apply`.
-func applyConfig(interfaces []itypes.NetworkInterfaceConfig) error {
+func applyConfig(log *slog.Logger, interfaces []itypes.NetworkInterfaceConfig) error {
 	ethernets := make(map[string]netplanEthernet, len(interfaces))
 	for _, ic := range interfaces {
 		eth := netplanEthernet{
@@ -110,33 +110,33 @@ func applyConfig(interfaces []itypes.NetworkInterfaceConfig) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 
-	slog.Info("network: wrote netplan config", "path", path)
+	log.Info("network: wrote netplan config", "path", path)
 
 	out, err := exec.Command("netplan", "apply").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("netplan apply: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	slog.Info("network: netplan apply succeeded")
+	log.Info("network: netplan apply succeeded")
 	return nil
 }
 
 // addAddress adds an IP address alias to an interface using ip addr add.
-func addAddress(interfaceName, address string) error {
+func addAddress(log *slog.Logger, interfaceName, address string) error {
 	out, err := exec.Command("ip", "addr", "add", address, "dev", interfaceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ip addr add %s dev %s: %s: %w", address, interfaceName, strings.TrimSpace(string(out)), err)
 	}
-	slog.Info("network: added address", "interface", interfaceName, "address", address)
+	log.Info("network: added address", "interface", interfaceName, "address", address)
 	return nil
 }
 
 // removeAddress removes an IP address from an interface using ip addr del.
-func removeAddress(interfaceName, address string) error {
+func removeAddress(log *slog.Logger, interfaceName, address string) error {
 	out, err := exec.Command("ip", "addr", "del", address, "dev", interfaceName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ip addr del %s dev %s: %s: %w", address, interfaceName, strings.TrimSpace(string(out)), err)
 	}
-	slog.Info("network: removed address", "interface", interfaceName, "address", address)
+	log.Info("network: removed address", "interface", interfaceName, "address", address)
 	return nil
 }

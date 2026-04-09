@@ -80,7 +80,7 @@ type GatewayUdtVariableConfig struct {
 	TemplateName    string                            `json:"templateName"`
 	MemberTags      map[string]string                 `json:"memberTags"`
 	MemberCipTypes  map[string]string                 `json:"memberCipTypes,omitempty"`
-	MemberDeadbands map[string]ttypes.DeadBandConfig  `json:"memberDeadbands,omitempty"`
+	MemberDeadbands map[string]ttypes.DeadBandOverride `json:"memberDeadbands,omitempty"`
 	Deadband        *ttypes.DeadBandConfig            `json:"deadband,omitempty"`
 	DisableRBE      bool                              `json:"disableRBE,omitempty"`
 }

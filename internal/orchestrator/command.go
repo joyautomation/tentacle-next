@@ -5,7 +5,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"time"
 
 	"github.com/joyautomation/tentacle/internal/bus"
@@ -19,7 +18,7 @@ func startCommandListener(b bus.Bus, config *OrchestratorConfig, mod *Module) (b
 	sub, err := b.Subscribe(topics.OrchestratorCommand, func(subject string, data []byte, reply bus.ReplyFunc) {
 		var req otypes.OrchestratorCommandRequest
 		if err := json.Unmarshal(data, &req); err != nil {
-			slog.Warn("command: error parsing request", "error", err)
+			mod.log.Warn("command: error parsing request", "error", err)
 			respondError(reply, "unknown", err.Error())
 			return
 		}
@@ -45,22 +44,22 @@ func startCommandListener(b bus.Bus, config *OrchestratorConfig, mod *Module) (b
 
 		respData, err := json.Marshal(resp)
 		if err != nil {
-			slog.Warn("command: failed to marshal response", "error", err)
+			mod.log.Warn("command: failed to marshal response", "error", err)
 			return
 		}
 		if reply != nil {
 			if err := reply(respData); err != nil {
-				slog.Warn("command: failed to reply", "error", err)
+				mod.log.Warn("command: failed to reply", "error", err)
 			}
 		}
 	})
 
 	if err != nil {
-		slog.Warn("command: failed to subscribe", "subject", topics.OrchestratorCommand, "error", err)
+		mod.log.Warn("command: failed to subscribe", "subject", topics.OrchestratorCommand, "error", err)
 		return nil, err
 	}
 
-	slog.Info("command: listening", "subject", topics.OrchestratorCommand)
+	mod.log.Info("command: listening", "subject", topics.OrchestratorCommand)
 	return sub, nil
 }
 
@@ -152,7 +151,7 @@ func handleRestartService(requestID, modID string, mod *Module) otypes.Orchestra
 		}
 
 		// Stop existing
-		slog.Info("command: restarting in-process module", "moduleId", modID)
+		mod.log.Info("command: restarting in-process module", "moduleId", modID)
 		rm.mod.Stop()
 		rm.cancel()
 
@@ -165,7 +164,7 @@ func handleRestartService(requestID, modID string, mod *Module) otypes.Orchestra
 
 		go func() {
 			if err := newMod.Start(ctx, mod.b); err != nil {
-				slog.Error("command: restarted module failed", "moduleId", modID, "error", err)
+				mod.log.Error("command: restarted module failed", "moduleId", modID, "error", err)
 			}
 			mod.mu.Lock()
 			delete(mod.running, modID)
@@ -188,7 +187,7 @@ func handleRestartService(requestID, modID string, mod *Module) otypes.Orchestra
 			Timestamp: time.Now().UnixMilli(),
 		}
 	}
-	if ok := systemctlRestart(modID); !ok {
+	if ok := systemctlRestart(modID, mod.log); !ok {
 		return otypes.OrchestratorCommandResponse{
 			RequestID: requestID,
 			Success:   false,
@@ -239,7 +238,7 @@ func handleGetModuleVersions(requestID, modID string, config *OrchestratorConfig
 
 	installedVersions := listInstalledVersions(modID, config)
 	activeVersion := getActiveVersion(entry, config)
-	latestVersion := resolveLatestVersion(entry, config)
+	latestVersion := resolveLatestVersion(entry, config, mod.log)
 
 	versions := &otypes.ModuleVersionInfo{
 		ModuleID:          modID,

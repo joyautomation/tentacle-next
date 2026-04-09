@@ -11,20 +11,20 @@ import (
 // enableHypertable converts the history table to a TimescaleDB hypertable.
 // This is a no-op if TimescaleDB is not installed, returning false instead of
 // an error so callers can gracefully fall back.
-func enableHypertable(db *sql.DB) bool {
+func enableHypertable(db *sql.DB, log *slog.Logger) bool {
 	_, err := db.Exec(`SELECT create_hypertable('history', 'timestamp', if_not_exists => TRUE)`)
 	if err != nil {
-		slog.Warn("history: could not create hypertable (TimescaleDB may not be installed)", "error", err)
+		log.Warn("history: could not create hypertable (TimescaleDB may not be installed)", "error", err)
 		return false
 	}
-	slog.Info("history: hypertable enabled on history table")
+	log.Info("history: hypertable enabled on history table")
 	return true
 }
 
 // enableCompressionPolicy sets a compression policy on the hypertable.
 // Segments by (module_id, variable_id), orders by timestamp DESC, and
 // compresses chunks older than 1 hour.
-func enableCompressionPolicy(db *sql.DB) error {
+func enableCompressionPolicy(db *sql.DB, log *slog.Logger) error {
 	const alterCompression = `
 ALTER TABLE history SET (
     timescaledb.compress,
@@ -40,15 +40,15 @@ ALTER TABLE history SET (
 		return fmt.Errorf("history: add compression policy: %w", err)
 	}
 
-	slog.Info("history: compression policy enabled (compress chunks > 1 hour)")
+	log.Info("history: compression policy enabled (compress chunks > 1 hour)")
 	return nil
 }
 
 // enableRetentionPolicy creates a data retention policy that drops chunks
 // older than the configured number of days.
-func enableRetentionPolicy(db *sql.DB, retentionDays int) error {
+func enableRetentionPolicy(db *sql.DB, retentionDays int, log *slog.Logger) error {
 	if retentionDays <= 0 {
-		slog.Info("history: retention policy disabled (retentionDays <= 0)")
+		log.Info("history: retention policy disabled (retentionDays <= 0)")
 		return nil
 	}
 
@@ -59,13 +59,13 @@ func enableRetentionPolicy(db *sql.DB, retentionDays int) error {
 	if _, err := db.Exec(query); err != nil {
 		return fmt.Errorf("history: add retention policy: %w", err)
 	}
-	slog.Info("history: retention policy enabled", "days", retentionDays)
+	log.Info("history: retention policy enabled", "days", retentionDays)
 	return nil
 }
 
 // compressEligibleChunks manually triggers compression on any chunks that
 // are eligible. Intended to be called periodically (e.g., every hour).
-func compressEligibleChunks(db *sql.DB) error {
+func compressEligibleChunks(db *sql.DB, log *slog.Logger) error {
 	const query = `
 SELECT compress_chunk(c.chunk_name, if_not_compressed => TRUE)
 FROM timescaledb_information.chunks c
@@ -87,7 +87,7 @@ WHERE c.hypertable_name = 'history'
 		return fmt.Errorf("history: compressEligibleChunks iteration: %w", err)
 	}
 	if count > 0 {
-		slog.Info("history: compressed eligible chunks", "count", count)
+		log.Info("history: compressed eligible chunks", "count", count)
 	}
 	return nil
 }

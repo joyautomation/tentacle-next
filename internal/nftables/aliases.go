@@ -56,10 +56,10 @@ func saveManagedAliases(state *managedAliasesState) error {
 // syncAliases compares the required NAT aliases (derived from rule natAddr values)
 // against the currently managed aliases, adding/removing via the network module
 // as needed.
-func syncAliases(b bus.Bus, rules []itypes.NatRule) error {
+func syncAliases(log *slog.Logger, b bus.Bus, rules []itypes.NatRule) error {
 	current, err := loadManagedAliases()
 	if err != nil {
-		slog.Warn("nftables: failed to load managed aliases, starting fresh", "error", err)
+		log.Warn("nftables: failed to load managed aliases, starting fresh", "error", err)
 		current = &managedAliasesState{}
 	}
 
@@ -87,9 +87,9 @@ func syncAliases(b bus.Bus, rules []itypes.NatRule) error {
 		if desired[key] {
 			continue
 		}
-		slog.Info("nftables: removing alias", "interface", a.InterfaceName, "address", a.Address)
+		log.Info("nftables: removing alias", "interface", a.InterfaceName, "address", a.Address)
 		if err := requestNetworkCommand(b, "remove-address", a.InterfaceName, a.Address); err != nil {
-			slog.Error("nftables: failed to remove alias", "interface", a.InterfaceName, "address", a.Address, "error", err)
+			log.Error("nftables: failed to remove alias", "interface", a.InterfaceName, "address", a.Address, "error", err)
 		}
 	}
 
@@ -98,9 +98,9 @@ func syncAliases(b bus.Bus, rules []itypes.NatRule) error {
 		if currentSet[key] {
 			continue
 		}
-		slog.Info("nftables: adding alias", "interface", key.iface, "address", key.addr)
+		log.Info("nftables: adding alias", "interface", key.iface, "address", key.addr)
 		if err := requestNetworkCommand(b, "add-address", key.iface, key.addr); err != nil {
-			slog.Error("nftables: failed to add alias", "interface", key.iface, "address", key.addr, "error", err)
+			log.Error("nftables: failed to add alias", "interface", key.iface, "address", key.addr, "error", err)
 		}
 	}
 
@@ -113,7 +113,7 @@ func syncAliases(b bus.Bus, rules []itypes.NatRule) error {
 		})
 	}
 	if err := saveManagedAliases(newState); err != nil {
-		slog.Error("nftables: failed to save managed aliases", "error", err)
+		log.Error("nftables: failed to save managed aliases", "error", err)
 		return err
 	}
 

@@ -6,6 +6,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,12 +19,19 @@ import (
 
 // FieldDef describes a configuration field.
 type FieldDef struct {
-	EnvVar      string // Environment variable name
-	Default     string // Default value
-	Required    bool   // If true, Start fails without a value
-	Type        string // "string", "number", "boolean"
-	Description string
-	EnvOnly     bool // If true, never read from KV (e.g., NATS credentials)
+	EnvVar      string `json:"envVar"`                // Environment variable name
+	Default     string `json:"default,omitempty"`      // Default value
+	Required    bool   `json:"required,omitempty"`     // If true, Start fails without a value
+	Type        string `json:"type"`                   // "string", "number", "boolean", "password"
+	Description string `json:"description,omitempty"`
+	EnvOnly     bool   `json:"envOnly,omitempty"`      // If true, never read from KV (e.g., NATS credentials)
+	Label       string `json:"label"`                  // Display label for the UI
+	Group       string `json:"group"`                  // Group name for visual grouping
+	GroupOrder  int    `json:"groupOrder"`             // Sort order among groups
+	SortOrder   int    `json:"sortOrder"`              // Sort order within a group
+	Toggleable  bool   `json:"toggleable,omitempty"`   // If true, UI shows a switch; input only visible when on
+	ToggleLabel string `json:"toggleLabel,omitempty"`  // Label for the toggle (e.g. "Override Device ID")
+	DependsOn   string `json:"dependsOn,omitempty"`    // EnvVar of a boolean field; this field is hidden unless that field is "true"
 }
 
 // Manager reads configuration from KV with env var fallback.
@@ -179,4 +187,21 @@ func (m *Manager) Destroy() {
 	if m.watchSub != nil {
 		_ = m.watchSub.Unsubscribe()
 	}
+}
+
+// RegisterSchema subscribes to the "{serviceType}.config.schema" bus request topic
+// and responds with the given field definitions. Returns the subscription for cleanup.
+func RegisterSchema(b bus.Bus, serviceType string, fields []FieldDef) (bus.Subscription, error) {
+	subject := serviceType + ".config.schema"
+	return b.Subscribe(subject, func(_ string, _ []byte, reply bus.ReplyFunc) {
+		if reply == nil {
+			return
+		}
+		data, err := json.Marshal(fields)
+		if err != nil {
+			slog.Warn("config: failed to marshal schema", "error", err)
+			return
+		}
+		_ = reply(data)
+	})
 }

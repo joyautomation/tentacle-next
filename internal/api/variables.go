@@ -15,33 +15,43 @@ import (
 )
 
 // handleListVariables returns all PLC variables, optionally filtered by moduleId.
+// Queries running scanner modules via bus request for live variable data.
 // GET /api/v1/variables?moduleId=
 func (m *Module) handleListVariables(w http.ResponseWriter, r *http.Request) {
-	keys, err := m.bus.KVKeys(topics.BucketPlcVariables)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list variable keys: "+err.Error())
-		return
-	}
-
 	moduleID := r.URL.Query().Get("moduleId")
-	result := make([]ttypes.PlcVariableKV, 0, len(keys))
 
-	for _, key := range keys {
-		data, _, err := m.bus.KVGet(topics.BucketPlcVariables, key)
+	// Determine which module IDs to query.
+	var moduleIDs []string
+	if moduleID != "" {
+		moduleIDs = []string{moduleID}
+	} else {
+		// Discover running scanner modules from heartbeats bucket.
+		keys, err := m.bus.KVKeys(topics.BucketHeartbeats)
 		if err != nil {
-			continue
+			writeError(w, http.StatusInternalServerError, "failed to list heartbeats: "+err.Error())
+			return
 		}
-		var v ttypes.PlcVariableKV
-		if err := json.Unmarshal(data, &v); err != nil {
-			continue
-		}
-		if moduleID != "" && v.ModuleID != moduleID {
-			continue
-		}
-		result = append(result, v)
+		moduleIDs = keys
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	var allVars []json.RawMessage
+	for _, mid := range moduleIDs {
+		resp, err := m.bus.Request(topics.Variables(mid), nil, 3*time.Second)
+		if err != nil {
+			continue // Module doesn't respond to variables request
+		}
+		var vars []json.RawMessage
+		if err := json.Unmarshal(resp, &vars); err != nil {
+			continue
+		}
+		allVars = append(allVars, vars...)
+	}
+
+	if allVars == nil {
+		allVars = []json.RawMessage{}
+	}
+
+	writeJSON(w, http.StatusOK, allVars)
 }
 
 // handleGetVariable returns a single PLC variable by variableId.
@@ -170,7 +180,12 @@ func (m *Module) handleStreamVariableBatch(w http.ResponseWriter, r *http.Reques
 			batch = make(map[string]json.RawMessage)
 			mu.Unlock()
 
-			sse.WriteEvent("batch", snapshot)
+			// Send as array — frontend iterates with for...of.
+			vals := make([]json.RawMessage, 0, len(snapshot))
+			for _, v := range snapshot {
+				vals = append(vals, v)
+			}
+			sse.WriteEvent("batch", vals)
 		}
 	}
 }

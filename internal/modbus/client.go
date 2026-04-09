@@ -160,7 +160,7 @@ func writeMultipleRegisters(d *DeviceState, addr uint16, data []byte) error {
 
 // readBlock reads a single ReadBlock from the device and decodes all contained tags.
 // Returns a map of tagID -> decoded value.
-func readBlock(d *DeviceState, block ReadBlock) (map[string]interface{}, error) {
+func readBlock(d *DeviceState, block ReadBlock, log *slog.Logger) (map[string]interface{}, error) {
 	results := make(map[string]interface{})
 
 	if fcIsCoilOrDiscrete(block.FunctionCode) {
@@ -189,7 +189,7 @@ func readBlock(d *DeviceState, block ReadBlock) (map[string]interface{}, error) 
 			offsetBytes := t.Offset * 2
 			val, err := decodeRegisters(data[offsetBytes:], t.Tag.Datatype, byteOrder)
 			if err != nil {
-				slog.Warn("modbus: decode error", "tag", t.Tag.ID, "error", err)
+				log.Warn("modbus: decode error", "tag", t.Tag.ID, "error", err)
 				continue
 			}
 			results[t.Tag.ID] = val

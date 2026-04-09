@@ -89,14 +89,16 @@ type TentacleTagProvider struct {
 	db        *TagDatabase
 	udtDB     *UdtDatabase
 	writeback chan WritebackEvent
+	log       *slog.Logger
 }
 
 // NewTentacleTagProvider creates a tag provider backed by the given database.
-func NewTentacleTagProvider(db *TagDatabase, udtDB *UdtDatabase, writeback chan WritebackEvent) *TentacleTagProvider {
+func NewTentacleTagProvider(db *TagDatabase, udtDB *UdtDatabase, writeback chan WritebackEvent, log *slog.Logger) *TentacleTagProvider {
 	return &TentacleTagProvider{
 		db:        db,
 		udtDB:     udtDB,
 		writeback: writeback,
+		log:       log,
 	}
 }
 
@@ -157,7 +159,7 @@ func (p *TentacleTagProvider) TagWrite(tag string, value interface{}) error {
 		select {
 		case p.writeback <- WritebackEvent{TagName: tag, Value: value, CipType: entry.CipType}:
 		default:
-			slog.Warn("eipserver: writeback channel full, dropping write", "tag", tag)
+			p.log.Warn("eipserver: writeback channel full, dropping write", "tag", tag)
 		}
 		return nil
 	}
@@ -169,7 +171,7 @@ func (p *TentacleTagProvider) TagWrite(tag string, value interface{}) error {
 	select {
 	case p.writeback <- WritebackEvent{TagName: tag, Value: coerced, CipType: entry.CipType}:
 	default:
-		slog.Warn("eipserver: writeback channel full, dropping write", "tag", tag)
+		p.log.Warn("eipserver: writeback channel full, dropping write", "tag", tag)
 	}
 
 	return nil
@@ -192,13 +194,15 @@ type CIPServer struct {
 	port     int
 	running  bool
 	mu       sync.Mutex
+	log      *slog.Logger
 }
 
 // NewCIPServer creates a CIP server on the given port.
-func NewCIPServer(provider *TentacleTagProvider, port int) *CIPServer {
+func NewCIPServer(provider *TentacleTagProvider, port int, log *slog.Logger) *CIPServer {
 	return &CIPServer{
 		provider: provider,
 		port:     port,
+		log:      log,
 	}
 }
 
@@ -221,9 +225,9 @@ func (s *CIPServer) Start() error {
 	s.server = gologix.NewServer(router)
 
 	go func() {
-		slog.Info("eipserver: CIP server starting", "port", s.port)
+		s.log.Info("eipserver: CIP server starting", "port", s.port)
 		if err := s.server.Serve(); err != nil {
-			slog.Error("eipserver: CIP server error", "error", err)
+			s.log.Error("eipserver: CIP server error", "error", err)
 		}
 	}()
 
@@ -243,5 +247,5 @@ func (s *CIPServer) Stop() {
 	// gologix Server doesn't expose a Stop method, so we just mark as stopped.
 	// The goroutine will exit when the process ends.
 	s.running = false
-	slog.Info("eipserver: CIP server stopped")
+	s.log.Info("eipserver: CIP server stopped")
 }

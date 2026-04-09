@@ -25,6 +25,9 @@ func ServiceLogs(serviceType, moduleID string) string { return fmt.Sprintf("serv
 // Orchestrator.
 const OrchestratorCommand = "orchestrator.command"
 
+// Config schema (per-module settings definition).
+func ConfigSchema(serviceType string) string { return serviceType + ".config.schema" }
+
 // MQTT Bridge.
 const (
 	MqttMetrics      = "mqtt.metrics"

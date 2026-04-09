@@ -19,13 +19,13 @@ const sysClassNet = "/sys/class/net"
 
 // readInterfaces enumerates all network interfaces from sysfs and enriches
 // them with IP addresses from `ip -j addr show`.
-func readInterfaces() ([]itypes.NetworkInterface, error) {
+func readInterfaces(log *slog.Logger) ([]itypes.NetworkInterface, error) {
 	entries, err := os.ReadDir(sysClassNet)
 	if err != nil {
 		return nil, fmt.Errorf("readdir %s: %w", sysClassNet, err)
 	}
 
-	addrMap, flagsMap := ipAddrMap()
+	addrMap, flagsMap := ipAddrMap(log)
 
 	ifaces := make([]itypes.NetworkInterface, 0, len(entries))
 	for _, entry := range entries {
@@ -113,19 +113,19 @@ func readStats(iface string) itypes.NetworkInterfaceStats {
 
 // ipAddrMap runs `ip -j addr show` and returns maps from interface name to
 // addresses and flags.
-func ipAddrMap() (map[string][]itypes.NetworkAddress, map[string][]string) {
+func ipAddrMap(log *slog.Logger) (map[string][]itypes.NetworkAddress, map[string][]string) {
 	addrMap := make(map[string][]itypes.NetworkAddress)
 	flagsMap := make(map[string][]string)
 
 	out, err := exec.Command("ip", "-j", "addr", "show").Output()
 	if err != nil {
-		slog.Warn("network: ip addr show failed", "error", err)
+		log.Warn("network: ip addr show failed", "error", err)
 		return addrMap, flagsMap
 	}
 
 	var entries []ipAddrEntry
 	if err := json.Unmarshal(out, &entries); err != nil {
-		slog.Warn("network: failed to parse ip addr JSON", "error", err)
+		log.Warn("network: failed to parse ip addr JSON", "error", err)
 		return addrMap, flagsMap
 	}
 

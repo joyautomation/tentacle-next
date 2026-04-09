@@ -46,7 +46,7 @@ type VariableInfo struct {
 	Value       interface{} `json:"value"`
 	Datatype    string      `json:"datatype"`
 	CipType     string      `json:"cipType,omitempty"`
-	StructType  string      `json:"structType,omitempty"`
+	StructType  string      `json:"udtType,omitempty"`
 	Quality     string      `json:"quality"`
 	Origin      string      `json:"origin"`
 	LastUpdated int64       `json:"lastUpdated"`

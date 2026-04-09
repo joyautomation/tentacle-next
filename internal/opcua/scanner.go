@@ -19,6 +19,7 @@ import (
 	"github.com/gopcua/opcua/monitor"
 	"github.com/gopcua/opcua/ua"
 	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/topics"
 	"github.com/joyautomation/tentacle/types"
 )
 
@@ -50,8 +51,8 @@ type DeviceSubscription struct {
 type Scanner struct {
 	b               bus.Bus
 	moduleID        string
-	connections     map[string]*OpcUaConnection               // deviceID -> connection
-	subscribers     map[string]map[string]*DeviceSubscription  // deviceID -> subscriberID -> sub
+	connections     map[string]*OpcUaConnection              // deviceID -> connection
+	subscribers     map[string]map[string]*DeviceSubscription // deviceID -> subscriberID -> sub
 	certFile        string
 	keyFile         string
 	pkiDir          string
@@ -59,10 +60,11 @@ type Scanner struct {
 	enabled         atomic.Bool
 	mu              sync.RWMutex
 	subs            []bus.Subscription
+	log             *slog.Logger
 }
 
 // NewScanner creates a new scanner instance.
-func NewScanner(b bus.Bus, moduleID, certFile, keyFile, pkiDir string, autoAcceptCerts bool) *Scanner {
+func NewScanner(b bus.Bus, moduleID, certFile, keyFile, pkiDir string, autoAcceptCerts bool, log *slog.Logger) *Scanner {
 	s := &Scanner{
 		b:               b,
 		moduleID:        moduleID,
@@ -72,6 +74,7 @@ func NewScanner(b bus.Bus, moduleID, certFile, keyFile, pkiDir string, autoAccep
 		keyFile:         keyFile,
 		pkiDir:          pkiDir,
 		autoAcceptCerts: autoAcceptCerts,
+		log:             log,
 	}
 	s.enabled.Store(true)
 	return s
@@ -88,23 +91,23 @@ func (s *Scanner) SetEnabled(enabled bool) {
 	was := s.enabled.Swap(enabled)
 	if was != enabled {
 		if enabled {
-			slog.Info("opcua: scanner ENABLED — resuming publishing")
+			s.log.Info("opcua: scanner ENABLED — resuming publishing")
 		} else {
-			slog.Info("opcua: scanner DISABLED — pausing publishing (connections preserved)")
+			s.log.Info("opcua: scanner DISABLED — pausing publishing (connections preserved)")
 		}
 	}
 }
 
 // Start begins listening for bus requests.
 func (s *Scanner) Start() {
-	slog.Info("opcua: starting scanner (stateless, subscriber-driven)")
+	s.log.Info("opcua: starting scanner (stateless, subscriber-driven)")
 	s.startRequestHandlers()
-	slog.Info("opcua: scanner started, waiting for subscribe/browse requests")
+	s.log.Info("opcua: scanner started, waiting for subscribe/browse requests")
 }
 
 // Stop shuts down all connections and bus subscriptions.
 func (s *Scanner) Stop() {
-	slog.Info("opcua: stopping scanner")
+	s.log.Info("opcua: stopping scanner")
 
 	for _, sub := range s.subs {
 		_ = sub.Unsubscribe()
@@ -114,13 +117,13 @@ func (s *Scanner) Stop() {
 	s.mu.Lock()
 	for deviceID, conn := range s.connections {
 		s.disconnectDevice(conn)
-		slog.Info("opcua: disconnected device", "deviceId", deviceID)
+		s.log.Info("opcua: disconnected device", "deviceId", deviceID)
 	}
 	s.connections = make(map[string]*OpcUaConnection)
 	s.subscribers = make(map[string]map[string]*DeviceSubscription)
 	s.mu.Unlock()
 
-	slog.Info("opcua: scanner stopped")
+	s.log.Info("opcua: scanner stopped")
 }
 
 // connectDevice establishes or reuses a connection to an OPC UA server.
@@ -155,7 +158,7 @@ func (s *Scanner) connectDevice(
 	conn.LastConnectAttempt = time.Now()
 	s.mu.Unlock()
 
-	slog.Info("opcua: connecting to device", "deviceId", deviceID, "endpointUrl", endpointURL)
+	s.log.Info("opcua: connecting to device", "deviceId", deviceID, "endpointUrl", endpointURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -180,7 +183,7 @@ func (s *Scanner) connectDevice(
 		return nil, fmt.Errorf("no matching endpoint for policy=%s mode=%s", securityPolicy, securityMode)
 	}
 
-	slog.Info("opcua: selected endpoint",
+	s.log.Info("opcua: selected endpoint",
 		"deviceId", deviceID,
 		"securityPolicy", ep.SecurityPolicyURI,
 		"securityMode", securityModeStr(ep.SecurityMode),
@@ -227,7 +230,7 @@ func (s *Scanner) connectDevice(
 	// (server may advertise an internal hostname we can't reach)
 	connectURL := ep.EndpointURL
 	if ep.EndpointURL != endpointURL {
-		slog.Info("opcua: server advertised different URL, using original",
+		s.log.Info("opcua: server advertised different URL, using original",
 			"deviceId", deviceID, "advertised", ep.EndpointURL, "using", endpointURL)
 		connectURL = endpointURL
 	}
@@ -258,7 +261,7 @@ func (s *Scanner) connectDevice(
 	conn.ConsecutiveFailures = 0
 	s.mu.Unlock()
 
-	slog.Info("opcua: connected", "deviceId", deviceID)
+	s.log.Info("opcua: connected", "deviceId", deviceID)
 	return conn, nil
 }
 
@@ -273,7 +276,7 @@ func (s *Scanner) disconnectDevice(conn *OpcUaConnection) {
 	conn.NodeMonitor = nil
 	if conn.Client != nil {
 		if err := conn.Client.Close(context.Background()); err != nil {
-			slog.Debug("opcua: close error", "deviceId", conn.DeviceID, "error", err)
+			s.log.Debug("opcua: close error", "deviceId", conn.DeviceID, "error", err)
 		}
 		conn.Client = nil
 	}
@@ -290,7 +293,7 @@ func (s *Scanner) removeConnection(deviceID string) {
 	}
 	s.disconnectDevice(conn)
 	delete(s.connections, deviceID)
-	slog.Info("opcua: removed connection", "deviceId", deviceID)
+	s.log.Info("opcua: removed connection", "deviceId", deviceID)
 }
 
 func selectEndpoint(endpoints []*ua.EndpointDescription, policy, mode string) *ua.EndpointDescription {
@@ -409,7 +412,7 @@ func (s *Scanner) addSubscriber(deviceID, subscriberID string, nodeIDs []string,
 		}
 	}
 
-	slog.Info("opcua: subscribed nodeIds",
+	s.log.Info("opcua: subscribed nodeIds",
 		"count", len(nodeIDs), "subscriber", subscriberID,
 		"device", deviceID, "totalSubscribers", len(subs))
 }
@@ -475,7 +478,7 @@ func (s *Scanner) publishValue(conn *OpcUaConnection, nodeID string, value inter
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		slog.Error("opcua: failed to marshal data message", "error", err)
+		s.log.Error("opcua: failed to marshal data message", "error", err)
 		return
 	}
 
@@ -486,15 +489,15 @@ func (s *Scanner) publishValue(conn *OpcUaConnection, nodeID string, value inter
 
 func (s *Scanner) publishBrowseProgress(browseID, deviceID, phase string, totalTags, completedTags, errorCount int, message string) {
 	msg := types.BrowseProgressMessage{
-		BrowseID:      browseID,
-		ModuleID:      s.moduleID,
-		DeviceID:      deviceID,
-		Phase:         phase,
-		TotalTags:     totalTags,
-		CompletedTags: completedTags,
-		ErrorCount:    errorCount,
-		Message:       message,
-		Timestamp:     time.Now().UnixMilli(),
+		BrowseID:        browseID,
+		ModuleID:        s.moduleID,
+		DeviceID:        deviceID,
+		Phase:           phase,
+		TotalCount:      totalTags,
+		DiscoveredCount: completedTags,
+		ErrorCount:      errorCount,
+		Message:         message,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339),
 	}
 
 	data, err := json.Marshal(msg)
@@ -530,7 +533,7 @@ func (s *Scanner) browseDevice(
 		var err error
 		conn, err = s.connectDevice(deviceID, endpointURL, auth, securityPolicy, securityMode)
 		if err != nil {
-			slog.Error("opcua: failed to connect for browse", "deviceId", deviceID, "error", err)
+			s.log.Error("opcua: failed to connect for browse", "deviceId", deviceID, "error", err)
 			if browseID != "" {
 				s.publishBrowseProgress(browseID, deviceID, "failed", 0, 0, 1,
 					fmt.Sprintf("Connection failed: %v", err))
@@ -545,7 +548,7 @@ func (s *Scanner) browseDevice(
 	}
 
 	if conn == nil || conn.Client == nil {
-		slog.Error("opcua: no client for device", "deviceId", deviceID)
+		s.log.Error("opcua: no client for device", "deviceId", deviceID)
 		return nil
 	}
 
@@ -568,9 +571,9 @@ func (s *Scanner) browseDevice(
 	}
 
 	ctx := context.Background()
-	browseResults, err := browseAddressSpace(ctx, conn.Client, startNodeID, maxDepth, progressFn)
+	browseResults, err := browseAddressSpace(ctx, conn.Client, startNodeID, maxDepth, progressFn, s.log)
 	if err != nil {
-		slog.Error("opcua: browse failed", "deviceId", deviceID, "error", err)
+		s.log.Error("opcua: browse failed", "deviceId", deviceID, "error", err)
 		if browseID != "" {
 			s.publishBrowseProgress(browseID, deviceID, "failed", 0, 0, 1,
 				fmt.Sprintf("Browse failed: %v", err))
@@ -644,11 +647,11 @@ func (s *Scanner) startRequestHandlers() {
 	subscribe := func(subject string, handler bus.MessageHandler) {
 		sub, err := s.b.Subscribe(subject, handler)
 		if err != nil {
-			slog.Error("opcua: failed to subscribe", "subject", subject, "error", err)
+			s.log.Error("opcua: failed to subscribe", "subject", subject, "error", err)
 			return
 		}
 		s.subs = append(s.subs, sub)
-		slog.Info("opcua: listening", "subject", subject)
+		s.log.Info("opcua: listening", "subject", subject)
 	}
 
 	subscribe(s.moduleID+".variables", s.handleVariables)
@@ -656,6 +659,28 @@ func (s *Scanner) startRequestHandlers() {
 	subscribe(s.moduleID+".subscribe", s.handleSubscribe)
 	subscribe(s.moduleID+".unsubscribe", s.handleUnsubscribe)
 	subscribe(s.moduleID+".command.>", s.handleWriteCommand)
+
+	// Watch scanner config KV bucket for subscription configs.
+	bucket := topics.BucketScannerOpcUA
+	if err := s.b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
+		s.log.Warn("opcua: failed to create scanner config bucket", "error", err)
+	}
+	kvSub, err := s.b.KVWatchAll(bucket, func(key string, value []byte, op bus.KVOperation) {
+		if op == bus.KVOpPut {
+			s.handleSubscribe("", value, nil)
+		} else if op == bus.KVOpDelete {
+			parts := strings.SplitN(key, ".", 2)
+			if len(parts) == 2 {
+				unsubReq, _ := json.Marshal(UnsubscribeRequest{SubscriberID: parts[0], DeviceID: parts[1]})
+				s.handleUnsubscribe("", unsubReq, nil)
+			}
+		}
+	})
+	if err != nil {
+		s.log.Error("opcua: failed to watch scanner config bucket", "error", err)
+	} else {
+		s.subs = append(s.subs, kvSub)
+	}
 }
 
 func (s *Scanner) handleVariables(subject string, data []byte, reply bus.ReplyFunc) {
@@ -679,7 +704,7 @@ func (s *Scanner) handleVariables(subject string, data []byte, reply bus.ReplyFu
 	}
 	s.mu.RUnlock()
 
-	slog.Info("opcua: variables request", "count", len(allVars))
+	s.log.Info("opcua: variables request", "count", len(allVars))
 	s.respondJSON(reply, allVars)
 }
 
@@ -687,7 +712,7 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 	var req BrowseRequest
 	if len(data) > 0 {
 		if err := json.Unmarshal(data, &req); err != nil {
-			slog.Error("opcua: invalid browse request", "error", err)
+			s.log.Error("opcua: invalid browse request", "error", err)
 			s.respondJSON(reply, []VariableInfo{})
 			return
 		}
@@ -706,7 +731,7 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 	}
 
 	if req.Async && browseID != "" {
-		slog.Info("opcua: browse request (async)",
+		s.log.Info("opcua: browse request (async)",
 			"deviceId", req.DeviceID, "endpointUrl", req.EndpointURL, "browseId", browseID)
 
 		// Reply immediately with browseId
@@ -732,14 +757,14 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 		req.StartNodeID, browseID, req.MaxDepth,
 	)
 
-	slog.Info("opcua: browse request complete", "count", len(results))
+	s.log.Info("opcua: browse request complete", "count", len(results))
 	s.respondJSON(reply, results)
 }
 
 func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFunc) {
 	var req SubscribeRequest
 	if err := json.Unmarshal(data, &req); err != nil {
-		slog.Error("opcua: invalid subscribe request", "error", err)
+		s.log.Error("opcua: invalid subscribe request", "error", err)
 		s.respondJSON(reply, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
@@ -781,7 +806,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		nm, err := monitor.NewNodeMonitor(conn.Client)
 		if err != nil {
 			s.mu.Unlock()
-			slog.Error("opcua: failed to create node monitor", "error", err)
+			s.log.Error("opcua: failed to create node monitor", "error", err)
 			s.respondJSON(reply, map[string]interface{}{
 				"success": false,
 				"error":   fmt.Sprintf("Monitor creation failed: %v", err),
@@ -802,7 +827,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		)
 		if err != nil {
 			s.mu.Unlock()
-			slog.Error("opcua: failed to create subscription", "error", err)
+			s.log.Error("opcua: failed to create subscription", "error", err)
 			s.respondJSON(reply, map[string]interface{}{
 				"success": false,
 				"error":   fmt.Sprintf("Subscription failed: %v", err),
@@ -831,7 +856,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		go func() {
 			for dcm := range ch {
 				if dcm.Error != nil {
-					slog.Debug("opcua: data change error", "error", dcm.Error)
+					s.log.Debug("opcua: data change error", "error", dcm.Error)
 					continue
 				}
 
@@ -885,14 +910,14 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 		s.mu.Unlock()
 	}
 
-	slog.Info("opcua: subscribe complete", "nodeIds", len(req.NodeIDs), "device", req.DeviceID)
+	s.log.Info("opcua: subscribe complete", "nodeIds", len(req.NodeIDs), "device", req.DeviceID)
 	s.respondJSON(reply, map[string]interface{}{"success": true, "count": len(req.NodeIDs)})
 }
 
 func (s *Scanner) handleUnsubscribe(subject string, data []byte, reply bus.ReplyFunc) {
 	var req UnsubscribeRequest
 	if err := json.Unmarshal(data, &req); err != nil {
-		slog.Error("opcua: invalid unsubscribe request", "error", err)
+		s.log.Error("opcua: invalid unsubscribe request", "error", err)
 		s.respondJSON(reply, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
@@ -902,7 +927,7 @@ func (s *Scanner) handleUnsubscribe(subject string, data []byte, reply bus.Reply
 	s.mu.Unlock()
 
 	if zeroSubscribers {
-		slog.Info("opcua: no subscribers remaining, closing connection", "device", req.DeviceID)
+		s.log.Info("opcua: no subscribers remaining, closing connection", "device", req.DeviceID)
 		s.removeConnection(req.DeviceID)
 	}
 
@@ -917,12 +942,12 @@ func (s *Scanner) handleWriteCommand(subj string, data []byte, reply bus.ReplyFu
 
 	variableID := subj[len(commandPrefix):]
 	if variableID == "" {
-		slog.Warn("opcua: write command with empty variableId", "subject", subj)
+		s.log.Warn("opcua: write command with empty variableId", "subject", subj)
 		return
 	}
 
 	valueStr := string(data)
-	slog.Info("opcua: write command received", "variableId", variableID, "value", valueStr)
+	s.log.Info("opcua: write command received", "variableId", variableID, "value", valueStr)
 
 	// Find connection with this variable
 	s.mu.RLock()
@@ -936,12 +961,12 @@ func (s *Scanner) handleWriteCommand(subj string, data []byte, reply bus.ReplyFu
 	s.mu.RUnlock()
 
 	if conn == nil {
-		slog.Warn("opcua: write failed, variable not found", "variableId", variableID)
+		s.log.Warn("opcua: write failed, variable not found", "variableId", variableID)
 		return
 	}
 
 	if conn.Client == nil || conn.ConnectionState != "connected" {
-		slog.Warn("opcua: write failed, device not connected", "deviceId", conn.DeviceID)
+		s.log.Warn("opcua: write failed, device not connected", "deviceId", conn.DeviceID)
 		return
 	}
 
@@ -968,13 +993,13 @@ func (s *Scanner) handleWriteCommand(subj string, data []byte, reply bus.ReplyFu
 	// Write to OPC UA
 	parsedID, err := ua.ParseNodeID(variableID)
 	if err != nil {
-		slog.Error("opcua: invalid NodeID for write", "variableId", variableID, "error", err)
+		s.log.Error("opcua: invalid NodeID for write", "variableId", variableID, "error", err)
 		return
 	}
 
 	variant, err := ua.NewVariant(writeValue)
 	if err != nil {
-		slog.Error("opcua: failed to create variant for write", "error", err)
+		s.log.Error("opcua: failed to create variant for write", "error", err)
 		return
 	}
 
@@ -996,14 +1021,14 @@ func (s *Scanner) handleWriteCommand(subj string, data []byte, reply bus.ReplyFu
 
 	resp, err := conn.Client.Write(ctx, writeReq)
 	if err != nil {
-		slog.Error("opcua: write error", "variableId", variableID, "error", err)
+		s.log.Error("opcua: write error", "variableId", variableID, "error", err)
 		return
 	}
 
 	if len(resp.Results) > 0 && resp.Results[0] != ua.StatusOK {
-		slog.Error("opcua: write failed", "variableId", variableID, "status", resp.Results[0])
+		s.log.Error("opcua: write failed", "variableId", variableID, "status", resp.Results[0])
 	} else {
-		slog.Info("opcua: write successful", "variableId", variableID, "value", writeValue)
+		s.log.Info("opcua: write successful", "variableId", variableID, "value", writeValue)
 	}
 }
 
@@ -1014,10 +1039,10 @@ func (s *Scanner) respondJSON(reply bus.ReplyFunc, v interface{}) {
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		slog.Error("opcua: failed to marshal response", "error", err)
+		s.log.Error("opcua: failed to marshal response", "error", err)
 		return
 	}
 	if err := reply(data); err != nil {
-		slog.Error("opcua: failed to respond", "error", err)
+		s.log.Error("opcua: failed to respond", "error", err)
 	}
 }

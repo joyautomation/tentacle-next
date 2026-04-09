@@ -34,7 +34,7 @@ func openDB(cfg itypes.HistoryConfig) (*sql.DB, error) {
 
 // ensureSchema creates the history table, unique constraint, and index if
 // they do not already exist.
-func ensureSchema(db *sql.DB) error {
+func ensureSchema(db *sql.DB, log *slog.Logger) error {
 	const createTable = `
 CREATE TABLE IF NOT EXISTS history (
     module_id    TEXT            NOT NULL,
@@ -67,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_history_module_variable_ts
 			return fmt.Errorf("history: ensureSchema: %w", err)
 		}
 	}
-	slog.Info("history: schema ensured")
+	log.Info("history: schema ensured")
 	return nil
 }
 
