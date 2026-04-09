@@ -1,98 +1,88 @@
 <script lang="ts">
   import type { PageData } from './$types';
+  import type { FieldDef } from './+page';
   import { page } from '$app/stores';
   import { invalidateAll } from '$app/navigation';
-  import { state as saltState, forms } from '@joyautomation/salt';
-  import type { FormGroup } from '@joyautomation/salt/forms';
+  import { state as saltState } from '@joyautomation/salt';
   import { apiPut } from '$lib/api/client';
-  const { Form } = forms;
 
   let { data }: { data: PageData } = $props();
 
   const serviceType = $derived($page.params.serviceType ?? '');
 
-  type ConfigEntry = {
-    key: string;
-    envVar: string;
-    value: string;
-    moduleId: string;
-  };
+  type ConfigEntry = { moduleId: string; envVar: string; value: string };
 
+  const schema = $derived((data?.schema ?? []) as FieldDef[]);
   const configEntries = $derived((data?.config ?? []) as ConfigEntry[]);
 
-  // Field display config: grouped, ordered, with custom labels
-  type FieldDef = { envVar: string; label: string; type?: string };
-  type FieldGroup = { name: string; fields: FieldDef[] };
-
-  const fieldGroups: FieldGroup[] = [
-    {
-      name: 'Connection',
-      fields: [
-        { envVar: 'MQTT_BROKER_URL', label: 'Broker URL' },
-        { envVar: 'MQTT_CLIENT_ID', label: 'Client ID' },
-        { envVar: 'MQTT_GROUP_ID', label: 'Group ID' },
-        { envVar: 'MQTT_EDGE_NODE', label: 'Node ID' },
-        { envVar: 'MQTT_USERNAME', label: 'Username' },
-        { envVar: 'MQTT_PASSWORD', label: 'Password', type: 'password' },
-        { envVar: 'MQTT_KEEPALIVE', label: 'Keep Alive (seconds)' },
-      ],
-    },
-    {
-      name: 'Sparkplug B',
-      fields: [
-        { envVar: 'MQTT_USE_TEMPLATES', label: 'Use Templates', type: 'checkbox' },
-      ],
-    },
-    {
-      name: 'Store & Forward',
-      fields: [
-        { envVar: 'MQTT_PRIMARY_HOST_ID', label: 'Primary Host ID' },
-        { envVar: 'MQTT_SF_MAX_MB', label: 'Max Buffer (MB)' },
-        { envVar: 'MQTT_SF_MAX_RECORDS', label: 'Max Records' },
-        { envVar: 'MQTT_SF_DRAIN_RATE', label: 'Drain Rate (records/sec)' },
-      ],
-    },
-  ];
-
-  // Build a lookup from envVar → value
+  // Build lookup from envVar → current value
   const configByEnvVar = $derived(
     Object.fromEntries(configEntries.map(e => [e.envVar, e.value]))
   );
 
-  // Build salt FormGroups with headings
-  const formGroups: FormGroup[] = $derived(
-    fieldGroups
-      .map(group => ({
-        heading: group.name,
-        rows: group.fields
-          .map(f => [{
-            id: f.envVar,
-            name: f.envVar,
-            label: f.label,
-            type: f.type ?? 'text',
-            value: configByEnvVar[f.envVar] ?? '',
-            validations: [],
-          }]),
-      }))
-      .filter(g => g.rows.length > 0)
-  );
+  // Local form values (editable)
+  let formValues: Record<string, string> = $state({});
+
+  // Sync from server data on load
+  $effect(() => {
+    const vals: Record<string, string> = {};
+    for (const field of schema) {
+      vals[field.envVar] = configByEnvVar[field.envVar] ?? field.default ?? '';
+    }
+    formValues = vals;
+  });
+
+  // Group fields by schema group metadata
+  type FieldGroup = { name: string; groupOrder: number; fields: FieldDef[] };
+  const fieldGroups = $derived.by((): FieldGroup[] => {
+    const groupMap = new Map<string, FieldGroup>();
+    for (const field of schema) {
+      const key = field.group || 'General';
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { name: key, groupOrder: field.groupOrder, fields: [] });
+      }
+      groupMap.get(key)!.fields.push(field);
+    }
+    // Sort groups by groupOrder, fields by sortOrder
+    const groups = [...groupMap.values()].sort((a, b) => a.groupOrder - b.groupOrder);
+    for (const g of groups) {
+      g.fields.sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+    return groups;
+  });
+
+  // Determine if a field is visible
+  function isFieldVisible(field: FieldDef): boolean {
+    if (field.dependsOn) {
+      return formValues[field.dependsOn] === 'true';
+    }
+    return true;
+  }
+
+  // For toggleable fields, check if the toggle is "on" (has a non-empty value)
+  function isToggleOn(field: FieldDef): boolean {
+    return !!formValues[field.envVar];
+  }
+
+  function handleToggle(field: FieldDef, on: boolean) {
+    if (on) {
+      formValues[field.envVar] = field.default ?? '';
+    } else {
+      formValues[field.envVar] = '';
+    }
+  }
 
   let saving = $state(false);
 
-  async function handleSave(event: SubmitEvent) {
-    event.preventDefault();
+  async function handleSave() {
     saving = true;
-
-    const form = event.target as HTMLFormElement;
-    const formData = new FormData(form);
     const errors: string[] = [];
 
-    for (const [envVar, value] of formData.entries()) {
-      if (typeof value !== 'string') continue;
-
-      const result = await apiPut<ConfigEntry>(`/config/${serviceType}/${envVar}`, { value });
+    for (const field of schema) {
+      const value = formValues[field.envVar] ?? '';
+      const result = await apiPut(`/config/${serviceType}/${field.envVar}`, { value });
       if (result.error) {
-        errors.push(`${envVar}: ${result.error.error}`);
+        errors.push(`${field.label}: ${result.error.error}`);
       }
     }
 
@@ -114,14 +104,66 @@
     </div>
   {/if}
 
-  {#if configEntries.length > 0}
-    <Form
-      groups={formGroups}
-      onsubmit={handleSave}
-      buttonText={saving ? 'Saving...' : 'Save All'}
-      showReset={true}
-      resetButtonText="Reset"
-    />
+  {#if fieldGroups.length > 0}
+    <form onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
+      {#each fieldGroups as group}
+        <section class="form-group">
+          <h2>{group.name}</h2>
+          {#each group.fields as field}
+            {#if isFieldVisible(field)}
+              <div class="form-field">
+                {#if field.type === 'boolean'}
+                  <label class="toggle-row">
+                    <span class="field-label">{field.label}</span>
+                    <button
+                      type="button"
+                      class="toggle-switch"
+                      class:on={formValues[field.envVar] === 'true'}
+                      onclick={() => { formValues[field.envVar] = formValues[field.envVar] === 'true' ? 'false' : 'true'; }}
+                    >
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </label>
+                {:else if field.toggleable}
+                  <label class="toggle-row">
+                    <span class="field-label">{field.toggleLabel ?? field.label}</span>
+                    <button
+                      type="button"
+                      class="toggle-switch"
+                      class:on={isToggleOn(field)}
+                      onclick={() => handleToggle(field, !isToggleOn(field))}
+                    >
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </label>
+                  {#if isToggleOn(field)}
+                    <div class="toggle-body">
+                      <label class="field-label">{field.label}</label>
+                      <input
+                        type={field.type === 'password' ? 'password' : 'text'}
+                        value={formValues[field.envVar]}
+                        oninput={(e) => { formValues[field.envVar] = (e.target as HTMLInputElement).value; }}
+                      />
+                    </div>
+                  {/if}
+                {:else}
+                  <label class="field-label">{field.label}</label>
+                  <input
+                    type={field.type === 'password' ? 'password' : 'text'}
+                    value={formValues[field.envVar]}
+                    oninput={(e) => { formValues[field.envVar] = (e.target as HTMLInputElement).value; }}
+                  />
+                {/if}
+              </div>
+            {/if}
+          {/each}
+        </section>
+      {/each}
+
+      <button type="submit" class="save-btn" disabled={saving}>
+        {saving ? 'Saving...' : 'Save All'}
+      </button>
+    </form>
   {:else if !data.error}
     <div class="empty-state">
       <p>No configuration found. Start the service to populate config from environment variables.</p>
@@ -133,6 +175,117 @@
   .settings-page {
     padding: 1.5rem;
     max-width: 700px;
+  }
+
+  .form-group {
+    margin-bottom: 1.5rem;
+
+    h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--theme-text);
+      margin: 0 0 0.75rem;
+    }
+  }
+
+  .form-field {
+    margin-bottom: 0.75rem;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--theme-text-muted);
+    margin-bottom: 0.25rem;
+  }
+
+  input[type='text'],
+  input[type='password'] {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-family: 'IBM Plex Mono', monospace;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    color: var(--theme-text);
+    outline: none;
+    box-sizing: border-box;
+
+    &:focus {
+      border-color: var(--color-teal-400, #2dd4bf);
+    }
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    cursor: pointer;
+
+    .field-label {
+      margin-bottom: 0;
+    }
+  }
+
+  .toggle-switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: var(--theme-border);
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    flex-shrink: 0;
+    transition: background 0.2s;
+
+    &.on {
+      background: var(--color-teal-500, #14b8a6);
+    }
+
+    .toggle-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: white;
+      transition: transform 0.2s;
+    }
+
+    &.on .toggle-knob {
+      transform: translateX(18px);
+    }
+  }
+
+  .toggle-body {
+    margin-top: 0.5rem;
+    padding-left: 0.25rem;
+  }
+
+  .save-btn {
+    margin-top: 1rem;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: white;
+    background: var(--color-teal-600, #0d9488);
+    border: none;
+    border-radius: var(--rounded-md);
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: var(--color-teal-500, #14b8a6);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
   }
 
   .error-box {
