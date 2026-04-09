@@ -307,9 +307,9 @@
                                   title={formatAge(metric.lastUpdated)}
                                   style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
                                 ></span>
+                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
                                 <span class="leaf-name">{member.name}</span>
                                 <span class="leaf-value">{formatValue(member.value)}</span>
-                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
                                 <span class="leaf-type">{memberDef?.datatype ?? member.type}</span>
                               </div>
                             {/each}
@@ -322,9 +322,9 @@
                                   title={formatAge(metric.lastUpdated)}
                                   style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
                                 ></span>
+                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
                                 <span class="leaf-name">{key}</span>
                                 <span class="leaf-value">{formatValue(val)}</span>
-                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
                                 {#if memberDef}
                                   <span class="leaf-type">{memberDef.datatype}</span>
                                 {/if}
@@ -360,9 +360,9 @@
               title={formatAge(metric.lastUpdated)}
               style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
             ></span>
+            <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
             <span class="leaf-name">{metric.name}</span>
             <span class="leaf-value">{formatValue(metric.value)}</span>
-            <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
             <span class="leaf-type">{metric.sparkplugType}</span>
           </div>
         {/each}
@@ -596,8 +596,8 @@
     font-size: 0.6875rem;
     font-family: 'IBM Plex Mono', monospace;
     flex-shrink: 0;
-    min-width: 2rem;
-    text-align: right;
+    min-width: 1.5rem;
+    text-align: left;
     transition: color 1s ease;
   }
 
