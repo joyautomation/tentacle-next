@@ -234,6 +234,7 @@ func (m *Module) routes() http.Handler {
 
 		// MQTT
 		r.Get("/mqtt/metrics", m.handleGetMqttMetrics)
+		r.Get("/mqtt/metrics/stream", m.handleStreamMqttMetrics)
 		r.Get("/mqtt/store-forward", m.handleGetStoreForwardStatus)
 
 		// History

@@ -61,7 +61,7 @@
     const width = 928;
     const centerRadius = width * 0.12; // smaller center hole
     const maxRadius = width / 2 - 2;
-    const visibleLevels = 2; // arcVisible shows 2 depth rings
+    const visibleLevels = 3; // arcVisible shows 3 depth rings
     const ringWidth = (maxRadius - centerRadius) / visibleLevels;
 
     // Map partition y-coordinates to pixel radii
@@ -272,12 +272,12 @@
     }
 
     function arcVisible(d: any) {
-      return d.y1 <= 3 && d.y0 >= 1 && d.x1 > d.x0;
+      return d.y1 <= 1 + visibleLevels && d.y0 >= 1 && d.x1 > d.x0;
     }
 
     function labelVisible(d: any) {
       return (
-        d.y1 <= 3 &&
+        d.y1 <= 1 + visibleLevels &&
         d.y0 >= 1 &&
         (d.y1 - d.y0) * (d.x1 - d.x0) > 0.03
       );
@@ -296,8 +296,8 @@
 <style>
   .sunburst-container {
     width: 100%;
-    max-width: calc(100vh - 12rem);
-    max-height: calc(100vh - 12rem);
+    max-width: min(calc(100vh - 14rem), calc(100vw - 6rem));
+    max-height: calc(100vh - 14rem);
     aspect-ratio: 1;
     margin: 0 auto;
   }

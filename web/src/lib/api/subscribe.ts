@@ -28,7 +28,7 @@ export function subscribe<T = unknown>(
   eventSource.onmessage = handler;
 
   // Also listen for common named events used by the backend
-  for (const name of ['progress', 'variable', 'batch', 'log', 'network', 'nftables']) {
+  for (const name of ['progress', 'variable', 'batch', 'log', 'network', 'nftables', 'metrics']) {
     eventSource.addEventListener(name, handler as EventListener);
   }
 

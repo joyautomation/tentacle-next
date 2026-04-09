@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
-  import { invalidateAll } from '$app/navigation';
   import { onMount } from 'svelte';
+  import { subscribe } from '$lib/api/subscribe';
   import Sunburst from '$lib/components/Sunburst.svelte';
   import TidyTree from '$lib/components/TidyTree.svelte';
   import DiagramSelector from '$lib/components/DiagramSelector.svelte';
@@ -65,17 +65,26 @@
   onMount(() => {
     const tickInterval = setInterval(() => { now = Date.now(); }, 1000);
 
-    // Poll mqttMetrics every 2.5s via SvelteKit invalidation.
-    // MQTT metrics use Sparkplug naming (not variable IDs), so variable
-    // subscriptions don't match — invalidateAll re-runs the page load.
-    const pollInterval = setInterval(() => {
-      invalidateAll();
-    }, 2500);
+    // Stream MQTT metrics via SSE — replaces invalidateAll() polling.
+    // Backend only pushes when data actually changes.
+    const unsub = subscribe<{ metrics: MetricInfo[]; templates: TemplateInfo[]; deviceId: string }>(
+      '/mqtt/metrics/stream',
+      (msg) => {
+        if (msg.templates) templates = msg.templates;
+        if (msg.deviceId) deviceId = msg.deviceId;
+        if (msg.metrics) {
+          for (const metric of msg.metrics) {
+            metricMap.set(metric.name, metric);
+          }
+          scheduleFlush();
+        }
+      },
+    );
 
     return () => {
       clearInterval(tickInterval);
-      clearInterval(pollInterval);
       if (flushTimer) clearTimeout(flushTimer);
+      unsub();
     };
   });
 
@@ -88,7 +97,7 @@
   let vizMode: VizMode = $state('tree');
 
   // Organize metrics into: template instances (grouped by templateRef) and scalar metrics
-  const organized = $derived(() => {
+  const organized = $derived.by(() => {
     void updateVersion; // depend on debounced version
     const allMetrics = [...metricMap.values()];
     const templateInstances: Record<string, MetricInfo[]> = {};
@@ -110,8 +119,8 @@
 
   // Build D3 hierarchy for sunburst visualization
   type SunburstNode = { name: string; children?: SunburstNode[]; value?: number; displayValue?: string };
-  const sunburstData = $derived((): SunburstNode => {
-    const org = organized();
+  const sunburstData = $derived.by((): SunburstNode => {
+    const org = organized;
     const children: SunburstNode[] = [];
 
     const instEntries = Object.entries(org.templateInstances);
@@ -120,9 +129,15 @@
         name: templateName,
         children: instances.map(inst => {
           const members: SunburstNode[] = [];
-          if (typeof inst.value === 'object' && inst.value !== null && 'metrics' in (inst.value as Record<string, unknown>)) {
-            for (const m of (inst.value as { metrics: { name: string; value?: unknown }[] }).metrics) {
-              members.push({ name: m.name, value: 1, displayValue: formatValue(m.value) });
+          if (typeof inst.value === 'object' && inst.value !== null) {
+            if ('metrics' in (inst.value as Record<string, unknown>)) {
+              for (const m of (inst.value as { metrics: { name: string; value?: unknown }[] }).metrics) {
+                members.push({ name: m.name, value: 1, displayValue: formatValue(m.value) });
+              }
+            } else {
+              for (const [key, val] of Object.entries(inst.value as Record<string, unknown>)) {
+                members.push({ name: key, value: 1, displayValue: formatValue(val) });
+              }
             }
           }
           return members.length > 0
@@ -226,11 +241,11 @@
   {/if}
 
   <!-- Template Instances -->
-  {#if Object.keys(organized().templateInstances).length > 0}
+  {#if Object.keys(organized.templateInstances).length > 0}
     <section class="section">
       <h2>Template Instances</h2>
       <div class="tree">
-        {#each Object.entries(organized().templateInstances) as [templateName, instances]}
+        {#each Object.entries(organized.templateInstances) as [templateName, instances]}
           <div class="tree-node">
             <button class="tree-toggle" onclick={() => toggleTemplate('inst-' + templateName)}>
               <svg class="chevron" class:expanded={expandedTemplates['inst-' + templateName]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -307,11 +322,11 @@
   {/if}
 
   <!-- Scalar Metrics -->
-  {#if organized().scalars.length > 0}
+  {#if organized.scalars.length > 0}
     <section class="section">
       <h2>Atomic</h2>
       <div class="tree">
-        {#each organized().scalars as metric}
+        {#each organized.scalars as metric}
           <div class="tree-leaf">
             <span
               class="freshness-dot"
@@ -335,9 +350,9 @@
   {/if}
   </div>
   {:else if vizMode === 'sunburst'}
-    {#if sunburstData().children && sunburstData().children.length > 0}
+    {#if sunburstData.children && sunburstData.children.length > 0}
       <div class="diagram-content">
-        <Sunburst data={sunburstData()} />
+        <Sunburst data={sunburstData} />
       </div>
     {:else if !data.error}
       <div class="empty-state">
@@ -345,8 +360,8 @@
       </div>
     {/if}
   {:else if vizMode === 'tidy'}
-    {#if sunburstData().children && sunburstData().children.length > 0}
-      <TidyTree data={sunburstData()} />
+    {#if sunburstData.children && sunburstData.children.length > 0}
+      <TidyTree data={sunburstData} />
     {:else if !data.error}
       <div class="empty-state">
         <p>No metrics being published. Start a PLC project to see metrics here.</p>
