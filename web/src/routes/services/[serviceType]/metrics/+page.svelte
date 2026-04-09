@@ -142,7 +142,7 @@
 
     if (org.scalars.length > 0) {
       children.push({
-        name: 'Scalar Metrics',
+        name: 'Atomic',
         children: org.scalars.map(m => ({ name: m.name, value: 1, displayValue: formatValue(m.value) })),
       });
     }

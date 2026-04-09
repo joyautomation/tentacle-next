@@ -2,11 +2,12 @@
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import * as d3 from 'd3';
+  import { getServiceName } from '$lib/constants/services';
 
   interface Service {
     serviceType: string;
     moduleId: string;
-    uptime: number;
+    startedAt: number;
     version: string | null;
     metadata: Record<string, unknown> | null;
     enabled?: boolean;
@@ -15,11 +16,12 @@
   interface Props {
     services: Service[];
     apiConnected: boolean;
+    monolith?: boolean;
   }
 
-  let { services, apiConnected }: Props = $props();
+  let { services, apiConnected, monolith = false }: Props = $props();
 
-  type NodeType = 'nats' | 'graphql' | 'web' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device';
+  type NodeType = 'nats' | 'bus' | 'graphql' | 'web' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device';
 
   type NodeDatum = {
     id: string;
@@ -53,7 +55,8 @@
 
   function getNodeColor(type: NodeType): string {
     switch (type) {
-      case 'nats': return 'var(--color-purple-500, #a855f7)';
+      case 'nats':
+      case 'bus': return 'var(--color-purple-500, #a855f7)';
       case 'device': return 'var(--color-amber-500, #f59e0b)';
       default: return 'var(--color-teal-500, #14b8a6)';
     }
@@ -61,7 +64,8 @@
 
   function getNodeRadius(type: NodeType): number {
     switch (type) {
-      case 'nats': return 50;
+      case 'nats':
+      case 'bus': return 50;
       case 'graphql':
       case 'web': return 40;
       case 'ethernetip':
@@ -75,7 +79,9 @@
     }
   }
 
-  function formatUptime(seconds: number): string {
+  function formatUptime(startedAt: number): string {
+    const seconds = Math.floor((Date.now() - startedAt) / 1000);
+    if (seconds < 0 || !isFinite(seconds)) return '';
     if (seconds < 60) return `${seconds}s`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
@@ -86,11 +92,12 @@
     const nodes: NodeDatum[] = [];
     const links: LinkDatum[] = [];
 
-    // NATS — always present as central hub
+    // Central hub — "Bus" in monolith mode, "NATS" in distributed mode
+    const hubType: NodeType = monolith ? 'bus' : 'nats';
     nodes.push({
       id: 'nats',
-      name: 'NATS',
-      type: 'nats',
+      name: monolith ? 'Bus' : 'NATS',
+      type: hubType,
       subtitle: apiConnected ? 'Message Bus' : 'Disconnected',
       connected: apiConnected,
       enabled: true,
@@ -104,7 +111,7 @@
       name: 'GraphQL',
       type: 'graphql',
       subtitle: apiConnected
-        ? (gqlService ? `Up ${formatUptime(gqlService.uptime)}` : 'API')
+        ? (gqlService ? `Up ${formatUptime(gqlService.startedAt)}` : 'API')
         : 'Offline',
       connected: apiConnected,
       enabled: true,
@@ -133,23 +140,14 @@
         // Skip if we already have this node
         if (nodes.some(n => n.id === nodeId)) return;
 
-        let name: string;
-        switch (service.serviceType) {
-          case 'ethernetip': name = 'EtherNet/IP'; break;
-          case 'ethernetip-server': name = 'EIP Server'; break;
-          case 'gateway': name = service.moduleId; break;
-          case 'mqtt': name = 'MQTT'; break;
-          case 'plc': name = service.moduleId; break;
-          case 'snmp': name = 'SNMP'; break;
-          default: name = service.serviceType;
-        }
+        const name = getServiceName(service.serviceType);
 
         const serviceEnabled = service.enabled !== false;
         nodes.push({
           id: nodeId,
           name,
           type: service.serviceType as NodeType,
-          subtitle: !serviceEnabled ? 'Disabled' : `Up ${formatUptime(service.uptime)}`,
+          subtitle: !serviceEnabled ? 'Disabled' : `Up ${formatUptime(service.startedAt)}`,
           connected: true,
           enabled: serviceEnabled,
           depth: 1
@@ -502,6 +500,7 @@
       .text(d => {
         switch (d.type) {
           case 'nats': return 'NATS';
+          case 'bus': return 'BUS';
           case 'graphql': return 'GQL';
           case 'web': return 'WEB';
           case 'ethernetip': return 'EIP';

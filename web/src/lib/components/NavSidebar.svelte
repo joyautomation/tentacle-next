@@ -14,6 +14,7 @@
     Squares2x2,
     PlusCircle
   } from '@joyautomation/salt/icons';
+  import { getServiceName, getModuleName } from '$lib/constants/services';
 
   interface Service {
     serviceType: string;
@@ -46,6 +47,7 @@
 
   const uniqueServices = $derived(
     [...new Map(services.map((s) => [s.serviceType, s])).values()]
+      .sort((a, b) => getServiceName(a.serviceType).localeCompare(getServiceName(b.serviceType)))
   );
 
   // Modules that are in the registry but not currently running (no heartbeat)
@@ -60,6 +62,7 @@
   });
 
   const serviceIcons: Record<string, typeof Squares2x2> = {
+    api: ServerStack,
     plc: CpuChip,
     ethernetip: CpuChip,
     mqtt: Signal,
@@ -67,21 +70,9 @@
     gateway: ArrowsRightLeft,
     network: GlobeAlt,
     nftables: ShieldCheck,
+    orchestrator: ArrowsRightLeft,
     snmp: ComputerDesktop,
     opcua: CircleStack
-  };
-
-  /** Map moduleId to a display label */
-  const moduleLabels: Record<string, string> = {
-    'tentacle-ethernetip': 'EtherNet/IP',
-    'tentacle-opcua': 'OPC UA',
-    'tentacle-snmp': 'SNMP',
-    'tentacle-mqtt': 'MQTT',
-    'tentacle-history': 'History',
-    'tentacle-modbus': 'Modbus',
-    'tentacle-modbus-server': 'Modbus Server',
-    'tentacle-network': 'Network',
-    'tentacle-nftables': 'NFTables',
   };
 
   /** Map moduleId to an icon */
@@ -97,32 +88,12 @@
     'tentacle-nftables': ShieldCheck,
   };
 
-  const serviceLabels: Record<string, string> = {
-    plc: 'PLC',
-    ethernetip: 'EtherNet/IP',
-    mqtt: 'MQTT',
-    nats: 'NATS',
-    gateway: 'Gateway',
-    network: 'Network',
-    nftables: 'NFTables',
-    snmp: 'SNMP',
-    opcua: 'OPC-UA'
-  };
-
   function getIcon(serviceType: string) {
     return serviceIcons[serviceType.toLowerCase()] ?? Squares2x2;
   }
 
-  function getLabel(serviceType: string) {
-    return serviceLabels[serviceType.toLowerCase()] ?? serviceType;
-  }
-
   function getModuleIcon(moduleId: string) {
     return moduleIcons[moduleId] ?? Squares2x2;
-  }
-
-  function getModuleLabel(moduleId: string) {
-    return moduleLabels[moduleId] ?? moduleId.replace('tentacle-', '');
   }
 
   function close() {
@@ -166,7 +137,7 @@
             onclick={close}
           >
             <Icon size="1.25rem" />
-            <span>{getLabel(service.serviceType)}</span>
+            <span>{getServiceName(service.serviceType)}</span>
             {#if !service.enabled}
               <span class="disabled-badge">off</span>
             {/if}
@@ -175,7 +146,10 @@
       {/each}
     {/if}
 
-    {#if uninstalledModules().length > 0}
+  </ul>
+
+  {#if uninstalledModules().length > 0}
+    <ul class="sidebar-nav sidebar-modules">
       <li class="sidebar-section-label">Available Modules</li>
       {#each uninstalledModules() as mod}
         {@const Icon = getModuleIcon(mod.moduleId)}
@@ -187,15 +161,15 @@
             onclick={close}
           >
             <Icon size="1.25rem" />
-            <span>{getModuleLabel(mod.moduleId)}</span>
+            <span>{getModuleName(mod.moduleId)}</span>
             <span class="available-badge">
               <PlusCircle size="0.875rem" />
             </span>
           </a>
         </li>
       {/each}
-    {/if}
-  </ul>
+    </ul>
+  {/if}
 </nav>
 
 <style lang="scss">
@@ -278,6 +252,11 @@
     margin: 0;
     padding: 0.5rem 0;
     flex: 1;
+  }
+
+  .sidebar-modules {
+    flex: 0;
+    border-top: 1px solid var(--theme-border);
   }
 
   .sidebar-section-label {

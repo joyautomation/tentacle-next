@@ -87,12 +87,12 @@
       const input: Record<string, unknown> = {
         deviceId: device.deviceId,
         protocol: device.protocol,
-        ...(device.config.host ? { host: device.config.host } : {}),
-        ...(device.config.port ? { port: device.config.port } : {}),
-        ...(device.config.endpointUrl ? { endpointUrl: device.config.endpointUrl } : {}),
-        ...(device.config.version ? { version: device.config.version } : {}),
-        ...(device.config.community ? { community: device.config.community } : {}),
-        ...(device.config.unitId ? { unitId: device.config.unitId } : {}),
+        ...(device.host ? { host: device.host } : {}),
+        ...(device.port ? { port: device.port } : {}),
+        ...(device.endpointUrl ? { endpointUrl: device.endpointUrl } : {}),
+        ...(device.version ? { version: device.version } : {}),
+        ...(device.community ? { community: device.community } : {}),
+        ...(device.unitId ? { unitId: device.unitId } : {}),
       };
 
       if (editScanRate) input.scanRate = parseInt(editScanRate);
@@ -169,10 +169,10 @@
 
   function formatDeviceInfo(device: GatewayDevice): string {
     switch (device.protocol) {
-      case 'ethernetip': return `${device.config.host ?? ''}:${device.config.port ?? 44818}`;
-      case 'opcua': return String(device.config.endpointUrl ?? '');
-      case 'snmp': return `${device.config.host ?? ''}:${device.config.port ?? 161} (v${device.config.version ?? '2c'})`;
-      case 'modbus': return `${device.config.host ?? ''}:${device.config.port ?? 502} (unit ${device.config.unitId ?? 1})`;
+      case 'ethernetip': return `${device.host ?? ''}:${device.port ?? 44818}`;
+      case 'opcua': return String(device.endpointUrl ?? '');
+      case 'snmp': return `${device.host ?? ''}:${device.port ?? 161} (v${device.version ?? '2c'})`;
+      case 'modbus': return `${device.host ?? ''}:${device.port ?? 502} (unit ${device.unitId ?? 1})`;
       default: return '';
     }
   }
@@ -380,10 +380,10 @@
 
   .chevron { display: inline-flex; flex-shrink: 0; color: var(--theme-text-muted); transition: transform 0.15s ease; &.expanded { transform: rotate(90deg); } }
 
-  .leaf-name { font-family: 'IBM Plex Mono', monospace; color: var(--theme-text); font-weight: 500; }
+  .leaf-name { font-family: 'IBM Plex Mono', monospace; color: var(--theme-text); font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .device-host {
-    font-size: 0.6875rem; font-family: 'IBM Plex Mono', monospace; color: var(--badge-muted-text);
+    font-size: 0.75rem; font-family: 'IBM Plex Mono', monospace; color: var(--badge-muted-text);
     padding: 0.1rem 0.35rem; border-radius: var(--rounded-sm); background: var(--badge-muted-bg);
   }
 

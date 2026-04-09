@@ -1,26 +1,11 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { getServiceName } from '$lib/constants/services';
 
   let { children } = $props();
 
   const serviceType = $derived($page.params.serviceType ?? '');
-
-  const serviceNames: Record<string, string> = {
-    nats: 'NATS',
-    graphql: 'GraphQL',
-    web: 'Web UI',
-    ethernetip: 'EtherNet/IP',
-    'ethernetip-server': 'EtherNet/IP Server',
-    mqtt: 'MQTT',
-    plc: 'PLC',
-    gateway: 'Gateway',
-    network: 'Network',
-    nftables: 'NAT / Firewall',
-    opcua: 'OPC UA',
-    snmp: 'SNMP',
-  };
-
-  const serviceName = $derived(serviceNames[serviceType] ?? serviceType);
+  const serviceName = $derived(getServiceName(serviceType));
 
   const currentTab = $derived(() => {
     const path = $page.url?.pathname ?? '';

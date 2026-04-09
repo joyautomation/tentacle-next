@@ -6,7 +6,7 @@
   interface Service {
     serviceType: string;
     moduleId: string;
-    uptime: number;
+    startedAt: number;
     version: string | null;
     metadata: Record<string, unknown> | null;
     enabled: boolean;
@@ -15,6 +15,11 @@
   // Live-updating services list — starts empty, populated by polling
   let liveServices = $state<Service[]>([]);
   let apiConnected = $state(false);
+
+  // Derive monolith mode from the orchestrator service's metadata
+  const monolith = $derived(
+    liveServices.some(s => s.serviceType === 'orchestrator' && (s.metadata as any)?.mode === 'monolith')
+  );
 
   // Poll services every 5 seconds for real-time topology updates
   onMount(() => {
@@ -70,7 +75,7 @@
       </div>
     </div>
   {/if}
-  <SystemTopology services={liveServices} {apiConnected} />
+  <SystemTopology services={liveServices} {apiConnected} {monolith} />
 </div>
 
 <style lang="scss">
