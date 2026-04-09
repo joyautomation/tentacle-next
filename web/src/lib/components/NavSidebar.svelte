@@ -12,7 +12,8 @@
     ShieldCheck,
     CircleStack,
     Squares2x2,
-    PlusCircle
+    PlusCircle,
+    RocketLaunch
   } from '@joyautomation/salt/icons';
   import { getServiceName, getModuleName } from '$lib/constants/services';
 
@@ -122,6 +123,17 @@
       >
         <Home size="1.25rem" />
         <span>Topology</span>
+      </a>
+    </li>
+    <li>
+      <a
+        href="/setup"
+        class="sidebar-item"
+        class:active={$page.url.pathname === '/setup'}
+        onclick={close}
+      >
+        <RocketLaunch size="1.25rem" />
+        <span>Setup</span>
       </a>
     </li>
 

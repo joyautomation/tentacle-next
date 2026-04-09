@@ -9,7 +9,7 @@
   import ThemeSwitch from "$lib/components/ThemeSwitch.svelte";
   import NavSidebar from "$lib/components/NavSidebar.svelte";
   import { onMount } from "svelte";
-  import { onNavigate } from "$app/navigation";
+  import { goto, onNavigate } from "$app/navigation";
   import { themeState, type Theme } from "./theme.svelte";
   import { api } from "$lib/api/client";
 
@@ -82,6 +82,15 @@
           }
         } catch {
           // Orchestrator queries not available yet — graceful degradation
+        }
+
+        // First-boot redirect: if no services are configured,
+        // redirect to the setup wizard (once per session)
+        if (desiredServices.length === 0) {
+          const currentPath = window.location.pathname;
+          if (currentPath !== '/setup' && !sessionStorage.getItem('setup_dismissed')) {
+            goto('/setup');
+          }
         }
       }
     }
