@@ -113,7 +113,7 @@
             {#if isFieldVisible(field)}
               <div class="form-field">
                 {#if field.type === 'boolean'}
-                  <label class="toggle-row">
+                  <div class="toggle-row">
                     <span class="field-label">{field.label}</span>
                     <button
                       type="button"
@@ -123,9 +123,9 @@
                     >
                       <span class="toggle-knob"></span>
                     </button>
-                  </label>
+                  </div>
                 {:else if field.toggleable}
-                  <label class="toggle-row">
+                  <div class="toggle-row">
                     <span class="field-label">{field.toggleLabel ?? field.label}</span>
                     <button
                       type="button"
@@ -135,7 +135,7 @@
                     >
                       <span class="toggle-knob"></span>
                     </button>
-                  </label>
+                  </div>
                   {#if isToggleOn(field)}
                     <div class="toggle-body">
                       <label class="field-label">{field.label}</label>
