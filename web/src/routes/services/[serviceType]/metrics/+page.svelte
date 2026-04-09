@@ -109,18 +109,6 @@
     const org = organized();
     const children: SunburstNode[] = [];
 
-    if (templates.length > 0) {
-      const templateChildren = templates
-        .map(t => ({
-          name: t.name,
-          children: t.members.map((m: any) => ({ name: m.name, value: 1 })),
-        }))
-        .filter(t => t.children.length > 0);
-      if (templateChildren.length > 0) {
-        children.push({ name: 'Template Definitions', children: templateChildren });
-      }
-    }
-
     const instEntries = Object.entries(org.templateInstances);
     if (instEntries.length > 0) {
       const instanceChildren = instEntries.map(([templateName, instances]) => ({
