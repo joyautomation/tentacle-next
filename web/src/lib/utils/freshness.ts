@@ -68,12 +68,12 @@ export function formatAge(
   return `${ageDays}d ago`;
 }
 
-/** Short inline age label (e.g. "1s", "3m"). Empty string when no data. */
+/** Short inline age label (e.g. "1s", "3m"). Returns "—" when no data. */
 export function formatAgeShort(
   timestamp: number | null | undefined,
   now: number,
 ): string {
-  if (!timestamp) return '';
+  if (!timestamp) return '\u2014';
   const ageMs = Math.max(0, now - timestamp);
   const ageSeconds = Math.floor(ageMs / 1000);
   if (ageSeconds < 60) return `${ageSeconds}s`;

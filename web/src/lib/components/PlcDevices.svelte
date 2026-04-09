@@ -177,7 +177,7 @@
                   <div class="tree-node">
                     <button class="tree-toggle" onclick={() => toggleTag(device.deviceId + ':type:' + group.typeName)}>
                       <span class="chevron" class:expanded={expandedTags[device.deviceId + ':type:' + group.typeName]}><ChevronRight size="0.875rem" /></span>
-                      <span class="type-icon">T</span>
+                      <span class="template-icon">T</span>
                       <span class="tree-label">{group.typeName}</span>
                       <span class="member-count">{group.instances.length} instances</span>
                     </button>
@@ -187,7 +187,7 @@
                           <div class="tree-node">
                             <button class="tree-toggle" onclick={() => toggleTag(device.deviceId + '.' + tag.name)}>
                               <span class="chevron" class:expanded={expandedTags[device.deviceId + '.' + tag.name]}><ChevronRight size="0.875rem" /></span>
-                              <span class="struct-icon">S</span>
+                              <span class="instance-dot"></span>
                               <span class="tree-label">{tag.name}</span>
                               <span class="member-count">{tag.members.length} members</span>
                             </button>
@@ -286,16 +286,15 @@
     font-size: 0.75rem; font-weight: 700; flex-shrink: 0;
   }
 
-  .type-icon {
-    display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
-    border-radius: var(--rounded-sm); background: var(--badge-teal-bg); color: var(--badge-teal-text);
-    font-size: 0.6875rem; font-weight: 700; flex-shrink: 0;
-  }
-
-  .struct-icon {
+  .template-icon {
     display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
     border-radius: var(--rounded-sm); background: var(--badge-purple-bg); color: var(--badge-purple-text);
     font-size: 0.6875rem; font-weight: 700; flex-shrink: 0;
+  }
+
+  .instance-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: var(--color-purple-400, #c084fc);
   }
 
   .tree-label { font-family: 'IBM Plex Mono', monospace; font-weight: 500; }
