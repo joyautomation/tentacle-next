@@ -5,20 +5,14 @@
 
   type TimelinePoint = { timestamp: string; state: string };
   type SFStatus = {
+    state: string;
     primaryHostId: string | null;
     primaryHostOnline: boolean;
-    bufferedRecords: number;
-    bufferSizeBytes: number;
-    bufferCapacityRecords: number;
-    bufferCapacityBytes: number;
-    bufferUsedPercentRecords: number;
-    bufferUsedPercentBytes: number;
+    bufferedCount: number;
+    maxRecords: number;
+    usagePercent: number;
     draining: boolean;
-    drainProgress: number;
-    drainRecordsRemaining: number;
-    drainTotalRecords: number;
     drainEtaSeconds: number;
-    drainStartedAt: string | null;
     totalBuffered: number;
     totalDrained: number;
     totalEvicted: number;
@@ -35,7 +29,7 @@
 
   async function poll() {
     try {
-      const result = await api<SFStatus | null>('/store-forward/status');
+      const result = await api<SFStatus | null>('/mqtt/store-forward');
       if (result.data) {
         status = result.data;
         renderGauge();
@@ -64,7 +58,7 @@
 
   function getUsedPercent(): number {
     if (!status) return 0;
-    return Math.max(status.bufferUsedPercentRecords, status.bufferUsedPercentBytes);
+    return status.usagePercent;
   }
 
   function getGaugeColor(pct: number): string {
@@ -138,7 +132,7 @@
       .attr('font-size', '20px')
       .attr('font-weight', '600')
       .attr('font-family', "'IBM Plex Mono', monospace")
-      .text(status.bufferedRecords.toLocaleString());
+      .text(status.bufferedCount.toLocaleString());
 
     // Sub text — percentage
     g.append('text')
@@ -231,7 +225,7 @@
         <div class="sf-banner-text">
           {#if status.draining}
             <strong>Backfilling</strong>
-            <span>{status.drainRecordsRemaining.toLocaleString()} records remaining (~{formatEta(status.drainEtaSeconds)})</span>
+            <span>~{formatEta(status.drainEtaSeconds)} remaining</span>
           {:else if status.primaryHostOnline}
             <strong>Primary Host Online</strong>
             <span>Publishing live</span>
@@ -241,16 +235,6 @@
           {/if}
         </div>
       </div>
-
-      <!-- Drain Progress -->
-      {#if status.draining}
-        <div class="sf-drain">
-          <div class="sf-drain-bar">
-            <div class="sf-drain-fill" style="width: {status.drainProgress}%"></div>
-          </div>
-          <span class="sf-drain-label">{status.drainProgress.toFixed(0)}%</span>
-        </div>
-      {/if}
 
       <!-- Eviction warning -->
       {#if status.totalEvicted > evictionDismissedAt}
