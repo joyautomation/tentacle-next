@@ -751,7 +751,7 @@
     // Persist overrides to server immediately so they survive navigation
     for (const { deviceId } of deviceOriginalNames) {
       const overrides = overridesNext.get(deviceId) ?? {};
-      const result = await apiPut(`/gateways/gateway/devices/${deviceId}/template-overrides`, overrides);
+      const result = await apiPut(`/gateways/gateway/devices/${deviceId}/template-overrides`, { overrides });
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
         return;
@@ -1252,7 +1252,7 @@
         const currentOverrides = device.templateNameOverrides ?? {};
         // Only save if overrides changed
         if (JSON.stringify(overrides) !== JSON.stringify(currentOverrides)) {
-          const overrideResult = await apiPut(`/gateways/gateway/devices/${device.deviceId}/template-overrides`, overrides);
+          const overrideResult = await apiPut(`/gateways/gateway/devices/${device.deviceId}/template-overrides`, { overrides });
 
           if (overrideResult.error) {
             saltState.addNotification({ message: overrideResult.error.error, type: 'error' });
