@@ -22,7 +22,7 @@ interface MqttMetricInfo {
   moduleId: string;
   datatype: string;
   templateRef: string | null;
-  timestamp: number | null;
+  lastUpdated: number | null;
 }
 
 interface MqttMetricsResponse {

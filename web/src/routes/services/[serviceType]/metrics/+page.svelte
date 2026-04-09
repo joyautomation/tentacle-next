@@ -299,26 +299,35 @@
                         {#if typeof metric.value === 'object' && metric.value !== null}
                           {@const template = templates.find(t => t.name === templateName)}
                           {#if template && typeof metric.value === 'object' && 'metrics' in (metric.value as Record<string, unknown>)}
-                            {#each (metric.value as { metrics: Array<{ name: string; value: unknown; type: string; timestamp?: number | null }> }).metrics as member}
+                            {#each (metric.value as { metrics: Array<{ name: string; value: unknown; type: string }> }).metrics as member}
                               {@const memberDef = template.members.find(m => m.name === member.name)}
                               <div class="tree-leaf">
                                 <span
                                   class="freshness-dot"
-                                  title={formatAge(member.timestamp)}
-                                  style="--dot-color: {getFreshnessColor(member.timestamp)}; --dot-glow: {getGlowStyle(member.timestamp)};"
+                                  title={formatAge(metric.lastUpdated)}
+                                  style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
                                 ></span>
                                 <span class="leaf-name">{member.name}</span>
                                 <span class="leaf-value">{formatValue(member.value)}</span>
-                                <span class="staleness-label" style="color: {getFreshnessColor(member.timestamp)}">{formatAgeShort(member.timestamp)}</span>
+                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
                                 <span class="leaf-type">{memberDef?.datatype ?? member.type}</span>
                               </div>
                             {/each}
                           {:else}
                             {#each Object.entries(metric.value as Record<string, unknown>) as [key, val]}
+                              {@const memberDef = template?.members.find(m => m.name === key)}
                               <div class="tree-leaf">
-                                <span class="freshness-dot" style="--dot-color: rgb(156, 163, 175); --dot-glow: none;"></span>
+                                <span
+                                  class="freshness-dot"
+                                  title={formatAge(metric.lastUpdated)}
+                                  style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
+                                ></span>
                                 <span class="leaf-name">{key}</span>
                                 <span class="leaf-value">{formatValue(val)}</span>
+                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
+                                {#if memberDef}
+                                  <span class="leaf-type">{memberDef.datatype}</span>
+                                {/if}
                               </div>
                             {/each}
                           {/if}
@@ -348,12 +357,12 @@
           <div class="tree-leaf">
             <span
               class="freshness-dot"
-              title={formatAge(metric.timestamp)}
-              style="--dot-color: {getFreshnessColor(metric.timestamp)}; --dot-glow: {getGlowStyle(metric.timestamp)};"
+              title={formatAge(metric.lastUpdated)}
+              style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
             ></span>
             <span class="leaf-name">{metric.name}</span>
             <span class="leaf-value">{formatValue(metric.value)}</span>
-            <span class="staleness-label" style="color: {getFreshnessColor(metric.timestamp)}">{formatAgeShort(metric.timestamp)}</span>
+            <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
             <span class="leaf-type">{metric.sparkplugType}</span>
           </div>
         {/each}
