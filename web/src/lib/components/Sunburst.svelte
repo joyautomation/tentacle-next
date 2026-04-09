@@ -61,7 +61,7 @@
     const width = 928;
     const centerRadius = width * 0.12; // smaller center hole
     const maxRadius = width / 2 - 2;
-    const visibleLevels = 3; // arcVisible shows 3 depth rings
+    const visibleLevels = 2; // arcVisible shows 2 depth rings; click to drill deeper
     const ringWidth = (maxRadius - centerRadius) / visibleLevels;
 
     // Map partition y-coordinates to pixel radii
