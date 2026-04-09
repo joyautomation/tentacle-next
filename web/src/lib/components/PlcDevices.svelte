@@ -47,7 +47,7 @@
           for (const v of batch) {
             if (variableMap.has(v.variableId)) {
               const existing = variableMap.get(v.variableId)!;
-              variableMap.set(v.variableId, { ...existing, value: v.value, quality: v.quality, lastUpdated: v.lastUpdated });
+              variableMap.set(v.variableId, { ...existing, value: v.value, quality: v.quality ?? existing.quality, lastUpdated: v.timestamp ?? v.lastUpdated ?? existing.lastUpdated });
             }
           }
           scheduleFlush();

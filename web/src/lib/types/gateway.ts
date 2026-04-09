@@ -120,7 +120,8 @@ export interface Variable {
   quality: string;
   moduleId: string;
   deviceId: string | null;
-  lastUpdated: string;
+  lastUpdated: string | number;
+  timestamp?: number; // SSE streams use `timestamp` instead of `lastUpdated`
 }
 
 export interface ActiveDevice {

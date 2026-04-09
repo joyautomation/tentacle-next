@@ -16,7 +16,8 @@
     quality: string;
     moduleId: string;
     deviceId: string | null;
-    lastUpdated: string;
+    lastUpdated: string | number;
+    timestamp?: number;
     source: string | null;
   };
 
@@ -58,8 +59,8 @@
               variableMap.set(v.variableId, {
                 ...existing,
                 value: v.value,
-                quality: v.quality,
-                lastUpdated: v.lastUpdated,
+                quality: v.quality ?? existing.quality,
+                lastUpdated: v.timestamp ?? v.lastUpdated ?? existing.lastUpdated,
               });
             }
           }
