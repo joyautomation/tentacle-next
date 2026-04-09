@@ -214,7 +214,7 @@
     box-sizing: border-box;
 
     &:focus {
-      border-color: var(--color-teal-400, #2dd4bf);
+      border-color: var(--theme-primary);
     }
   }
 
@@ -243,7 +243,7 @@
     transition: background 0.2s;
 
     &.on {
-      background: var(--color-teal-500, #14b8a6);
+      background: var(--theme-primary);
     }
 
     .toggle-knob {
@@ -273,13 +273,13 @@
     font-size: 0.875rem;
     font-weight: 600;
     color: white;
-    background: var(--color-teal-600, #0d9488);
+    background: var(--theme-primary);
     border: none;
     border-radius: var(--rounded-md);
     cursor: pointer;
 
     &:hover:not(:disabled) {
-      background: var(--color-teal-500, #14b8a6);
+      background: var(--theme-primary-hover);
     }
 
     &:disabled {
