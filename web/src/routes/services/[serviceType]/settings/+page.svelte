@@ -59,15 +59,27 @@
     return true;
   }
 
-  // For toggleable fields, check if the toggle is "on" (has a non-empty value)
+  // Track toggleable field enabled state separately — value may be empty while toggle is on
+  let toggleStates: Record<string, boolean> = $state({});
+
+  // Initialize toggle states from existing config values
+  $effect(() => {
+    const states: Record<string, boolean> = {};
+    for (const field of schema) {
+      if (field.toggleable) {
+        states[field.envVar] = !!configByEnvVar[field.envVar];
+      }
+    }
+    toggleStates = states;
+  });
+
   function isToggleOn(field: FieldDef): boolean {
-    return !!formValues[field.envVar];
+    return toggleStates[field.envVar] ?? false;
   }
 
   function handleToggle(field: FieldDef, on: boolean) {
-    if (on) {
-      formValues[field.envVar] = field.default ?? '';
-    } else {
+    toggleStates[field.envVar] = on;
+    if (!on) {
       formValues[field.envVar] = '';
     }
   }
