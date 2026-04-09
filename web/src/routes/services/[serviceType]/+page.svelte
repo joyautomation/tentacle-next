@@ -29,7 +29,11 @@
     network: 'Network interface monitoring and configuration management',
   };
 
-  function formatUptime(seconds: number): string {
+  function formatUptime(startedAt: string | number): string {
+    const startMs = typeof startedAt === 'number' ? startedAt : Date.parse(startedAt);
+    if (!startMs || Number.isNaN(startMs)) return '—';
+    const seconds = Math.floor((Date.now() - startMs) / 1000);
+    if (seconds < 0) return '—';
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -124,7 +128,7 @@
       <div class="details" class:disabled={!instance.enabled}>
         <div class="detail-row">
           <span class="label">Uptime</span>
-          <span class="value">{formatUptime(instance.uptime)}</span>
+          <span class="value">{formatUptime(instance.startedAt)}</span>
         </div>
         <div class="detail-row">
           <span class="label">Started</span>

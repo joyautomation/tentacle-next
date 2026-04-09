@@ -4,10 +4,9 @@ import { api } from '$lib/api/client';
 interface Service {
   serviceType: string;
   moduleId: string;
-  uptime: number;
   version: string | null;
   metadata: Record<string, unknown> | null;
-  startedAt: string;
+  startedAt: string | number;
   enabled: boolean;
 }
 

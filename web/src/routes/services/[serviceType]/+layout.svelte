@@ -19,6 +19,7 @@
     if (path.endsWith('/metrics')) return 'metrics';
     if (path.endsWith('/devices')) return 'devices';
     if (path.endsWith('/oids')) return 'oids';
+    if (path.endsWith('/modules')) return 'modules';
     return 'default';
   });
 </script>
@@ -121,6 +122,16 @@
       </a>
       <a href="/services/{serviceType}/oids" class="tab" class:active={currentTab() === 'oids'}>
         OIDs
+      </a>
+      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+        Logs
+      </a>
+    {:else if serviceType === 'orchestrator'}
+      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+        Overview
+      </a>
+      <a href="/services/{serviceType}/modules" class="tab" class:active={currentTab() === 'modules'}>
+        Modules
       </a>
       <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
         Logs
