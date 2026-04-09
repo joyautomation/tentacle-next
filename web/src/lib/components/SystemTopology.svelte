@@ -21,7 +21,7 @@
 
   let { services, apiConnected, monolith = false }: Props = $props();
 
-  type NodeType = 'nats' | 'bus' | 'graphql' | 'web' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device';
+  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
 
   type NodeDatum = {
     id: string;
@@ -66,7 +66,7 @@
     switch (type) {
       case 'nats':
       case 'bus': return 50;
-      case 'graphql':
+      case 'api':
       case 'web': return 40;
       case 'ethernetip':
       case 'ethernetip-server':
@@ -104,22 +104,10 @@
       depth: 0
     });
 
-    // tentacle-graphql — always shown, dimmed when disconnected
-    const gqlService = services.find(s => s.serviceType === 'graphql');
-    nodes.push({
-      id: 'graphql',
-      name: 'GraphQL',
-      type: 'graphql',
-      subtitle: apiConnected
-        ? (gqlService ? `Up ${formatUptime(gqlService.startedAt)}` : 'API')
-        : 'Offline',
-      connected: apiConnected,
-      enabled: true,
-      depth: 1
-    });
-    links.push({ source: 'nats', target: 'graphql' });
-
-    // tentacle-web — always present (we're rendering it)
+    // Web UI — always present (we're rendering it)
+    // Links to the API service if present, otherwise directly to the hub
+    const apiService = services.find(s => s.serviceType === 'api');
+    const webParent = apiService ? `api-${apiService.moduleId}` : 'nats';
     nodes.push({
       id: 'web',
       name: 'Web UI',
@@ -127,12 +115,11 @@
       subtitle: 'This App',
       connected: true,
       enabled: true,
-      depth: 2
+      depth: apiService ? 2 : 1
     });
-    links.push({ source: 'graphql', target: 'web' });
 
     // Additional discovered services from heartbeats
-    const knownStaticTypes = new Set(['graphql']);
+    const knownStaticTypes = new Set<string>();
     services
       .filter(s => !knownStaticTypes.has(s.serviceType))
       .forEach(service => {
@@ -202,6 +189,9 @@
           } catch { /* ignore malformed devices metadata */ }
         }
       });
+
+    // Link Web UI to API (or hub if no API service found)
+    links.push({ source: webParent, target: 'web' });
 
     // Mark data-flow links as active and set flow direction
     // EtherNet/IP: data flows from device → EIP → NATS (inbound to NATS)
@@ -501,7 +491,7 @@
         switch (d.type) {
           case 'nats': return 'NATS';
           case 'bus': return 'BUS';
-          case 'graphql': return 'GQL';
+          case 'api': return 'API';
           case 'web': return 'WEB';
           case 'ethernetip': return 'EIP';
           case 'ethernetip-server': return 'EIPS';
@@ -553,8 +543,9 @@
         if (!event.active) simulation?.alphaTarget(0);
         d.fx = null;
         d.fy = null;
-        // Navigate on click (not drag) — skip device and web nodes (no detail page)
-        if (!dragMoved && d.type !== 'device' && d.type !== 'web') {
+        // Navigate on click (not drag) — skip non-navigable nodes
+        const skipTypes = new Set(['device', 'web', 'nats', 'bus']);
+        if (!dragMoved && !skipTypes.has(d.type)) {
           goto(`/services/${d.type}`);
         }
       });
