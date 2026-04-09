@@ -5,6 +5,7 @@
   import { invalidateAll } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { apiPut } from '$lib/api/client';
+  import { slide } from 'svelte/transition';
 
   let { data }: { data: PageData } = $props();
 
@@ -123,7 +124,7 @@
           <h2>{group.name}</h2>
           {#each group.fields as field}
             {#if isFieldVisible(field)}
-              <div class="form-field">
+              <div class="form-field" transition:slide={{ duration: 200 }}>
                 {#if field.type === 'boolean'}
                   <div class="toggle-row">
                     <span class="field-label">{field.label}</span>
@@ -149,7 +150,7 @@
                     </button>
                   </div>
                   {#if isToggleOn(field)}
-                    <div class="toggle-body">
+                    <div class="toggle-body" transition:slide={{ duration: 200 }}>
                       <label class="field-label">{field.label}</label>
                       <input
                         type={field.type === 'password' ? 'password' : 'text'}
