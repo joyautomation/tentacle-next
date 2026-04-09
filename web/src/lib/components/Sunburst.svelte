@@ -296,6 +296,7 @@
 <style>
   .sunburst-container {
     width: 100%;
+    max-width: calc(100vh - 12rem);
     max-height: calc(100vh - 12rem);
     aspect-ratio: 1;
     margin: 0 auto;
