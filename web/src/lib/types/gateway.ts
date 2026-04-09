@@ -8,7 +8,13 @@ export interface DeadBandConfig {
 export interface GatewayDevice {
   deviceId: string;
   protocol: string;
-  config: Record<string, unknown>;
+  host?: string;
+  port?: number | null;
+  endpointUrl?: string;
+  version?: string;
+  community?: string;
+  v3Auth?: Record<string, unknown> | null;
+  unitId?: number | null;
   scanRate?: number | null;
   deadband?: DeadBandConfig | null;
   disableRBE?: boolean | null;

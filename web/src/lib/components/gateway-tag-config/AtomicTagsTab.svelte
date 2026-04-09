@@ -53,7 +53,7 @@
 	// Local filter/sort state
 	let filter = $state('');
 
-	type SortCol = 'tag' | 'type' | 'mqtt' | 'rbe' | 'deadband' | 'minTime' | 'maxTime' | 'status';
+	type SortCol = 'tag' | 'value' | 'type' | 'mqtt' | 'rbe' | 'deadband' | 'minTime' | 'maxTime' | 'status';
 	let sortCol: SortCol = $state('tag');
 	let sortAsc = $state(true);
 
@@ -63,14 +63,15 @@
 	}
 
 	const atomicItems = $derived.by(
-		(): { tag: string; name: string; datatype: string; protocolType: string }[] => {
+		(): { tag: string; name: string; datatype: string; protocolType: string; value: unknown }[] => {
 			if (!browseCache) return [];
 			const structTags = browseCache.structTags ?? {};
 			const q = filter?.toLowerCase() ?? '';
+			const isSnmp = browseCache.protocol === 'snmp';
 			const filtered = browseCache.items
 				.filter((item) => {
 					if (structTags[item.tag]) return false;
-					if (item.tag.includes('.')) return false;
+					if (!isSnmp && item.tag.includes('.')) return false;
 					if (
 						q &&
 						!item.name.toLowerCase().includes(q) &&
@@ -90,7 +91,8 @@
 				const rbeA = rbeOverrides.get(keyA);
 				const rbeB = rbeOverrides.get(keyB);
 				switch (sortCol) {
-					case 'tag': return dir * a.tag.localeCompare(b.tag);
+					case 'tag': return dir * (a.name || a.tag).localeCompare(b.name || b.tag);
+					case 'value': return dir * String(a.value ?? '').localeCompare(String(b.value ?? ''));
 					case 'type': return dir * a.datatype.localeCompare(b.datatype);
 					case 'mqtt': return dir * (Number(pubA) - Number(pubB));
 					case 'rbe': return dir * (Number(!!rbeA?.disableRBE) - Number(!!rbeB?.disableRBE));
@@ -107,6 +109,8 @@
 			});
 		}
 	);
+
+	const hasValues = $derived(atomicItems.some(i => i.value != null));
 
 	function getFilteredBatchKeys(): string[] {
 		return atomicItems
@@ -158,7 +162,8 @@
 	<table class="tpl-table">
 		<thead>
 			<tr>
-				<th style="width: 20%" class="sortable" class:sorted={sortCol === 'tag'} onclick={() => toggleSort('tag')}>Tag <span class="sort-arrow">{sortCol === 'tag' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
+				<th style={hasValues ? 'width: 16%' : 'width: 20%'} class="sortable" class:sorted={sortCol === 'tag'} onclick={() => toggleSort('tag')}>Tag <span class="sort-arrow">{sortCol === 'tag' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
+				{#if hasValues}<th style="width: 12%" class="sortable" class:sorted={sortCol === 'value'} onclick={() => toggleSort('value')}>Value <span class="sort-arrow">{sortCol === 'value' ? (sortAsc ? '▲' : '▼') : ''}</span></th>{/if}
 				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'type'} onclick={() => toggleSort('type')}>Type <span class="sort-arrow">{sortCol === 'type' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'mqtt'} onclick={() => toggleSort('mqtt')}>MQTT <span class="sort-arrow">{sortCol === 'mqtt' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 8%" class="sortable" class:sorted={sortCol === 'rbe'} onclick={() => toggleSort('rbe')}>RBE <span class="sort-arrow">{sortCol === 'rbe' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
@@ -184,8 +189,11 @@
 				<tr class:row-override={hasOverride} class:row-dirty={dirtyAtomicKeys.has(key)}>
 					<td data-label="Tag">
 						{#if dirtyAtomicKeys.has(key)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
-						<span class="mono item-name">{item.tag}</span>
+						<span class="mono item-name" title={item.tag}>{item.name || item.tag}</span>
 					</td>
+					{#if hasValues}
+						<td data-label="Value"><span class="mono value-cell" title={String(item.value ?? '')}>{String(item.value ?? '')}</span></td>
+					{/if}
 					<td data-label="Type">
 						<span
 							class="type-badge"
@@ -340,6 +348,15 @@
 	@use './tag-table';
 
 	.tc-scroll { flex: 1; overflow: auto; }
+
+	.value-cell {
+		display: inline-block;
+		max-width: 200px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 0.75rem;
+	}
 
 	.rbe-toggle {
 		font-size: 0.625rem;

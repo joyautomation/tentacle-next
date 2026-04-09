@@ -454,13 +454,12 @@
     const device = gatewayConfig?.devices?.find(d => d.deviceId === deviceId);
     if (!device) return;
     try {
-      const cfg = device.config as Record<string, unknown>;
       const input: Record<string, unknown> = { deviceId, protocol: device.protocol };
-      if (cfg.host) input.host = cfg.host;
-      if (cfg.port) input.port = cfg.port;
-      if (cfg.endpointUrl) input.endpointUrl = cfg.endpointUrl;
-      if (cfg.version) input.version = cfg.version;
-      if (cfg.community) input.community = cfg.community;
+      if (device.host) input.host = device.host;
+      if (device.port) input.port = device.port;
+      if (device.endpointUrl) input.endpointUrl = device.endpointUrl;
+      if (device.version) input.version = device.version;
+      if (device.community) input.community = device.community;
 
       const result = await apiPost<{ browseId: string; deviceId: string }>('/gateways/gateway/browse', input);
 

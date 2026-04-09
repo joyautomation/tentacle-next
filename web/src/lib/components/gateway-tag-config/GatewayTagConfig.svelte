@@ -76,6 +76,17 @@
     return names;
   }
 
+  // ── SNMP root OID presets ──
+  const snmpRootOidPresets = [
+    { label: 'MIB-2 (mgmt)', value: '.1.3.6.1.2.1' },
+    { label: 'System', value: '.1.3.6.1.2.1.1' },
+    { label: 'Interfaces', value: '.1.3.6.1.2.1.2' },
+    { label: 'IF-MIB (ext)', value: '.1.3.6.1.2.1.31' },
+    { label: 'Enterprise', value: '.1.3.6.1.4.1' },
+    { label: 'Full tree', value: '.1.3.6.1' },
+  ];
+  let snmpRootOids: Map<string, string> = $state(new Map());
+
   // ── Browse state ──
   let liveProgress: Map<string, GatewayBrowseState> = $state(new Map());
   let saving = $state(false);
@@ -334,6 +345,8 @@
     for (const cache of browseCaches ?? []) {
       const structTags = cache.structTags ?? {};
       for (const [tag, udtName] of Object.entries(structTags)) {
+        // Skip raw OID keys (used only for atomic tag filtering, not instances)
+        if (tag.startsWith('.')) continue;
         if (resolveTemplateName(cache.deviceId, udtName) !== activeTemplateName) continue;
         const key = `${cache.deviceId}::${tag}`;
         if (seen.has(key)) continue;
@@ -1096,13 +1109,16 @@
     const device = gatewayConfig?.devices?.find(d => d.deviceId === deviceId);
     if (!device) return;
     try {
-      const cfg = device.config as Record<string, unknown>;
       const input: Record<string, unknown> = { deviceId, protocol: device.protocol };
-      if (cfg.host) input.host = cfg.host;
-      if (cfg.port) input.port = cfg.port;
-      if (cfg.endpointUrl) input.endpointUrl = cfg.endpointUrl;
-      if (cfg.version) input.version = cfg.version;
-      if (cfg.community) input.community = cfg.community;
+      if (device.host) input.host = device.host;
+      if (device.port) input.port = device.port;
+      if (device.endpointUrl) input.endpointUrl = device.endpointUrl;
+      if (device.version) input.version = device.version;
+      if (device.community) input.community = device.community;
+      if (device.protocol === 'snmp') {
+        const rootOid = snmpRootOids.get(deviceId) || snmpRootOidPresets[0].value;
+        input.rootOid = rootOid;
+      }
 
       const result = await apiPost<{ browseId: string; deviceId: string }>('/gateways/gateway/browse', input);
 
@@ -1138,8 +1154,9 @@
         const structTags = cache.structTags ?? {};
         const udtLookup = new Map(cache.udts.map(u => [u.name, u]));
 
+        const isSnmp = cache.protocol === 'snmp';
         const atomicVariables = cache.items
-          .filter(item => !structTags[item.tag] && !item.tag.includes('.') && checkedAtomicTags.has(`${deviceId}::${item.tag}`))
+          .filter(item => !structTags[item.tag] && (isSnmp || !item.tag.includes('.')) && checkedAtomicTags.has(`${deviceId}::${item.tag}`))
           .map(item => {
             const key = `${deviceId}::${item.tag}`;
             const rbe = rbeOverrides.get(key);
@@ -1160,6 +1177,7 @@
         const seenTemplates = new Set<string>();
 
         for (const [tag, udtName] of Object.entries(structTags)) {
+          if (tag.startsWith('.')) continue;
           if (!checkedUdtInstances.has(`${deviceId}::${tag}`)) continue;
           const udt = udtLookup.get(udtName);
           if (!udt) continue;
@@ -1326,7 +1344,8 @@
       const cache = cacheMap.get(device.deviceId);
       if (cache) {
         const structTags = cache.structTags ?? {};
-        const atomicCount = cache.items.filter(item => !structTags[item.tag] && !item.tag.includes('.')).length;
+        const isSnmp = cache.protocol === 'snmp';
+        const atomicCount = cache.items.filter(item => !structTags[item.tag] && (isSnmp || !item.tag.includes('.'))).length;
         result.push({ deviceId: device.deviceId, protocol: device.protocol, atomicCount });
       } else {
         result.push({ deviceId: device.deviceId, protocol: device.protocol, atomicCount: 0 });
@@ -1336,7 +1355,8 @@
     for (const cache of browseCaches ?? []) {
       if (seen.has(cache.deviceId)) continue;
       const structTags = cache.structTags ?? {};
-      const atomicCount = cache.items.filter(item => !structTags[item.tag] && !item.tag.includes('.')).length;
+      const isSnmp = cache.protocol === 'snmp';
+      const atomicCount = cache.items.filter(item => !structTags[item.tag] && (isSnmp || !item.tag.includes('.'))).length;
       result.push({ deviceId: cache.deviceId, protocol: cache.protocol, atomicCount });
     }
 
@@ -1411,6 +1431,19 @@
               {/if}
             </span>
           </div>
+          {#if device.protocol === 'snmp' && !isBusy}
+            <div class="snmp-root-oid">
+              <select
+                class="snmp-root-oid-select"
+                value={snmpRootOids.get(device.deviceId) || snmpRootOidPresets[0].value}
+                onchange={(e) => { const next = new Map(snmpRootOids); next.set(device.deviceId, (e.target as HTMLSelectElement).value); snmpRootOids = next; }}
+              >
+                {#each snmpRootOidPresets as preset}
+                  <option value={preset.value}>{preset.label}</option>
+                {/each}
+              </select>
+            </div>
+          {/if}
           {#if device.atomicCount > 0}
             <button
               class="tc-side-item"
@@ -1644,6 +1677,17 @@
 
   .side-browse-count {
     font-size: 0.625rem; color: var(--theme-text-muted); font-family: 'IBM Plex Mono', monospace; white-space: nowrap;
+  }
+
+  .snmp-root-oid {
+    padding: 2px 12px 4px;
+  }
+  .snmp-root-oid-select {
+    width: 100%; font-size: 0.7rem; padding: 2px 4px;
+    background: var(--theme-surface); color: var(--theme-text);
+    border: 1px solid var(--theme-border); border-radius: var(--rounded-md);
+    font-family: 'IBM Plex Mono', monospace;
+    &:focus { outline: none; border-color: var(--theme-primary); }
   }
 
   .side-refresh-btn {
