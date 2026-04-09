@@ -1220,25 +1220,23 @@
       // Phase 2: save UDT deadband config per template (only for templates synced in Phase 1)
       for (const [tmplName, working] of workingTemplates) {
         if (!syncedTemplates.has(tmplName)) continue;
-        const memberUpdates = working.members
-          .filter(m => m.datatype === 'number')
-          .map(m => ({
-            name: m.name,
-            defaultDeadband: m.defaultDeadband ? {
-              value: m.defaultDeadband.value,
-              ...(m.defaultDeadband.minTime != null ? { minTime: m.defaultDeadband.minTime } : {}),
-              ...(m.defaultDeadband.maxTime != null ? { maxTime: m.defaultDeadband.maxTime } : {}),
-              ...(m.defaultDeadband.disableRBE ? { disableRBE: true } : {}),
-            } : null,
-          }));
+        const memberUpdates: Record<string, unknown> = {};
+        for (const m of working.members.filter(m => m.datatype === 'number')) {
+          memberUpdates[m.name] = m.defaultDeadband ? {
+            value: m.defaultDeadband.value,
+            ...(m.defaultDeadband.minTime != null ? { minTime: m.defaultDeadband.minTime } : {}),
+            ...(m.defaultDeadband.maxTime != null ? { maxTime: m.defaultDeadband.maxTime } : {}),
+            ...(m.defaultDeadband.disableRBE ? { disableRBE: true } : {}),
+          } : null;
+        }
 
         const templateInstances = allConfigInstances.filter(i => i.templateName === tmplName);
-        const instanceUpdates = templateInstances.map(inst => ({
-          id: inst.id,
-          memberDeadbands: workingInstanceOverrides.get(inst.id) ?? {},
-        }));
+        const instanceUpdates: Record<string, unknown> = {};
+        for (const inst of templateInstances) {
+          instanceUpdates[inst.id] = workingInstanceOverrides.get(inst.id) ?? {};
+        }
 
-        if (memberUpdates.length > 0 || instanceUpdates.length > 0) {
+        if (Object.keys(memberUpdates).length > 0 || Object.keys(instanceUpdates).length > 0) {
           const udtResult = await apiPut(`/gateways/gateway/udt-config/${tmplName}`, { memberUpdates, instanceUpdates });
 
           if (udtResult.error) {

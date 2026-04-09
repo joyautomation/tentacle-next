@@ -249,17 +249,15 @@
       const tmpl = workingTemplates.get(activeTemplateKey);
       if (!tmpl) return;
 
-      const memberUpdates = tmpl.members
-        .filter(m => m.datatype === 'number')
-        .map(m => ({
-          name: m.name,
-          defaultDeadband: m.defaultDeadband ? { value: m.defaultDeadband.value } : null,
-        }));
+      const memberUpdates: Record<string, unknown> = {};
+      for (const m of tmpl.members.filter(m => m.datatype === 'number')) {
+        memberUpdates[m.name] = m.defaultDeadband ? { value: m.defaultDeadband.value } : null;
+      }
 
-      const instanceUpdates = activeInstances.map(inst => ({
-        id: inst.id,
-        memberDeadbands: workingInstanceOverrides.get(inst.id) ?? {},
-      }));
+      const instanceUpdates: Record<string, unknown> = {};
+      for (const inst of activeInstances) {
+        instanceUpdates[inst.id] = workingInstanceOverrides.get(inst.id) ?? {};
+      }
 
       const result = await apiPut(`/gateways/gateway/udt-config/${activeTemplateKey}`, { memberUpdates, instanceUpdates });
 
