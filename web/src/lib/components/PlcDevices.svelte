@@ -8,6 +8,7 @@
   import DiagramSelector from '$lib/components/DiagramSelector.svelte';
   import type { VizMode } from '$lib/components/DiagramSelector.svelte';
   import { ChevronRight } from '@joyautomation/salt/icons';
+  import { toEpochMs, getFreshnessColor, getGlowStyle, formatAge, formatAgeShort } from '$lib/utils/freshness';
 
   let { variables: initialVariables, deviceInfo, error }: {
     variables: Variable[];
@@ -22,6 +23,7 @@
   let variableMap: Map<string, Variable> = $state(new Map());
   let updateVersion = $state(0);
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let now = $state(Date.now());
 
   function scheduleFlush() {
     if (!flushTimer) {
@@ -36,6 +38,7 @@
   });
 
   onMount(() => {
+    const tickInterval = setInterval(() => { now = Date.now(); }, 1000);
     const serviceType = $page.params.serviceType;
     const unsub = subscribe<Variable[]>(
       `/variables/stream/batch?moduleId=${encodeURIComponent(serviceType)}`,
@@ -51,7 +54,7 @@
         }
       },
     );
-    return () => { if (flushTimer) clearTimeout(flushTimer); unsub(); };
+    return () => { clearInterval(tickInterval); if (flushTimer) clearTimeout(flushTimer); unsub(); };
   });
 
   type TagNode = { name: string; udtType?: string; variable?: Variable; members: { name: string; variable: Variable }[] };
@@ -139,11 +142,6 @@
     return String(value);
   }
 
-  function getQualityColor(quality: string): string {
-    if (quality === 'good') return 'var(--color-green-500, #22c55e)';
-    if (quality === 'bad') return 'var(--color-red-500, #ef4444)';
-    return 'var(--theme-text-muted)';
-  }
 </script>
 
 <div class="devices-page">
@@ -196,8 +194,14 @@
                             {#if expandedTags[device.deviceId + '.' + tag.name]}
                               <div class="tree-children">
                                 {#each tag.members as member}
+                                  {@const ts = toEpochMs(member.variable.lastUpdated)}
                                   <div class="tree-leaf">
-                                    <span class="quality-dot" style="background: {getQualityColor(member.variable.quality)}" title="Quality: {member.variable.quality}"></span>
+                                    <span
+                                      class="freshness-dot"
+                                      title={formatAge(ts, now)}
+                                      style="--dot-color: {getFreshnessColor(ts, now, member.variable.quality)}; --dot-glow: {getGlowStyle(ts, now)};"
+                                    ></span>
+                                    <span class="staleness-label" style="color: {getFreshnessColor(ts, now, member.variable.quality)}">{formatAgeShort(ts, now)}</span>
                                     <span class="leaf-name">{member.name}</span>
                                     <span class="leaf-value">{formatValue(member.variable.value)}</span>
                                     <span class="leaf-type">{member.variable.datatype}</span>
@@ -213,8 +217,14 @@
                 {/each}
                 {#each device.scalars as tag}
                   {#if tag.variable}
+                    {@const ts = toEpochMs(tag.variable.lastUpdated)}
                     <div class="tree-leaf">
-                      <span class="quality-dot" style="background: {getQualityColor(tag.variable.quality)}" title="Quality: {tag.variable.quality}"></span>
+                      <span
+                        class="freshness-dot"
+                        title={formatAge(ts, now)}
+                        style="--dot-color: {getFreshnessColor(ts, now, tag.variable.quality)}; --dot-glow: {getGlowStyle(ts, now)};"
+                      ></span>
+                      <span class="staleness-label" style="color: {getFreshnessColor(ts, now, tag.variable.quality)}">{formatAgeShort(ts, now)}</span>
                       <span class="leaf-name">{tag.name}</span>
                       <span class="leaf-value">{formatValue(tag.variable.value)}</span>
                       <span class="leaf-type">{tag.variable.datatype}</span>
@@ -308,7 +318,20 @@
     &:not(:last-child) { border-bottom: 1px solid color-mix(in srgb, var(--theme-border) 30%, transparent); }
   }
 
-  .quality-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .freshness-dot {
+    position: relative; width: 16px; height: 16px; flex-shrink: 0; cursor: help;
+    &::before {
+      content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 8px; height: 8px; border-radius: 50%;
+      background-color: var(--dot-color, rgb(156, 163, 175));
+      box-shadow: var(--dot-glow, none);
+      transition: background-color 1s ease, box-shadow 1s ease;
+    }
+  }
+  .staleness-label {
+    font-size: 0.6875rem; font-family: 'IBM Plex Mono', monospace;
+    flex-shrink: 0; min-width: 1.5rem; text-align: left; transition: color 1s ease;
+  }
   .leaf-name { font-family: 'IBM Plex Mono', monospace; color: var(--theme-text); }
   .leaf-value { margin-left: auto; font-family: 'IBM Plex Mono', monospace; color: var(--theme-text-muted); font-size: 0.75rem; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .leaf-type { font-size: 0.6875rem; color: var(--badge-muted-text); padding: 0.1rem 0.35rem; border-radius: var(--rounded-sm); background: var(--badge-muted-bg); flex-shrink: 0; }

@@ -6,6 +6,7 @@
   import TidyTree from '$lib/components/TidyTree.svelte';
   import DiagramSelector from '$lib/components/DiagramSelector.svelte';
   import type { VizMode } from '$lib/components/DiagramSelector.svelte';
+  import { getFreshnessColor as _getFreshnessColor, getGlowStyle as _getGlowStyle, formatAge as _formatAge, formatAgeShort as _formatAgeShort } from '$lib/utils/freshness';
 
   let { data }: { data: PageData } = $props();
 
@@ -78,7 +79,11 @@
     };
   });
 
-  const FADE_DURATION_SECONDS = 300;
+  // Thin wrappers that bind `now` into the shared freshness utilities
+  const getFreshnessColor = (ts: number | null | undefined) => _getFreshnessColor(ts, now);
+  const getGlowStyle = (ts: number | null | undefined) => _getGlowStyle(ts, now);
+  const formatAge = (ts: number | null | undefined) => _formatAge(ts, now);
+  const formatAgeShort = (ts: number | null | undefined) => _formatAgeShort(ts, now);
 
   let vizMode: VizMode = $state('tree');
 
@@ -159,53 +164,6 @@
     return String(value);
   }
 
-  function getFreshnessColor(timestamp: number | null | undefined): string {
-    if (!timestamp) return 'rgb(156, 163, 175)'; // gray
-    const ageSeconds = (now - timestamp) / 1000;
-    if (ageSeconds <= 0) return 'rgb(34, 197, 94)'; // green
-    if (ageSeconds >= FADE_DURATION_SECONDS) return 'rgb(156, 163, 175)'; // gray
-    const t = 1 - ageSeconds / FADE_DURATION_SECONDS;
-    const r = Math.round(156 + (34 - 156) * t);
-    const g = Math.round(163 + (197 - 163) * t);
-    const b = Math.round(175 + (94 - 175) * t);
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-
-  function getGlowStyle(timestamp: number | null | undefined): string {
-    if (!timestamp) return 'none';
-    const ageSeconds = (now - timestamp) / 1000;
-    const opacity = ageSeconds <= 0 ? 1 : ageSeconds >= FADE_DURATION_SECONDS ? 0 : 1 - ageSeconds / FADE_DURATION_SECONDS;
-    if (opacity < 0.5) return 'none';
-    const glowOpacity = (opacity - 0.5) * 2;
-    return `0 0 ${6 + glowOpacity * 4}px rgba(34, 197, 94, ${glowOpacity * 0.5})`;
-  }
-
-  function formatAge(timestamp: number | null | undefined): string {
-    if (!timestamp) return 'No data';
-    const ageMs = Math.max(0, now - timestamp);
-    const ageSeconds = Math.floor(ageMs / 1000);
-    if (ageSeconds < 60) return `${ageSeconds}s ago`;
-    const ageMinutes = Math.floor(ageSeconds / 60);
-    if (ageMinutes < 60) return `${ageMinutes}m ago`;
-    const ageHours = Math.floor(ageMinutes / 60);
-    if (ageHours < 24) return `${ageHours}h ago`;
-    const ageDays = Math.floor(ageHours / 24);
-    return `${ageDays}d ago`;
-  }
-
-  /** Short age label shown inline next to values (colorblind-accessible) */
-  function formatAgeShort(timestamp: number | null | undefined): string {
-    if (!timestamp) return '';
-    const ageMs = Math.max(0, now - timestamp);
-    const ageSeconds = Math.floor(ageMs / 1000);
-    if (ageSeconds < 60) return `${ageSeconds}s`;
-    const ageMinutes = Math.floor(ageSeconds / 60);
-    if (ageMinutes < 60) return `${ageMinutes}m`;
-    const ageHours = Math.floor(ageMinutes / 60);
-    if (ageHours < 24) return `${ageHours}h`;
-    const ageDays = Math.floor(ageHours / 24);
-    return `${ageDays}d`;
-  }
 </script>
 
 <div class="metrics-page">

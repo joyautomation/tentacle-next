@@ -2,10 +2,12 @@
   import type { PageData } from "./$types";
   import { subscribe } from "$lib/api/subscribe";
   import { onMount } from "svelte";
+  import { toEpochMs, getFreshnessColor, getGlowStyle, formatAge, formatAgeShort } from "$lib/utils/freshness";
 
   let { data }: { data: PageData } = $props();
 
   let expandedDevices: Record<string, boolean> = $state({});
+  let now = $state(Date.now());
 
   type Variable = {
     variableId: string;
@@ -45,6 +47,7 @@
 
   // Subscribe to batched variable updates via SSE
   onMount(() => {
+    const tickInterval = setInterval(() => { now = Date.now(); }, 1000);
     const unsub = subscribe<Variable[]>(
       '/variables/stream/batch?moduleId=snmp',
       (batch) => {
@@ -65,6 +68,7 @@
       },
     );
     return () => {
+      clearInterval(tickInterval);
       if (flushTimer) clearTimeout(flushTimer);
       unsub();
     };
@@ -131,11 +135,6 @@
     return str;
   }
 
-  function getQualityColor(quality: string): string {
-    if (quality === "good") return "var(--color-green-500, #22c55e)";
-    if (quality === "bad") return "var(--color-red-500, #ef4444)";
-    return "var(--theme-text-muted)";
-  }
 </script>
 
 <div class="oids-page">
@@ -180,12 +179,14 @@
             {#if expandedDevices[device.deviceId]}
               <div class="tree-children">
                 {#each device.oids as entry}
+                  {@const ts = toEpochMs(entry.variable.lastUpdated)}
                   <div class="tree-leaf">
                     <span
-                      class="quality-dot"
-                      style="background: {getQualityColor(entry.variable.quality)}"
-                      title="Quality: {entry.variable.quality}"
+                      class="freshness-dot"
+                      title={formatAge(ts, now)}
+                      style="--dot-color: {getFreshnessColor(ts, now, entry.variable.quality)}; --dot-glow: {getGlowStyle(ts, now)};"
                     ></span>
+                    <span class="staleness-label" style="color: {getFreshnessColor(ts, now, entry.variable.quality)}">{formatAgeShort(ts, now)}</span>
                     <span class="leaf-name-group">
                       <span class="leaf-name">{entry.oid}</span>
                       {#if entry.variable.source}
@@ -363,15 +364,39 @@
     }
   }
 
-  .quality-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+  .freshness-dot {
+    position: relative;
+    width: 16px;
+    height: 16px;
     flex-shrink: 0;
+    cursor: help;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--dot-color, rgb(156, 163, 175));
+      box-shadow: var(--dot-glow, none);
+      transition: background-color 1s ease, box-shadow 1s ease;
+    }
 
     @media (max-width: 640px) {
       margin-top: 0.3rem;
     }
+  }
+
+  .staleness-label {
+    font-size: 0.6875rem;
+    font-family: "IBM Plex Mono", monospace;
+    flex-shrink: 0;
+    min-width: 1.5rem;
+    text-align: left;
+    transition: color 1s ease;
   }
 
   .leaf-name-group {
