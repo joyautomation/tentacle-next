@@ -17,6 +17,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/logger"
 	"github.com/joyautomation/tentacle/internal/ethernetipserver"
 	"github.com/joyautomation/tentacle/internal/gateway"
+	"github.com/joyautomation/tentacle/internal/gitops"
 	"github.com/joyautomation/tentacle/internal/history"
 	"github.com/joyautomation/tentacle/internal/modbus"
 	"github.com/joyautomation/tentacle/internal/modbusserver"
@@ -84,6 +85,7 @@ func runMonolith(ctx context.Context) {
 		"history":           func(id string) module.Module { return history.New(id) },
 		"network":           func(id string) module.Module { return network.New(id) },
 		"nftables":          func(id string) module.Module { return nftables.New(id) },
+		"gitops":            func(id string) module.Module { return gitops.New(id) },
 	}
 
 	// Core modules: always running.
@@ -171,6 +173,8 @@ func moduleByName(name string) module.Module {
 		return network.New("network")
 	case "nftables":
 		return nftables.New("nftables")
+	case "gitops":
+		return gitops.New("gitops")
 	case "api":
 		return api.New("api")
 	default:

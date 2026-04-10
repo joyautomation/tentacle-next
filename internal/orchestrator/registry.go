@@ -100,6 +100,16 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 		Category:    "optional",
 		Runtime:     "embedded",
 	},
+	{
+		Repo:        "tentacle-next",
+		ModuleID:    "gitops",
+		Description: "GitOps config sync",
+		Category:    "optional",
+		Runtime:     "embedded",
+		RequiredConfig: []otypes.ConfigField{
+			{EnvVar: "GITOPS_REPO_URL", Description: "Git repository URL (SSH or HTTPS)", Required: true},
+		},
+	},
 }
 
 // getRegistryEntry looks up a module by its moduleId.
