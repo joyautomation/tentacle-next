@@ -25,6 +25,10 @@ const (
 	BucketScannerOpcUA      = "scanner_config_opcua"
 	BucketScannerModbus     = "scanner_config_modbus"
 	BucketScannerSNMP       = "scanner_config_snmp"
+
+	// Config metadata tracks the source of each config write (gui, cli, gitops)
+	// to prevent feedback loops in bidirectional sync.
+	BucketConfigMetadata = "config_metadata"
 )
 
 // ScannerBucket returns the KV bucket name for a given protocol.
@@ -59,5 +63,6 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketScannerOpcUA:      {History: 1},
 		BucketScannerModbus:     {History: 1},
 		BucketScannerSNMP:       {History: 1},
+		BucketConfigMetadata:    {History: 1},
 	}
 }
