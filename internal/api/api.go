@@ -242,6 +242,14 @@ func (m *Module) routes() http.Handler {
 		r.Get("/history/usage", m.handleGetHistoryUsage)
 		r.Get("/history/enabled", m.handleGetHistoryEnabled)
 
+		// GitOps setup
+		r.Get("/gitops/ssh-key", m.handleGetSSHKey)
+		r.Post("/gitops/ssh-key/generate", m.handleGenerateSSHKey)
+		r.Post("/gitops/test-connection", m.handleTestGitConnection)
+
+		// System
+		r.Get("/system/hostname", m.handleGetHostname)
+
 		// Config
 		r.Get("/config", m.handleGetAllConfig)
 		r.Get("/config/{moduleId}/schema", m.handleGetConfigSchema)
