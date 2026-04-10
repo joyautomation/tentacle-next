@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { invalidateAll } from '$app/navigation';
-  import { apiPost, apiDelete } from '$lib/api/client';
+  import { apiPut, apiDelete } from '$lib/api/client';
   import { state as saltState } from '@joyautomation/salt';
   import {
     GlobeAlt,
@@ -37,10 +37,9 @@
   async function installModule() {
     installing = true;
     try {
-      const result = await apiPost<{ moduleId: string; version: string; running: boolean }>(
-        '/orchestrator/desired-services',
+      const result = await apiPut<{ moduleId: string; version: string; running: boolean }>(
+        `/orchestrator/desired-services/${data.moduleId}`,
         {
-          moduleId: data.moduleId,
           version: selectedVersion,
           running: true,
         }
