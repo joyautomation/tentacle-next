@@ -104,6 +104,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.log.Error("gitops: repo init failed", "error", err)
 		// Keep running — the poll loop will retry.
 	} else {
+		m.repo.EnsureIdentity()
 		m.log.Info("gitops: repo initialized", "dir", cloneDir, "remote", m.cfg.RepoURL, "branch", m.cfg.Branch)
 
 		// Do an initial sync from git (apply remote state).

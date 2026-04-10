@@ -28,30 +28,61 @@ func (r *gitRepo) Init() error {
 		if err := r.run("remote", "set-url", "origin", r.remote); err != nil {
 			return fmt.Errorf("set remote: %w", err)
 		}
-		return r.run("fetch", "origin", r.branch)
+		// Fetch without branch name — branch-specific fetch fails on empty remotes.
+		_ = r.run("fetch", "origin")
+		return nil
 	}
 
 	// Clone fresh.
 	if err := os.MkdirAll(filepath.Dir(r.dir), 0o755); err != nil {
 		return fmt.Errorf("create parent dir: %w", err)
 	}
-	return r.runInDir(filepath.Dir(r.dir), "clone", "--branch", r.branch, "--single-branch", r.remote, filepath.Base(r.dir))
+
+	// Try branch-specific clone first (faster for non-empty repos).
+	if err := r.runInDir(filepath.Dir(r.dir), "clone", "--branch", r.branch, "--single-branch", r.remote, filepath.Base(r.dir)); err == nil {
+		return nil
+	}
+
+	// Fall back to plain clone (handles empty repos).
+	if err := r.runInDir(filepath.Dir(r.dir), "clone", r.remote, filepath.Base(r.dir)); err != nil {
+		return fmt.Errorf("clone: %w", err)
+	}
+
+	// Ensure we're on the desired branch (empty repo default may differ).
+	currentBranch, _ := r.output("symbolic-ref", "--short", "HEAD")
+	if strings.TrimSpace(currentBranch) != r.branch {
+		_ = r.run("checkout", "-b", r.branch)
+	}
+
+	return nil
+}
+
+// EnsureIdentity configures git user.name and user.email in the repo if not already set.
+func (r *gitRepo) EnsureIdentity() {
+	if name, _ := r.output("config", "user.name"); strings.TrimSpace(name) == "" {
+		hostname, _ := os.Hostname()
+		_ = r.run("config", "user.name", "tentacle")
+		_ = r.run("config", "user.email", fmt.Sprintf("tentacle@%s", hostname))
+	}
 }
 
 // HasRemoteChanges returns true if the remote branch has commits not in the local branch.
 func (r *gitRepo) HasRemoteChanges() (bool, error) {
-	if err := r.run("fetch", "origin", r.branch); err != nil {
+	if err := r.run("fetch", "origin"); err != nil {
 		return false, err
 	}
 
 	localSHA, err := r.output("rev-parse", "HEAD")
 	if err != nil {
-		return false, err
+		// No local commits yet. Check if remote has any.
+		_, remoteErr := r.output("rev-parse", "origin/"+r.branch)
+		return remoteErr == nil, nil
 	}
 
 	remoteSHA, err := r.output("rev-parse", "origin/"+r.branch)
 	if err != nil {
-		return false, err
+		// Remote branch doesn't exist yet.
+		return false, nil
 	}
 
 	return strings.TrimSpace(localSHA) != strings.TrimSpace(remoteSHA), nil
@@ -101,11 +132,12 @@ func (r *gitRepo) Push() error {
 	return r.run("push", "origin", r.branch)
 }
 
-// CurrentSHA returns the current HEAD commit SHA.
+// CurrentSHA returns the current HEAD commit SHA (empty string for repos with no commits).
 func (r *gitRepo) CurrentSHA() (string, error) {
 	out, err := r.output("rev-parse", "HEAD")
 	if err != nil {
-		return "", err
+		// Empty repo — no commits yet.
+		return "", nil
 	}
 	return strings.TrimSpace(out), nil
 }
