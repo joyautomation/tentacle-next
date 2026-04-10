@@ -8,6 +8,17 @@
   type Step = 'ssh-key' | 'repository' | 'settings' | 'complete';
   const STEPS: Step[] = ['ssh-key', 'repository', 'settings'];
 
+  // Poll for state changes after saving so the page updates when the module starts
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if (step === 'complete' && !pollTimer) {
+      pollTimer = setInterval(() => { invalidateAll(); }, 2000);
+    }
+    return () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    };
+  });
+
   let step: Step = $state('ssh-key');
 
   // SSH key state
@@ -123,7 +134,7 @@
     if (errors.length > 0) {
       saltState.addNotification({ message: errors.join('; '), type: 'error' });
     } else {
-      saltState.addNotification({ message: 'GitOps configuration saved', type: 'success' });
+      step = 'complete';
       await invalidateAll();
     }
   }
@@ -131,25 +142,27 @@
 
 <div class="wizard">
   <!-- Step indicators -->
-  <div class="step-bar">
-    {#each STEPS as s, i}
-      <button
-        class="step-indicator"
-        class:active={step === s}
-        class:done={i < stepIndex}
-        onclick={() => { if (i <= stepIndex) step = s; }}
-        disabled={i > stepIndex}
-      >
-        <span class="step-num">{i + 1}</span>
-        <span class="step-label">
-          {s === 'ssh-key' ? 'SSH Key' : s === 'repository' ? 'Repository' : 'Settings'}
-        </span>
-      </button>
-      {#if i < STEPS.length - 1}
-        <div class="step-line" class:done={i < stepIndex}></div>
-      {/if}
-    {/each}
-  </div>
+  {#if step !== 'complete'}
+    <div class="step-bar">
+      {#each STEPS as s, i}
+        <button
+          class="step-indicator"
+          class:active={step === s}
+          class:done={i < stepIndex}
+          onclick={() => { if (i <= stepIndex) step = s; }}
+          disabled={i > stepIndex}
+        >
+          <span class="step-num">{i + 1}</span>
+          <span class="step-label">
+            {s === 'ssh-key' ? 'SSH Key' : s === 'repository' ? 'Repository' : 'Settings'}
+          </span>
+        </button>
+        {#if i < STEPS.length - 1}
+          <div class="step-line" class:done={i < stepIndex}></div>
+        {/if}
+      {/each}
+    </div>
+  {/if}
 
   <!-- Step content -->
   <div class="step-content">
@@ -299,6 +312,19 @@
           <button class="btn primary" onclick={saveAndStart} disabled={saving}>
             {saving ? 'Saving...' : 'Save & Start'}
           </button>
+        </div>
+      </div>
+
+    {:else if step === 'complete'}
+      <div class="complete-state" transition:slide={{ duration: 200 }}>
+        <div class="complete-icon">
+          <CheckCircle size="2rem" />
+        </div>
+        <h3>Configuration Saved</h3>
+        <p class="step-desc">GitOps module is starting up. This page will update automatically.</p>
+        <div class="spinner-row">
+          <span class="spinner"></span>
+          <span class="starting-text">Starting module...</span>
         </div>
       </div>
     {/if}
@@ -609,5 +635,38 @@
       padding: 0.1rem 0.3rem;
       border-radius: 3px;
     }
+  }
+
+  .complete-state {
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+
+  .complete-icon {
+    color: var(--badge-green-text);
+    margin-bottom: 0.75rem;
+  }
+
+  .spinner-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    color: var(--theme-text-muted);
+    font-size: 0.8125rem;
+  }
+
+  .spinner {
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--theme-border);
+    border-top-color: var(--theme-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 </style>
