@@ -67,55 +67,44 @@
       });
     });
 
-    // NATS bus (layer 2)
+    // Gateway (layer 2)
     nodes.push({
-      id: 'nats',
-      label: 'NATS Bus',
-      abbr: 'NATS',
+      id: 'gateway',
+      label: 'Gateway',
+      abbr: 'GW',
       layer: 2,
       row: 1.5,
       color: 'var(--color-purple-500, #a855f7)',
     });
 
-    // Gateway (layer 3)
+    // MQTT Bridge (layer 3)
     nodes.push({
-      id: 'gateway',
-      label: 'Gateway',
-      abbr: 'GW',
+      id: 'mqtt',
+      label: 'MQTT Bridge',
+      abbr: 'MQTT',
       layer: 3,
       row: 1.5,
       color: 'var(--color-teal-500, #14b8a6)',
     });
 
-    // MQTT Bridge (layer 4)
-    nodes.push({
-      id: 'mqtt',
-      label: 'MQTT Bridge',
-      abbr: 'MQTT',
-      layer: 4,
-      row: 1.5,
-      color: 'var(--color-teal-500, #14b8a6)',
-    });
-
-    // Broker (layer 5)
+    // Broker (layer 4)
     nodes.push({
       id: 'broker',
       label: 'MQTT Broker',
       abbr: 'BRK',
-      layer: 5,
+      layer: 4,
       row: 1.5,
       color: 'var(--color-sky-500, #0ea5e9)',
     });
 
-    // Links: device → scanner → nats → gateway → mqtt → broker
+    // Links: device → scanner → gateway → mqtt → broker
     const showAll = activeProtocols.size === 0;
     protocols.forEach((p) => {
       const active = showAll || activeProtocols.has(p.id);
       links.push({ source: `device-${p.id}`, target: `scanner-${p.id}`, active });
-      links.push({ source: `scanner-${p.id}`, target: 'nats', active });
+      links.push({ source: `scanner-${p.id}`, target: 'gateway', active });
     });
 
-    links.push({ source: 'nats', target: 'gateway', active: true });
     links.push({ source: 'gateway', target: 'mqtt', active: true });
     links.push({ source: 'mqtt', target: 'broker', active: true });
 
@@ -157,7 +146,7 @@
     // Layout: distribute layers across width, rows across height
     const padX = compact ? 40 : 60;
     const padY = compact ? 30 : 40;
-    const layerCount = 6;
+    const layerCount = 5;
     const maxRows = 4;
     const layerSpacing = (width - padX * 2) / (layerCount - 1);
     const rowSpacing = (height - padY * 2) / (maxRows - 1);
@@ -216,7 +205,7 @@
       .attr('transform', d => `translate(${nodeX(d)}, ${nodeY(d)})`);
 
     nodeGs.append('circle')
-      .attr('r', d => d.id === 'nats' ? nodeRadius * 1.3 : nodeRadius)
+      .attr('r', d => d.id === 'gateway' ? nodeRadius * 1.3 : nodeRadius)
       .attr('fill', 'var(--theme-surface)')
       .attr('stroke', d => isNodeActive(d) ? d.color : 'var(--theme-text-muted)')
       .attr('stroke-width', 2.5)
