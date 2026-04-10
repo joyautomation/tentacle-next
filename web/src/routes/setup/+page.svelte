@@ -120,7 +120,7 @@
 
         <ArchitectureCard
           title="NAT"
-          description="Network address translation between private and public networks. Manage interfaces and firewall rules."
+          description="Network address translation between networks. Manage one to one communications between subnets."
           selected={selectedArchetype === 'nat-gateway'}
           onclick={() => selectArchetype('nat-gateway')}
         >

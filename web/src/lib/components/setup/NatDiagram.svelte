@@ -28,15 +28,15 @@
   function buildDiagram(): { nodes: DiagramNode[]; links: DiagramLink[] } {
     const nodes: DiagramNode[] = [
       // Private side (left)
-      { id: 'priv-1', label: '192.168.1.10', abbr: '.10', layer: 0, row: 0.5, color: 'var(--color-amber-500, #f59e0b)' },
-      { id: 'priv-2', label: '192.168.1.20', abbr: '.20', layer: 0, row: 2, color: 'var(--color-amber-500, #f59e0b)' },
-      { id: 'priv-3', label: '192.168.1.30', abbr: '.30', layer: 0, row: 3.5, color: 'var(--color-amber-500, #f59e0b)' },
+      { id: 'priv-1', label: '192.168.1.10', abbr: '.10', layer: 0, row: 0, color: 'var(--color-amber-500, #f59e0b)' },
+      { id: 'priv-2', label: '192.168.1.20', abbr: '.20', layer: 0, row: 1.5, color: 'var(--color-amber-500, #f59e0b)' },
+      { id: 'priv-3', label: '192.168.1.30', abbr: '.30', layer: 0, row: 3, color: 'var(--color-amber-500, #f59e0b)' },
       // NAT (center)
-      { id: 'nat', label: 'NAT', abbr: 'NAT', layer: 1, row: 2, color: 'var(--color-purple-500, #a855f7)' },
+      { id: 'nat', label: 'NAT', abbr: 'NAT', layer: 1, row: 1.5, color: 'var(--color-purple-500, #a855f7)' },
       // Public side (right)
-      { id: 'pub-1', label: '10.0.0.50', abbr: '.50', layer: 2, row: 0.5, color: 'var(--color-sky-500, #0ea5e9)' },
-      { id: 'pub-2', label: '10.0.0.60', abbr: '.60', layer: 2, row: 2, color: 'var(--color-sky-500, #0ea5e9)' },
-      { id: 'pub-3', label: '10.0.0.70', abbr: '.70', layer: 2, row: 3.5, color: 'var(--color-sky-500, #0ea5e9)' },
+      { id: 'pub-1', label: '10.0.0.50', abbr: '.50', layer: 2, row: 0, color: 'var(--color-sky-500, #0ea5e9)' },
+      { id: 'pub-2', label: '10.0.0.60', abbr: '.60', layer: 2, row: 1.5, color: 'var(--color-sky-500, #0ea5e9)' },
+      { id: 'pub-3', label: '10.0.0.70', abbr: '.70', layer: 2, row: 3, color: 'var(--color-sky-500, #0ea5e9)' },
     ];
 
     const links: DiagramLink[] = [
