@@ -6,11 +6,17 @@
   import { getServiceName } from '$lib/constants/services';
 
   interface Props {
+    archetype: string;
     selectedProtocols: Set<string>;
     mqttConfig: MqttConfig;
   }
 
-  let { selectedProtocols, mqttConfig }: Props = $props();
+  let { archetype, selectedProtocols, mqttConfig }: Props = $props();
+
+  const ARCHETYPE_NAMES: Record<string, string> = {
+    'sparkplug-gateway': 'Sparkplug Gateway',
+    'nat-gateway': 'NAT Gateway',
+  };
 
   type StepStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -28,124 +34,120 @@
     steps[index] = { ...steps[index], status, error };
   }
 
+  async function enableModule(moduleId: string, label: string): Promise<boolean> {
+    const idx = steps.length;
+    steps.push({ label, status: 'running' });
+    const result = await apiPut(`/orchestrator/desired-services/${moduleId}`, {
+      version: 'latest',
+      running: true,
+    });
+    if (result.error) {
+      updateStep(idx, 'error', `Failed: ${result.error.error}`);
+      return false;
+    }
+    updateStep(idx, 'done');
+    return true;
+  }
+
+  async function waitForModules(moduleIds: Set<string>): Promise<boolean> {
+    const idx = steps.length;
+    steps.push({ label: 'Waiting for services to start', status: 'running' });
+
+    const maxAttempts = 30;
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      await new Promise(r => setTimeout(r, 2000));
+      attempts++;
+
+      const statusResult = await api<Array<{
+        moduleId: string;
+        systemdState: string;
+        reconcileState: string;
+      }>>('/orchestrator/service-statuses');
+
+      if (statusResult.error) continue;
+
+      const statuses = statusResult.data ?? [];
+      const allActive = [...moduleIds].every(modId => {
+        const s = statuses.find(st => st.moduleId === modId);
+        return s && s.systemdState === 'active' && s.reconcileState === 'ok';
+      });
+
+      if (allActive) {
+        updateStep(idx, 'done');
+        return true;
+      }
+
+      const errored = statuses.find(s =>
+        moduleIds.has(s.moduleId) && s.reconcileState === 'error'
+      );
+      if (errored) {
+        updateStep(idx, 'error', `${errored.moduleId} failed to start`);
+        return false;
+      }
+    }
+
+    updateStep(idx, 'error', 'Timed out waiting for services');
+    return false;
+  }
+
+  async function applySparkplugGateway() {
+    // Write MQTT config
+    const configIdx = steps.length;
+    steps.push({ label: 'Writing MQTT configuration', status: 'running' });
+    const configEntries = Object.entries(mqttConfig).filter(([_, v]) => v !== '');
+    for (const [envVar, value] of configEntries) {
+      const result = await apiPut(`/config/mqtt/${envVar}`, { value });
+      if (result.error) {
+        updateStep(configIdx, 'error', `Failed to set ${envVar}: ${result.error.error}`);
+        return false;
+      }
+    }
+    updateStep(configIdx, 'done');
+
+    // Enable scanners
+    const protocols = [...selectedProtocols];
+    for (const protocol of protocols) {
+      if (!await enableModule(protocol, `Enabling ${getServiceName(protocol)}`)) return false;
+    }
+
+    // Enable gateway and MQTT
+    if (!await enableModule('gateway', 'Enabling Gateway')) return false;
+    if (!await enableModule('mqtt', 'Enabling MQTT bridge')) return false;
+
+    // Wait for all
+    const expected = new Set([...protocols, 'gateway', 'mqtt']);
+    return await waitForModules(expected);
+  }
+
+  async function applyNatGateway() {
+    if (!await enableModule('network', 'Enabling Network Manager')) return false;
+    if (!await enableModule('nftables', 'Enabling Firewall (nftables)')) return false;
+
+    return await waitForModules(new Set(['network', 'nftables']));
+  }
+
   async function applyConfiguration() {
     applying = true;
     done = false;
     steps = [];
 
-    // Step 1: Write MQTT config
-    const configStep: ApplyStep = { label: 'Writing MQTT configuration', status: 'running' };
-    steps.push(configStep);
-
-    const configEntries = Object.entries(mqttConfig).filter(([_, v]) => v !== '');
-    for (const [envVar, value] of configEntries) {
-      const result = await apiPut(`/config/mqtt/${envVar}`, { value });
-      if (result.error) {
-        updateStep(0, 'error', `Failed to set ${envVar}: ${result.error.error}`);
-        applying = false;
-        return;
-      }
-    }
-    updateStep(0, 'done');
-
-    // Step 2: Enable scanner modules
-    const protocols = [...selectedProtocols];
-    for (const protocol of protocols) {
-      const idx = steps.length;
-      steps.push({ label: `Enabling ${getServiceName(protocol)}`, status: 'running' });
-      const result = await apiPut(`/orchestrator/desired-services/${protocol}`, {
-        version: 'latest',
-        running: true,
-      });
-      if (result.error) {
-        updateStep(idx, 'error', `Failed: ${result.error.error}`);
-        applying = false;
-        return;
-      }
-      updateStep(idx, 'done');
+    let success = false;
+    switch (archetype) {
+      case 'sparkplug-gateway':
+        success = await applySparkplugGateway();
+        break;
+      case 'nat-gateway':
+        success = await applyNatGateway();
+        break;
     }
 
-    // Step 3: Enable gateway
-    {
-      const idx = steps.length;
-      steps.push({ label: 'Enabling Gateway', status: 'running' });
-      const result = await apiPut('/orchestrator/desired-services/gateway', {
-        version: 'latest',
-        running: true,
-      });
-      if (result.error) {
-        updateStep(idx, 'error', `Failed: ${result.error.error}`);
-        applying = false;
-        return;
-      }
-      updateStep(idx, 'done');
+    if (success) {
+      done = true;
+      saltState.addNotification({ message: 'Setup complete! All services are running.', type: 'success' });
     }
-
-    // Step 4: Enable MQTT bridge
-    {
-      const idx = steps.length;
-      steps.push({ label: 'Enabling MQTT bridge', status: 'running' });
-      const result = await apiPut('/orchestrator/desired-services/mqtt', {
-        version: 'latest',
-        running: true,
-      });
-      if (result.error) {
-        updateStep(idx, 'error', `Failed: ${result.error.error}`);
-        applying = false;
-        return;
-      }
-      updateStep(idx, 'done');
-    }
-
-    // Step 5: Wait for services to start
-    {
-      const idx = steps.length;
-      steps.push({ label: 'Waiting for services to start', status: 'running' });
-
-      const expectedModules = new Set([...protocols, 'gateway', 'mqtt']);
-      const maxAttempts = 30; // 60 seconds max
-      let attempts = 0;
-
-      while (attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 2000));
-        attempts++;
-
-        const statusResult = await api<Array<{
-          moduleId: string;
-          systemdState: string;
-          reconcileState: string;
-        }>>('/orchestrator/service-statuses');
-
-        if (statusResult.error) continue;
-
-        const statuses = statusResult.data ?? [];
-        const allActive = [...expectedModules].every(modId => {
-          const s = statuses.find(st => st.moduleId === modId);
-          return s && s.systemdState === 'active' && s.reconcileState === 'ok';
-        });
-
-        if (allActive) {
-          updateStep(idx, 'done');
-          done = true;
-          applying = false;
-          saltState.addNotification({ message: 'Setup complete! All services are running.', type: 'success' });
-          return;
-        }
-
-        // Check for errors
-        const errored = statuses.find(s =>
-          expectedModules.has(s.moduleId) && s.reconcileState === 'error'
-        );
-        if (errored) {
-          updateStep(idx, 'error', `${errored.moduleId} failed to start`);
-          applying = false;
-          return;
-        }
-      }
-
-      updateStep(idx, 'error', 'Timed out waiting for services');
-      applying = false;
-    }
+    applying = false;
   }
 
   function goToTopology() {
@@ -161,32 +163,42 @@
 
       <div class="summary-row">
         <span class="summary-label">Architecture</span>
-        <span class="summary-value">Sparkplug Gateway</span>
+        <span class="summary-value">{ARCHETYPE_NAMES[archetype] ?? archetype}</span>
       </div>
 
-      <div class="summary-row">
-        <span class="summary-label">Protocols</span>
-        <span class="summary-value">
-          {#each [...selectedProtocols] as protocol, i}
-            <span class="badge">{getServiceName(protocol)}</span>
-          {/each}
-        </span>
-      </div>
-
-      <div class="summary-row">
-        <span class="summary-label">MQTT Broker</span>
-        <span class="summary-value mono">{mqttConfig.MQTT_BROKER_URL}</span>
-      </div>
-
-      <div class="summary-row">
-        <span class="summary-label">Group / Node</span>
-        <span class="summary-value mono">{mqttConfig.MQTT_GROUP_ID} / {mqttConfig.MQTT_EDGE_NODE}</span>
-      </div>
-
-      {#if mqttConfig.MQTT_USERNAME}
+      {#if archetype === 'sparkplug-gateway'}
         <div class="summary-row">
-          <span class="summary-label">Authentication</span>
-          <span class="summary-value">Username: {mqttConfig.MQTT_USERNAME}</span>
+          <span class="summary-label">Protocols</span>
+          <span class="summary-value">
+            {#each [...selectedProtocols] as protocol}
+              <span class="badge">{getServiceName(protocol)}</span>
+            {/each}
+          </span>
+        </div>
+
+        <div class="summary-row">
+          <span class="summary-label">MQTT Broker</span>
+          <span class="summary-value mono">{mqttConfig.MQTT_BROKER_URL}</span>
+        </div>
+
+        <div class="summary-row">
+          <span class="summary-label">Group / Node</span>
+          <span class="summary-value mono">{mqttConfig.MQTT_GROUP_ID} / {mqttConfig.MQTT_EDGE_NODE}</span>
+        </div>
+
+        {#if mqttConfig.MQTT_USERNAME}
+          <div class="summary-row">
+            <span class="summary-label">Authentication</span>
+            <span class="summary-value">Username: {mqttConfig.MQTT_USERNAME}</span>
+          </div>
+        {/if}
+      {:else if archetype === 'nat-gateway'}
+        <div class="summary-row">
+          <span class="summary-label">Modules</span>
+          <span class="summary-value">
+            <span class="badge">Network Manager</span>
+            <span class="badge">Firewall (nftables)</span>
+          </span>
         </div>
       {/if}
     </section>

@@ -4,13 +4,28 @@
   import WizardStepper from '$lib/components/setup/WizardStepper.svelte';
   import ArchitectureCard from '$lib/components/setup/ArchitectureCard.svelte';
   import SparkplugDiagram from '$lib/components/setup/SparkplugDiagram.svelte';
+  import NatDiagram from '$lib/components/setup/NatDiagram.svelte';
   import ProtocolSelector from '$lib/components/setup/ProtocolSelector.svelte';
   import MqttConfigForm from '$lib/components/setup/MqttConfigForm.svelte';
   import ReviewPanel from '$lib/components/setup/ReviewPanel.svelte';
 
   let { data }: { data: PageData } = $props();
 
-  const STEPS = ['Architecture', 'Protocols', 'MQTT Config', 'Review'];
+  // Step IDs used by archetypes
+  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'review';
+
+  const STEP_LABELS: Record<StepId, string> = {
+    'architecture': 'Architecture',
+    'protocols': 'Protocols',
+    'mqtt-config': 'MQTT Config',
+    'review': 'Review',
+  };
+
+  // Each archetype defines which steps it needs (architecture + review are always first/last)
+  const ARCHETYPE_STEPS: Record<string, StepId[]> = {
+    'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'review'],
+    'nat-gateway': ['architecture', 'review'],
+  };
 
   // Wizard state
   let currentStep = $state(0);
@@ -25,21 +40,29 @@
     MQTT_PASSWORD: '',
   });
 
+  // Dynamic steps based on selected archetype
+  const activeSteps = $derived<StepId[]>(
+    selectedArchetype ? ARCHETYPE_STEPS[selectedArchetype] : ['architecture']
+  );
+  const stepLabels = $derived(activeSteps.map(id => STEP_LABELS[id]));
+  const currentStepId = $derived<StepId>(activeSteps[currentStep] ?? 'architecture');
+  const isLastStep = $derived(currentStep === activeSteps.length - 1);
+
   // Validation per step
   const canProceed = $derived.by(() => {
-    switch (currentStep) {
-      case 0: return selectedArchetype !== null;
-      case 1: return selectedProtocols.size > 0;
-      case 2: return mqttConfig.MQTT_BROKER_URL.trim() !== '' &&
+    switch (currentStepId) {
+      case 'architecture': return selectedArchetype !== null;
+      case 'protocols': return selectedProtocols.size > 0;
+      case 'mqtt-config': return mqttConfig.MQTT_BROKER_URL.trim() !== '' &&
                      mqttConfig.MQTT_GROUP_ID.trim() !== '' &&
                      mqttConfig.MQTT_EDGE_NODE.trim() !== '';
-      case 3: return true;
+      case 'review': return true;
       default: return false;
     }
   });
 
   function next() {
-    if (canProceed && currentStep < STEPS.length - 1) {
+    if (canProceed && !isLastStep) {
       currentStep++;
     }
   }
@@ -47,6 +70,14 @@
   function back() {
     if (currentStep > 0) {
       currentStep--;
+    }
+  }
+
+  function selectArchetype(id: string) {
+    if (selectedArchetype !== id) {
+      selectedArchetype = id;
+      // Reset to step 0 when switching archetype
+      currentStep = 0;
     }
   }
 
@@ -60,16 +91,16 @@
     <p class="subtitle">Configure your tentacle in a few steps</p>
   </div>
 
-  {#if hasExistingConfig && currentStep === 0}
+  {#if hasExistingConfig && currentStepId === 'architecture'}
     <div class="notice">
       Services are already configured. Running the wizard again will update your configuration.
     </div>
   {/if}
 
-  <WizardStepper steps={STEPS} {currentStep} onStepClick={(s) => { currentStep = s; }} />
+  <WizardStepper steps={stepLabels} {currentStep} onStepClick={(s) => { currentStep = s; }} />
 
   <div class="step-content">
-    {#if currentStep === 0}
+    {#if currentStepId === 'architecture'}
       <div class="step-intro">
         <h2>Choose an Architecture</h2>
         <p>Select how you'd like to set up your tentacle.</p>
@@ -79,7 +110,7 @@
           title="Sparkplug Gateway"
           description="Connect industrial device scanners to an MQTT Sparkplug B infrastructure. Supports EtherNet/IP, OPC UA, Modbus, and SNMP."
           selected={selectedArchetype === 'sparkplug-gateway'}
-          onclick={() => { selectedArchetype = 'sparkplug-gateway'; }}
+          onclick={() => selectArchetype('sparkplug-gateway')}
           badge="Recommended"
         >
           {#snippet diagram()}
@@ -87,13 +118,19 @@
           {/snippet}
         </ArchitectureCard>
 
-        <!-- Future archetypes go here -->
-        <div class="card-placeholder">
-          <span>More architectures coming soon</span>
-        </div>
+        <ArchitectureCard
+          title="NAT Gateway"
+          description="Configure network address translation and firewall rules. Manage network interfaces and nftables."
+          selected={selectedArchetype === 'nat-gateway'}
+          onclick={() => selectArchetype('nat-gateway')}
+        >
+          {#snippet diagram()}
+            <NatDiagram compact={true} />
+          {/snippet}
+        </ArchitectureCard>
       </div>
 
-    {:else if currentStep === 1}
+    {:else if currentStepId === 'protocols'}
       <div class="step-intro">
         <h2>Select Protocols</h2>
         <p>Which industrial protocols does your environment use? Select all that apply.</p>
@@ -106,7 +143,7 @@
         <SparkplugDiagram activeProtocols={selectedProtocols} compact={false} />
       </div>
 
-    {:else if currentStep === 2}
+    {:else if currentStepId === 'mqtt-config'}
       <div class="step-intro">
         <h2>MQTT Broker Settings</h2>
         <p>Configure the connection to your MQTT broker and Sparkplug B identity.</p>
@@ -116,15 +153,16 @@
         onchange={(c) => { mqttConfig = c; }}
       />
 
-    {:else if currentStep === 3}
+    {:else if currentStepId === 'review'}
       <ReviewPanel
+        archetype={selectedArchetype ?? 'sparkplug-gateway'}
         {selectedProtocols}
         {mqttConfig}
       />
     {/if}
   </div>
 
-  {#if currentStep < 3}
+  {#if !isLastStep}
     <div class="nav-buttons">
       {#if currentStep > 0}
         <button class="btn-secondary" onclick={back}>Back</button>
@@ -200,21 +238,6 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 1rem;
-  }
-
-  .card-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 200px;
-    border: 2px dashed var(--theme-border);
-    border-radius: var(--rounded-lg);
-
-    span {
-      font-size: 0.8125rem;
-      color: var(--theme-text-muted);
-      opacity: 0.5;
-    }
   }
 
   .diagram-preview {
