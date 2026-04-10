@@ -32,7 +32,7 @@
         oninput={(e) => update('MQTT_BROKER_URL', (e.target as HTMLInputElement).value)}
         placeholder="tcp://localhost:1883"
       />
-      <span class="field-hint">Use tcp:// for plain MQTT or ssl:// for TLS</span>
+      <span class="field-hint">Use tcp:// or mqtt:// for plain MQTT, ssl:// or mqtts:// for TLS</span>
     </div>
     <div class="form-field">
       <label class="field-label" for="mqtt-username">Username</label>
