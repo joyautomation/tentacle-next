@@ -248,6 +248,9 @@ func (m *Module) routes() http.Handler {
 		r.Get("/config/{moduleId}", m.handleGetServiceConfig)
 		r.Put("/config/{moduleId}/{envVar}", m.handleUpdateServiceConfig)
 
+		// Manifest export
+		r.Get("/export", m.handleExport)
+
 		// Orchestrator
 		r.Get("/orchestrator/desired-services", m.handleListDesiredServices)
 		r.Put("/orchestrator/desired-services/{moduleId}", m.handleSetDesiredService)
