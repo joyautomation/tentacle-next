@@ -254,6 +254,9 @@ func (m *Module) routes() http.Handler {
 		r.Post("/validate", m.handleValidate)
 		r.Post("/diff", m.handleDiff)
 
+		// System
+		r.Post("/system/factory-reset", m.handleFactoryReset)
+
 		// Orchestrator
 		r.Get("/orchestrator/desired-services", m.handleListDesiredServices)
 		r.Put("/orchestrator/desired-services/{moduleId}", m.handleSetDesiredService)

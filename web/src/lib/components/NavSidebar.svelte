@@ -13,9 +13,12 @@
     CircleStack,
     Squares2x2,
     PlusCircle,
-    RocketLaunch
+    RocketLaunch,
+    ArrowPath
   } from '@joyautomation/salt/icons';
   import { getServiceName, getModuleName } from '$lib/constants/services';
+  import { apiPost } from '$lib/api/client';
+  import { goto } from '$app/navigation';
 
   interface Service {
     serviceType: string;
@@ -95,6 +98,22 @@
 
   function getModuleIcon(moduleId: string) {
     return moduleIcons[moduleId] ?? Squares2x2;
+  }
+
+  let showResetModal = $state(false);
+  let resetConfirmInput = $state('');
+  let resetting = $state(false);
+
+  async function performFactoryReset() {
+    resetting = true;
+    const result = await apiPost<{ success: boolean }>('/system/factory-reset');
+    resetting = false;
+    if (result.data?.success) {
+      showResetModal = false;
+      resetConfirmInput = '';
+      sessionStorage.removeItem('setup_dismissed');
+      goto('/setup');
+    }
   }
 
   function close() {
@@ -182,7 +201,40 @@
       {/each}
     </ul>
   {/if}
+
+  <div class="sidebar-footer">
+    <button class="sidebar-item reset-btn" onclick={() => { showResetModal = true; }}>
+      <ArrowPath size="1.25rem" />
+      <span>Factory Reset</span>
+    </button>
+  </div>
 </nav>
+
+{#if showResetModal}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onkeydown={(e) => { if (e.key === 'Escape') { showResetModal = false; resetConfirmInput = ''; } }} onclick={() => { showResetModal = false; resetConfirmInput = ''; }}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h2>Factory Reset</h2>
+      <p class="modal-warning">This will erase all configuration and return Tentacle to its initial state. All modules, gateways, devices, variables, and settings will be permanently removed.</p>
+      <p class="modal-confirm-label">Type <strong>RESET</strong> to confirm:</p>
+      <input
+        class="modal-input"
+        bind:value={resetConfirmInput}
+        placeholder="RESET"
+        onkeydown={(e) => { if (e.key === 'Enter' && resetConfirmInput === 'RESET') performFactoryReset(); }}
+      />
+      <div class="modal-actions">
+        <button class="modal-cancel-btn" onclick={() => { showResetModal = false; resetConfirmInput = ''; }}>Cancel</button>
+        <button
+          class="modal-delete-btn"
+          disabled={resetConfirmInput !== 'RESET' || resetting}
+          onclick={performFactoryReset}
+        >{resetting ? 'Resetting...' : 'Factory Reset'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style lang="scss">
   .sidebar-backdrop {
@@ -329,5 +381,122 @@
   .sidebar-item:hover .available-badge {
     opacity: 1;
     color: var(--theme-primary);
+  }
+
+  .sidebar-footer {
+    border-top: 1px solid var(--theme-border);
+    padding: 0.5rem 0;
+    flex-shrink: 0;
+  }
+
+  .reset-btn {
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    color: var(--theme-text-muted);
+
+    &:hover {
+      color: var(--badge-red-text, #ef4444);
+    }
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal {
+    background: var(--theme-background);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-lg);
+    padding: 1.5rem;
+    max-width: 28rem;
+    width: 90%;
+
+    h2 {
+      margin: 0 0 1rem;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--theme-text);
+    }
+  }
+
+  .modal-warning {
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    margin: 0 0 1rem;
+    line-height: 1.5;
+  }
+
+  .modal-confirm-label {
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    margin: 0 0 0.5rem;
+  }
+
+  .modal-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-family: 'IBM Plex Mono', monospace;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    background: var(--theme-surface);
+    color: var(--theme-text);
+    box-sizing: border-box;
+
+    &:focus {
+      outline: none;
+      border-color: var(--theme-primary);
+    }
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .modal-cancel-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    background: var(--theme-surface);
+    color: var(--theme-text);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--theme-border);
+    }
+  }
+
+  .modal-delete-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border: none;
+    border-radius: var(--rounded-md);
+    background: #ef4444;
+    color: white;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: #dc2626;
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   }
 </style>
