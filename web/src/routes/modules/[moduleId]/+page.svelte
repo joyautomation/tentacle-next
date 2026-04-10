@@ -9,6 +9,7 @@
     XCircle,
     ArrowDownTray,
   } from '@joyautomation/salt/icons';
+  import GitOpsSetup from '$lib/components/GitOpsSetup.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -250,7 +251,9 @@
             <span class="value">{data.desiredService.running ? 'Yes' : 'No'}</span>
           </div>
         {/if}
-        {#if needsConfig}
+        {#if needsConfig && data.moduleId === 'gitops'}
+          <GitOpsSetup />
+        {:else if needsConfig}
           <form class="config-form" onsubmit={(e) => { e.preventDefault(); saveConfig(); }}>
             <p class="config-hint">Complete the required configuration to start this module.</p>
             {#each requiredConfig as field}
