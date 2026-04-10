@@ -14,7 +14,9 @@
     Squares2x2,
     PlusCircle,
     RocketLaunch,
-    ArrowPath
+    ArrowPath,
+    ArrowDownTray,
+    ArrowUpTray
   } from '@joyautomation/salt/icons';
   import { getServiceName, getModuleName } from '$lib/constants/services';
   import { apiPost } from '$lib/api/client';
@@ -116,6 +118,76 @@
     }
   }
 
+  // Export config
+  function exportConfig() {
+    close();
+    window.location.href = '/api/v1/export';
+  }
+
+  // Import config
+  interface ApplyResult {
+    applied: { kind: string; name: string }[];
+    skipped?: { kind: string; name: string; reason: string }[];
+  }
+
+  let showImportModal = $state(false);
+  let importFileName = $state('');
+  let importYaml = $state('');
+  let importing = $state(false);
+  let importResult = $state<ApplyResult | null>(null);
+  let importError = $state('');
+  let fileInput: HTMLInputElement;
+
+  function openFilePicker() {
+    close();
+    fileInput.click();
+  }
+
+  function handleFileSelected(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    importFileName = file.name;
+    const reader = new FileReader();
+    reader.onload = () => {
+      importYaml = reader.result as string;
+      importResult = null;
+      importError = '';
+      showImportModal = true;
+    };
+    reader.readAsText(file);
+    input.value = '';
+  }
+
+  async function performImport() {
+    importing = true;
+    importError = '';
+    try {
+      const response = await fetch('/api/v1/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-yaml', 'X-Config-Source': 'gui' },
+        body: importYaml,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        importError = text;
+      } else {
+        importResult = await response.json();
+      }
+    } catch (err) {
+      importError = err instanceof Error ? err.message : 'Network error';
+    }
+    importing = false;
+  }
+
+  function closeImportModal() {
+    showImportModal = false;
+    importFileName = '';
+    importYaml = '';
+    importResult = null;
+    importError = '';
+  }
+
   function close() {
     open = false;
   }
@@ -203,12 +275,69 @@
   {/if}
 
   <div class="sidebar-footer">
+    <span class="sidebar-section-label">System</span>
+    <button class="sidebar-item footer-btn" onclick={exportConfig}>
+      <ArrowDownTray size="1.25rem" />
+      <span>Export Config</span>
+    </button>
+    <button class="sidebar-item footer-btn" onclick={openFilePicker}>
+      <ArrowUpTray size="1.25rem" />
+      <span>Import Config</span>
+    </button>
     <button class="sidebar-item reset-btn" onclick={() => { showResetModal = true; }}>
       <ArrowPath size="1.25rem" />
       <span>Factory Reset</span>
     </button>
   </div>
 </nav>
+
+<input type="file" accept=".yaml,.yml" bind:this={fileInput} onchange={handleFileSelected} style="display:none" />
+
+{#if showImportModal}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onkeydown={(e) => { if (e.key === 'Escape') closeImportModal(); }} onclick={closeImportModal}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal modal-wide" onclick={(e) => e.stopPropagation()}>
+      {#if importResult}
+        <h2>Import Complete</h2>
+        <div class="import-results">
+          {#if importResult.applied.length > 0}
+            <p class="result-label">Applied ({importResult.applied.length}):</p>
+            <ul class="result-list">
+              {#each importResult.applied as r}
+                <li class="result-applied">{r.kind}/{r.name}</li>
+              {/each}
+            </ul>
+          {/if}
+          {#if importResult.skipped && importResult.skipped.length > 0}
+            <p class="result-label">Skipped ({importResult.skipped.length}):</p>
+            <ul class="result-list">
+              {#each importResult.skipped as r}
+                <li class="result-skipped">{r.kind}/{r.name} — {r.reason}</li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+        <div class="modal-actions">
+          <button class="modal-cancel-btn" onclick={closeImportModal}>Close</button>
+        </div>
+      {:else}
+        <h2>Import Config</h2>
+        <p class="modal-warning">Apply configuration from <strong>{importFileName}</strong>. This will overwrite any matching resources in the current system.</p>
+        {#if importError}
+          <div class="import-error">{importError}</div>
+        {/if}
+        <div class="yaml-preview"><pre>{importYaml}</pre></div>
+        <div class="modal-actions">
+          <button class="modal-cancel-btn" onclick={closeImportModal}>Cancel</button>
+          <button class="modal-apply-btn" onclick={performImport} disabled={importing}>
+            {importing ? 'Applying...' : 'Apply'}
+          </button>
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 {#if showResetModal}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -389,6 +518,15 @@
     flex-shrink: 0;
   }
 
+  .footer-btn {
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    color: var(--theme-text-muted);
+  }
+
   .reset-btn {
     width: 100%;
     background: none;
@@ -498,5 +636,94 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
+  }
+
+  .modal-apply-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border: none;
+    border-radius: var(--rounded-md);
+    background: var(--theme-primary);
+    color: white;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      filter: brightness(1.1);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  .modal-wide {
+    max-width: 36rem;
+  }
+
+  .yaml-preview {
+    max-height: 16rem;
+    overflow: auto;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+
+    pre {
+      margin: 0;
+      font-size: 0.75rem;
+      font-family: 'IBM Plex Mono', monospace;
+      color: var(--theme-text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+
+  .import-error {
+    padding: 0.625rem 0.75rem;
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    border-radius: var(--rounded-md);
+    color: #ef4444;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .import-results {
+    margin-bottom: 1rem;
+  }
+
+  .result-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--theme-text);
+    margin: 0.75rem 0 0.25rem;
+  }
+
+  .result-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+
+    li {
+      font-size: 0.8125rem;
+      font-family: 'IBM Plex Mono', monospace;
+      padding: 0.25rem 0;
+      color: var(--theme-text-muted);
+    }
+  }
+
+  .result-applied::before {
+    content: '+ ';
+    color: #22c55e;
+  }
+
+  .result-skipped::before {
+    content: '~ ';
+    color: #eab308;
   }
 </style>
