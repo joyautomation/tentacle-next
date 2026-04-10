@@ -119,8 +119,8 @@
         </ArchitectureCard>
 
         <ArchitectureCard
-          title="NAT Gateway"
-          description="Configure network address translation and firewall rules. Manage network interfaces and nftables."
+          title="NAT"
+          description="Network address translation between private and public networks. Manage interfaces and firewall rules."
           selected={selectedArchetype === 'nat-gateway'}
           onclick={() => selectArchetype('nat-gateway')}
         >

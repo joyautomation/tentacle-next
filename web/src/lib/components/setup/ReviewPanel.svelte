@@ -15,7 +15,7 @@
 
   const ARCHETYPE_NAMES: Record<string, string> = {
     'sparkplug-gateway': 'Sparkplug Gateway',
-    'nat-gateway': 'NAT Gateway',
+    'nat-gateway': 'NAT',
   };
 
   type StepStatus = 'pending' | 'running' | 'done' | 'error';

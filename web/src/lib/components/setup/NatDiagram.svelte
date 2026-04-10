@@ -27,22 +27,25 @@
 
   function buildDiagram(): { nodes: DiagramNode[]; links: DiagramLink[] } {
     const nodes: DiagramNode[] = [
-      { id: 'lan-1', label: 'LAN Device', abbr: 'LAN', layer: 0, row: 0.5, color: 'var(--color-amber-500, #f59e0b)' },
-      { id: 'lan-2', label: 'LAN Device', abbr: 'LAN', layer: 0, row: 2, color: 'var(--color-amber-500, #f59e0b)' },
-      { id: 'lan-3', label: 'LAN Device', abbr: 'LAN', layer: 0, row: 3.5, color: 'var(--color-amber-500, #f59e0b)' },
-      { id: 'network', label: 'Network Mgr', abbr: 'NET', layer: 1, row: 1.25, color: 'var(--color-teal-500, #14b8a6)' },
-      { id: 'nftables', label: 'Firewall', abbr: 'NFT', layer: 1, row: 2.75, color: 'var(--color-teal-500, #14b8a6)' },
-      { id: 'tentacle', label: 'Tentacle', abbr: 'NATS', layer: 2, row: 2, color: 'var(--color-purple-500, #a855f7)' },
-      { id: 'wan', label: 'WAN / Internet', abbr: 'WAN', layer: 3, row: 2, color: 'var(--color-sky-500, #0ea5e9)' },
+      // Private side (left)
+      { id: 'priv-1', label: '192.168.1.10', abbr: '.10', layer: 0, row: 0.5, color: 'var(--color-amber-500, #f59e0b)' },
+      { id: 'priv-2', label: '192.168.1.20', abbr: '.20', layer: 0, row: 2, color: 'var(--color-amber-500, #f59e0b)' },
+      { id: 'priv-3', label: '192.168.1.30', abbr: '.30', layer: 0, row: 3.5, color: 'var(--color-amber-500, #f59e0b)' },
+      // NAT (center)
+      { id: 'nat', label: 'NAT', abbr: 'NAT', layer: 1, row: 2, color: 'var(--color-purple-500, #a855f7)' },
+      // Public side (right)
+      { id: 'pub-1', label: '10.0.0.50', abbr: '.50', layer: 2, row: 0.5, color: 'var(--color-sky-500, #0ea5e9)' },
+      { id: 'pub-2', label: '10.0.0.60', abbr: '.60', layer: 2, row: 2, color: 'var(--color-sky-500, #0ea5e9)' },
+      { id: 'pub-3', label: '10.0.0.70', abbr: '.70', layer: 2, row: 3.5, color: 'var(--color-sky-500, #0ea5e9)' },
     ];
 
     const links: DiagramLink[] = [
-      { source: 'lan-1', target: 'network' },
-      { source: 'lan-2', target: 'nftables' },
-      { source: 'lan-3', target: 'nftables' },
-      { source: 'network', target: 'tentacle' },
-      { source: 'nftables', target: 'tentacle' },
-      { source: 'tentacle', target: 'wan' },
+      { source: 'priv-1', target: 'nat' },
+      { source: 'priv-2', target: 'nat' },
+      { source: 'priv-3', target: 'nat' },
+      { source: 'nat', target: 'pub-1' },
+      { source: 'nat', target: 'pub-2' },
+      { source: 'nat', target: 'pub-3' },
     ];
 
     return { nodes, links };
@@ -82,7 +85,7 @@
 
     const padX = compact ? 35 : 50;
     const padY = compact ? 20 : 30;
-    const layerCount = 4;
+    const layerCount = 3;
     const maxRows = 4;
     const layerSpacing = (width - padX * 2) / (layerCount - 1);
     const rowSpacing = (height - padY * 2) / (maxRows - 1);
@@ -132,7 +135,7 @@
       .attr('transform', d => `translate(${nodeX(d)}, ${nodeY(d)})`);
 
     nodeGs.append('circle')
-      .attr('r', d => d.id === 'tentacle' ? nodeRadius * 1.3 : nodeRadius)
+      .attr('r', d => d.id === 'nat' ? nodeRadius * 1.4 : nodeRadius)
       .attr('fill', 'var(--theme-surface)')
       .attr('stroke', d => d.color)
       .attr('stroke-width', 2.5)
