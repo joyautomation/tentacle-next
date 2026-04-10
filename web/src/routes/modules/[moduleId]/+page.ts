@@ -1,12 +1,20 @@
 import type { PageLoad } from './$types';
 import { api } from '$lib/api/client';
 
+interface ConfigField {
+	envVar: string;
+	description: string;
+	required?: boolean;
+	default?: string;
+}
+
 interface ModuleRegistryInfo {
 	moduleId: string;
 	repo: string;
 	description: string;
 	category: string;
 	runtime: string;
+	requiredConfig?: ConfigField[];
 }
 
 interface ModuleVersionInfo {
@@ -38,13 +46,14 @@ export const load: PageLoad = async ({ params }) => {
 	const { moduleId } = params;
 
 	try {
-		const [modulesResult, versionsResult, internetResult, desiredResult, statusesResult] =
+		const [modulesResult, versionsResult, internetResult, desiredResult, statusesResult, configResult] =
 			await Promise.all([
 				api<ModuleRegistryInfo[]>('/orchestrator/modules'),
 				api<ModuleVersionInfo>(`/orchestrator/modules/${moduleId}/versions`),
 				api<boolean>('/orchestrator/internet'),
 				api<DesiredService[]>('/orchestrator/desired-services'),
 				api<ServiceStatus[]>('/orchestrator/service-statuses'),
+				api<{ moduleId: string; envVar: string; value: string }[]>(`/config/${moduleId}`),
 			]);
 
 		const firstError =
@@ -63,6 +72,7 @@ export const load: PageLoad = async ({ params }) => {
 				online: false,
 				desiredService: null,
 				serviceStatus: null,
+				existingConfig: [],
 				error: firstError,
 			};
 		}
@@ -83,6 +93,7 @@ export const load: PageLoad = async ({ params }) => {
 			online: internetResult.data ?? false,
 			desiredService,
 			serviceStatus,
+			existingConfig: configResult.data ?? [],
 			error: null,
 		};
 	} catch (e) {
@@ -93,6 +104,7 @@ export const load: PageLoad = async ({ params }) => {
 			online: false,
 			desiredService: null,
 			serviceStatus: null,
+			existingConfig: [],
 			error: e instanceof Error ? e.message : 'Failed to connect',
 		};
 	}

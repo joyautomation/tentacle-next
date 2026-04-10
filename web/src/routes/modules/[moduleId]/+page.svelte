@@ -14,6 +14,52 @@
 
   let selectedVersion = $state('latest');
   let installing = $state(false);
+  let savingConfig = $state(false);
+
+  // Config form values for required config fields
+  let configValues: Record<string, string> = $state({});
+
+  const requiredConfig = $derived(data.module?.requiredConfig ?? []);
+
+  // Build lookup from existing config
+  const existingConfigByEnvVar = $derived(
+    Object.fromEntries((data.existingConfig ?? []).map((e: { envVar: string; value: string }) => [e.envVar, e.value]))
+  );
+
+  // Initialize form values from existing config or defaults
+  $effect(() => {
+    const vals: Record<string, string> = {};
+    for (const field of requiredConfig) {
+      vals[field.envVar] = existingConfigByEnvVar[field.envVar] ?? field.default ?? '';
+    }
+    configValues = vals;
+  });
+
+  async function saveConfig() {
+    savingConfig = true;
+    const errors: string[] = [];
+
+    for (const field of requiredConfig) {
+      const value = configValues[field.envVar] ?? '';
+      if (field.required && !value) {
+        errors.push(`${field.envVar} is required`);
+        continue;
+      }
+      const result = await apiPut(`/config/${data.moduleId}/${field.envVar}`, { value });
+      if (result.error) {
+        errors.push(`${field.envVar}: ${result.error.error}`);
+      }
+    }
+
+    savingConfig = false;
+
+    if (errors.length > 0) {
+      saltState.addNotification({ message: errors.join('; '), type: 'error' });
+    } else {
+      saltState.addNotification({ message: 'Configuration saved', type: 'success' });
+      await invalidateAll();
+    }
+  }
 
   // Derive available version options
   const versionOptions = $derived(() => {
@@ -33,6 +79,7 @@
   const isInstalled = $derived(data.desiredService !== null || data.serviceStatus !== null);
   const isRunning = $derived(data.serviceStatus?.systemdState === 'active');
   const reconcileState = $derived(data.serviceStatus?.reconcileState ?? null);
+  const needsConfig = $derived(reconcileState === 'needs_config' && requiredConfig.length > 0);
 
   async function installModule() {
     installing = true;
@@ -203,7 +250,28 @@
             <span class="value">{data.desiredService.running ? 'Yes' : 'No'}</span>
           </div>
         {/if}
-        {#if data.serviceStatus?.lastError}
+        {#if needsConfig}
+          <form class="config-form" onsubmit={(e) => { e.preventDefault(); saveConfig(); }}>
+            <p class="config-hint">Complete the required configuration to start this module.</p>
+            {#each requiredConfig as field}
+              <div class="config-field">
+                <label for="cfg-{field.envVar}">{field.envVar}</label>
+                {#if field.description}
+                  <p class="field-desc">{field.description}</p>
+                {/if}
+                <input
+                  id="cfg-{field.envVar}"
+                  type="text"
+                  bind:value={configValues[field.envVar]}
+                  placeholder={field.default ?? ''}
+                />
+              </div>
+            {/each}
+            <button type="submit" class="save-btn" disabled={savingConfig}>
+              {savingConfig ? 'Saving...' : 'Save & Start'}
+            </button>
+          </form>
+        {:else if data.serviceStatus?.lastError}
           <div class="info-box error">
             <p>{data.serviceStatus.lastError}</p>
           </div>
@@ -411,6 +479,73 @@
     font-size: 0.75rem;
     color: var(--theme-text-muted);
     margin: 0;
+  }
+
+  .config-form {
+    margin-bottom: 1.5rem;
+  }
+
+  .config-hint {
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    margin: 0 0 1rem;
+  }
+
+  .config-field {
+    margin-bottom: 0.75rem;
+
+    label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--theme-text);
+      margin-bottom: 0.25rem;
+      font-family: var(--font-mono, monospace);
+    }
+
+    .field-desc {
+      font-size: 0.75rem;
+      color: var(--theme-text-muted);
+      margin: 0 0 0.375rem;
+    }
+
+    input[type='text'] {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      font-family: 'IBM Plex Mono', monospace;
+      background: var(--theme-surface);
+      border: 1px solid var(--theme-border);
+      border-radius: var(--rounded-md);
+      color: var(--theme-text);
+      outline: none;
+      box-sizing: border-box;
+
+      &:focus {
+        border-color: var(--theme-primary);
+      }
+    }
+  }
+
+  .save-btn {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: white;
+    background: var(--theme-primary);
+    border: none;
+    border-radius: var(--rounded-md);
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
   }
 
   .info-box {
