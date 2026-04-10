@@ -165,7 +165,7 @@
               <code>{sshKey.publicKey}</code>
             </div>
             <div class="key-actions">
-              <button class="btn secondary" onclick={copyPublicKey}>
+              <button class="btn secondary copy-btn" onclick={copyPublicKey}>
                 {copied ? 'Copied!' : 'Copy Public Key'}
               </button>
               <a
@@ -572,6 +572,10 @@
       background: var(--theme-surface);
       color: var(--theme-text);
       border: 1px solid var(--theme-border);
+    }
+
+    &.copy-btn {
+      min-width: 10rem;
     }
   }
 
