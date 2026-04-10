@@ -106,6 +106,7 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 		Description: "GitOps Config Sync",
 		Category:    "optional",
 		Runtime:     "embedded",
+		AptDeps:     []string{"git"},
 		RequiredConfig: []otypes.ConfigField{
 			{EnvVar: "GITOPS_REPO_URL", Description: "Git repository URL (SSH or HTTPS)", Required: true},
 		},

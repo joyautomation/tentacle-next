@@ -79,6 +79,20 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 		}
 	}
 
+	// Ensure system dependencies (apt packages) are installed.
+	if desired.Running && len(entry.AptDeps) > 0 {
+		if !ensureDeps(entry, rctx.log) {
+			reportStatus(rctx.b, entry, statusOpts{
+				InstalledVersions: []string{"embedded"},
+				ActiveVersion:     "embedded",
+				SystemdState:      "inactive",
+				ReconcileState:    "error",
+				LastError:         "Failed to install system dependencies",
+			}, rctx.log)
+			return
+		}
+	}
+
 	rctx.mod.mu.Lock()
 	_, isRunning := rctx.mod.running[desired.ModuleID]
 	rctx.mod.mu.Unlock()
