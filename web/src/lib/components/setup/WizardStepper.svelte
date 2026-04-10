@@ -38,7 +38,7 @@
 <style lang="scss">
   .wizard-stepper {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     gap: 0;
     padding: 1.5rem 1rem;
@@ -49,6 +49,8 @@
     height: 2px;
     background: var(--theme-border);
     transition: background 0.3s;
+    // Align to the vertical center of the step-number circle (2rem / 2 = 1rem)
+    margin-top: calc(1rem - 1px);
 
     &.completed {
       background: var(--theme-primary);
