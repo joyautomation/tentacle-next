@@ -201,12 +201,13 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 
 // transformBrowseResult converts a scanner BrowseResult into the frontend BrowseCache shape.
 func transformBrowseResult(raw []byte, deviceID, protocol string) json.RawMessage {
-	// Parse the scanner response generically (supports both EtherNet/IP and SNMP shapes).
+	// Parse the scanner response generically (supports EtherNet/IP, SNMP, and network shapes).
 	var scanner struct {
 		Variables  []json.RawMessage          `json:"variables"`
 		OIDs       []json.RawMessage          `json:"oids"`
 		Udts       map[string]json.RawMessage `json:"udts"`
 		StructTags map[string]string          `json:"structTags"`
+		Instances  []json.RawMessage          `json:"instances"` // network: discovered UDT instances
 	}
 	if err := json.Unmarshal(raw, &scanner); err != nil {
 		return raw // fallback to raw
@@ -279,12 +280,19 @@ func transformBrowseResult(raw []byte, deviceID, protocol string) json.RawMessag
 		structTags = make(map[string]string)
 	}
 
+	// Include instances for protocols that support auto-discovery (e.g. network)
+	instances := scanner.Instances
+	if instances == nil {
+		instances = make([]json.RawMessage, 0)
+	}
+
 	cache := struct {
 		DeviceID   string            `json:"deviceId"`
 		Protocol   string            `json:"protocol"`
 		Items      []browseCacheItem `json:"items"`
 		Udts       []json.RawMessage `json:"udts"`
 		StructTags map[string]string `json:"structTags"`
+		Instances  []json.RawMessage `json:"instances"`
 		CachedAt   string            `json:"cachedAt"`
 	}{
 		DeviceID:   deviceID,
@@ -292,6 +300,7 @@ func transformBrowseResult(raw []byte, deviceID, protocol string) json.RawMessag
 		Items:      items,
 		Udts:       udts,
 		StructTags: structTags,
+		Instances:  instances,
 		CachedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 

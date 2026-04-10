@@ -19,6 +19,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/heartbeat"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
+	"github.com/joyautomation/tentacle/types"
 )
 
 const serviceType = "network"
@@ -82,6 +83,16 @@ func (n *Network) Start(ctx context.Context, b bus.Bus) error {
 	} else {
 		n.mu.Lock()
 		n.subs = append(n.subs, cmdSub)
+		n.mu.Unlock()
+	}
+
+	// Subscribe to network.browse (request/reply) for gateway discovery.
+	browseSub, err := b.Subscribe(topics.Browse("network"), n.handleBrowse)
+	if err != nil {
+		n.log.Error("network: failed to subscribe to browse", "error", err)
+	} else {
+		n.mu.Lock()
+		n.subs = append(n.subs, browseSub)
 		n.mu.Unlock()
 	}
 
@@ -154,8 +165,9 @@ func (n *Network) publishLoop() {
 	}
 }
 
-// publishInterfaces reads all network interfaces and publishes a
-// NetworkStateMessage to topics.NetworkInterfaces.
+// publishInterfaces reads all network interfaces and publishes:
+//  1. A bulk NetworkStateMessage to topics.NetworkInterfaces (for the web UI).
+//  2. Individual PlcDataMessage values per property per interface (for the gateway).
 func (n *Network) publishInterfaces() {
 	ifaces, err := readInterfaces(n.log)
 	if err != nil {
@@ -163,9 +175,12 @@ func (n *Network) publishInterfaces() {
 		return
 	}
 
+	nowMs := time.Now().UnixMilli()
+
+	// 1. Bulk publish for the web UI (unchanged).
 	msg := itypes.NetworkStateMessage{
 		ModuleID:   n.moduleID,
-		Timestamp:  time.Now().UnixMilli(),
+		Timestamp:  nowMs,
 		Interfaces: ifaces,
 	}
 
@@ -177,6 +192,78 @@ func (n *Network) publishInterfaces() {
 
 	if err := n.b.Publish(topics.NetworkInterfaces, data); err != nil {
 		n.log.Warn("network: failed to publish interfaces", "error", err)
+	}
+
+	// 2. Per-property publish for gateway consumption.
+	for _, iface := range ifaces {
+		n.publishInterfaceProperties(iface, nowMs)
+	}
+}
+
+// publishInterfaceProperties publishes individual PlcDataMessage values for
+// each property of a network interface to network.data.{ifaceName}.{prop}.
+func (n *Network) publishInterfaceProperties(iface itypes.NetworkInterface, nowMs int64) {
+	props := map[string]struct {
+		value    interface{}
+		datatype string
+	}{
+		"operstate": {iface.Operstate, "string"},
+		"carrier":   {iface.Carrier, "boolean"},
+		"speed":     {iface.Speed, "number"},
+		"mtu":       {iface.Mtu, "number"},
+		"mac":       {iface.Mac, "string"},
+	}
+	if iface.Statistics != nil {
+		props["rxBytes"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.RxBytes, "number"}
+		props["txBytes"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.TxBytes, "number"}
+		props["rxPackets"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.RxPackets, "number"}
+		props["txPackets"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.TxPackets, "number"}
+		props["rxErrors"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.RxErrors, "number"}
+		props["txErrors"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.TxErrors, "number"}
+		props["rxDropped"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.RxDropped, "number"}
+		props["txDropped"] = struct {
+			value    interface{}
+			datatype string
+		}{iface.Statistics.TxDropped, "number"}
+	}
+
+	sanitizedIface := types.SanitizeForSubject(iface.Name)
+	for prop, pv := range props {
+		dataMsg := types.PlcDataMessage{
+			ModuleID:   "network",
+			DeviceID:   iface.Name,
+			VariableID: prop,
+			Value:      pv.value,
+			Timestamp:  nowMs,
+			Datatype:   pv.datatype,
+		}
+		data, err := json.Marshal(dataMsg)
+		if err != nil {
+			continue
+		}
+		subject := topics.NetworkData(sanitizedIface + "." + prop)
+		_ = n.b.Publish(subject, data)
 	}
 }
 
@@ -208,6 +295,99 @@ func (n *Network) handleState(subject string, data []byte, reply bus.ReplyFunc) 
 		return
 	}
 	_ = reply(resp)
+}
+
+// handleBrowse responds to network.browse with discovered interfaces and their
+// properties, formatted as a browse result the gateway API can transform.
+func (n *Network) handleBrowse(subject string, data []byte, reply bus.ReplyFunc) {
+	if reply == nil {
+		return
+	}
+
+	// Parse optional browseId for async progress.
+	var req struct {
+		BrowseID string `json:"browseId"`
+		Async    bool   `json:"async"`
+	}
+	_ = json.Unmarshal(data, &req)
+
+	ifaces, err := readInterfaces(n.log)
+	if err != nil {
+		resp, _ := json.Marshal(map[string]string{"error": err.Error()})
+		_ = reply(resp)
+		return
+	}
+
+	// Build a UDT template for NetworkInterface.
+	templateMembers := []map[string]interface{}{
+		{"name": "operstate", "datatype": "string"},
+		{"name": "carrier", "datatype": "boolean"},
+		{"name": "speed", "datatype": "number"},
+		{"name": "mtu", "datatype": "number"},
+		{"name": "mac", "datatype": "string"},
+		{"name": "rxBytes", "datatype": "number"},
+		{"name": "txBytes", "datatype": "number"},
+		{"name": "rxPackets", "datatype": "number"},
+		{"name": "txPackets", "datatype": "number"},
+		{"name": "rxErrors", "datatype": "number"},
+		{"name": "txErrors", "datatype": "number"},
+		{"name": "rxDropped", "datatype": "number"},
+		{"name": "txDropped", "datatype": "number"},
+	}
+
+	udtTemplate := map[string]interface{}{
+		"name":    "NetworkInterface",
+		"version": "1.0",
+		"members": templateMembers,
+	}
+
+	// Build one UDT instance per discovered interface.
+	type udtInstance struct {
+		Name         string            `json:"name"`
+		TemplateName string            `json:"templateName"`
+		MemberTags   map[string]string `json:"memberTags"`
+	}
+	instances := make([]udtInstance, 0, len(ifaces))
+	for _, iface := range ifaces {
+		memberTags := make(map[string]string)
+		for _, m := range templateMembers {
+			name := m["name"].(string)
+			memberTags[name] = name
+		}
+		instances = append(instances, udtInstance{
+			Name:         iface.Name,
+			TemplateName: "NetworkInterface",
+			MemberTags:   memberTags,
+		})
+	}
+
+	// Send progress if async.
+	if req.Async && req.BrowseID != "" {
+		progress := map[string]interface{}{
+			"phase":           "completed",
+			"discoveredCount": len(ifaces),
+			"totalCount":      len(ifaces),
+			"message":         fmt.Sprintf("discovered %d interfaces", len(ifaces)),
+		}
+		progressData, _ := json.Marshal(progress)
+		_ = n.b.Publish(topics.BrowseProgress("network", req.BrowseID), progressData)
+
+		// Also publish result on the result subject.
+		result := map[string]interface{}{
+			"udts":      map[string]interface{}{"NetworkInterface": udtTemplate},
+			"instances": instances,
+		}
+		resultData, _ := json.Marshal(result)
+		_ = n.b.Publish(fmt.Sprintf("network.browse.result.%s", req.BrowseID), resultData)
+	}
+
+	resp := map[string]interface{}{
+		"udts":      map[string]interface{}{"NetworkInterface": udtTemplate},
+		"instances": instances,
+		"browseId":  req.BrowseID,
+	}
+	respData, _ := json.Marshal(resp)
+	_ = reply(respData)
 }
 
 // handleCommand is the handler for network.command request/reply messages.

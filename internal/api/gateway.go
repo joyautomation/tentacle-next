@@ -159,7 +159,7 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine which protocol modules are running by checking heartbeats.
-	protocolTypes := []string{"ethernetip", "opcua", "snmp", "modbus"}
+	protocolTypes := []string{"ethernetip", "opcua", "snmp", "modbus", "network"}
 	var available []string
 	keys, _ := m.bus.KVKeys(topics.BucketHeartbeats)
 	for _, key := range keys {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { GatewayConfig, GatewayDevice } from '$lib/types/gateway';
-  import { apiPut, apiDelete } from '$lib/api/client';
+  import { api, apiPut, apiPost, apiDelete } from '$lib/api/client';
   import { invalidateAll } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { slide } from 'svelte/transition';
@@ -27,6 +27,7 @@
     { value: 'opcua', label: 'OPC UA', defaultScanRate: 1000 },
     { value: 'snmp', label: 'SNMP', defaultScanRate: 5000 },
     { value: 'modbus', label: 'Modbus TCP', defaultScanRate: 1000 },
+    { value: 'network', label: 'Network', defaultScanRate: 10000 },
   ] as const;
 
   const protocolLabels: Record<string, string> = Object.fromEntries(
@@ -43,6 +44,12 @@
       ? allProtocols.filter(p => gatewayConfig!.availableProtocols!.includes(p.value))
       : []
   );
+
+  // Network interface discovery state
+  interface DiscoveredInterface { name: string; configured: boolean; }
+  let networkInterfaces: DiscoveredInterface[] = $state([]);
+  let networkLoading = $state(false);
+  let networkSelected: Record<string, boolean> = $state({});
 
   let newDevice = $state({
     deviceId: '',
@@ -121,6 +128,50 @@
     }
   }
 
+  async function discoverNetworkInterfaces() {
+    networkLoading = true;
+    try {
+      const result = await api<{ interfaces: DiscoveredInterface[] }>('/gateways/gateway/network/discover');
+      if (result.error) {
+        saltState.addNotification({ message: result.error.error, type: 'error' });
+      } else {
+        networkInterfaces = result.data.interfaces;
+        networkSelected = {};
+        for (const iface of networkInterfaces) {
+          if (!iface.configured) {
+            networkSelected[iface.name] = false;
+          }
+        }
+      }
+    } catch (err) {
+      saltState.addNotification({ message: err instanceof Error ? err.message : 'Discovery failed', type: 'error' });
+    } finally {
+      networkLoading = false;
+    }
+  }
+
+  async function addNetworkInterfaces() {
+    const selected = Object.entries(networkSelected).filter(([, v]) => v).map(([k]) => k);
+    if (selected.length === 0) return;
+    saving = true;
+    try {
+      const result = await apiPost('/gateways/gateway/network/add', { interfaces: selected });
+      if (result.error) {
+        saltState.addNotification({ message: result.error.error, type: 'error' });
+      } else {
+        saltState.addNotification({ message: `Added ${selected.length} network interface${selected.length !== 1 ? 's' : ''}`, type: 'success' });
+        networkInterfaces = [];
+        networkSelected = {};
+        showAddDevice = false;
+        await invalidateAll();
+      }
+    } catch (err) {
+      saltState.addNotification({ message: err instanceof Error ? err.message : 'Failed', type: 'error' });
+    } finally {
+      saving = false;
+    }
+  }
+
   async function addDevice() {
     if (!newDevice.deviceId) return;
     saving = true;
@@ -173,6 +224,7 @@
       case 'opcua': return String(device.endpointUrl ?? '');
       case 'snmp': return `${device.host ?? ''}:${device.port ?? 161} (v${device.version ?? '2c'})`;
       case 'modbus': return `${device.host ?? ''}:${device.port ?? 502} (unit ${device.unitId ?? 1})`;
+      case 'network': return 'local interface';
       default: return '';
     }
   }
@@ -193,10 +245,12 @@
 
   {#if showAddDevice}
     <div class="add-form">
-      <div class="form-row">
-        <label for="gw-device-id">Device ID</label>
-        <input id="gw-device-id" type="text" bind:value={newDevice.deviceId} placeholder="e.g. plc-1" />
-      </div>
+      {#if newDevice.protocol !== 'network'}
+        <div class="form-row">
+          <label for="gw-device-id">Device ID</label>
+          <input id="gw-device-id" type="text" bind:value={newDevice.deviceId} placeholder="e.g. plc-1" />
+        </div>
+      {/if}
       <div class="form-row">
         <label for="gw-protocol">Protocol</label>
         {#if availableProtocols.length === 0}
@@ -209,7 +263,31 @@
           </select>
         {/if}
       </div>
-      {#if newDevice.protocol === 'opcua'}
+      {#if newDevice.protocol === 'network'}
+        <div class="network-discover">
+          <button class="save-btn" onclick={discoverNetworkInterfaces} disabled={networkLoading}>
+            {networkLoading ? 'Discovering...' : 'Discover Interfaces'}
+          </button>
+          {#if networkInterfaces.length > 0}
+            <div class="network-interfaces" transition:slide|local={{ duration: 200 }}>
+              {#each networkInterfaces as iface}
+                <label class="checkbox-label network-iface-label">
+                  <input type="checkbox" bind:checked={networkSelected[iface.name]} disabled={iface.configured} />
+                  <span class="iface-name">{iface.name}</span>
+                  {#if iface.configured}
+                    <span class="setting-badge">configured</span>
+                  {/if}
+                </label>
+              {/each}
+            </div>
+            <div class="form-actions">
+              <button class="save-btn" onclick={addNetworkInterfaces} disabled={saving || Object.values(networkSelected).filter(Boolean).length === 0}>
+                {saving ? 'Adding...' : `Add Selected (${Object.values(networkSelected).filter(Boolean).length})`}
+              </button>
+            </div>
+          {/if}
+        </div>
+      {:else if newDevice.protocol === 'opcua'}
         <div class="form-row">
           <label for="gw-endpoint">Endpoint URL</label>
           <input id="gw-endpoint" type="text" bind:value={newDevice.endpointUrl} placeholder="opc.tcp://192.168.1.50:4840" />
@@ -244,11 +322,13 @@
           <input id="gw-unitid" type="text" bind:value={newDevice.unitId} placeholder="1" />
         </div>
       {/if}
-      <div class="form-actions">
-        <button class="save-btn" onclick={addDevice} disabled={saving || !newDevice.deviceId || availableProtocols.length === 0}>
-          {saving ? 'Saving...' : 'Add Device'}
-        </button>
-      </div>
+      {#if newDevice.protocol !== 'network'}
+        <div class="form-actions">
+          <button class="save-btn" onclick={addDevice} disabled={saving || !newDevice.deviceId || availableProtocols.length === 0}>
+            {saving ? 'Saving...' : 'Add Device'}
+          </button>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -486,6 +566,22 @@
     padding: 1rem; border-radius: var(--rounded-lg); background: var(--theme-surface);
     border: 1px solid var(--color-red-500, #ef4444); margin-bottom: 1.5rem;
     p { margin: 0; font-size: 0.875rem; color: var(--color-red-500, #ef4444); }
+  }
+
+  .network-discover {
+    margin-top: 0.5rem;
+  }
+
+  .network-interfaces {
+    margin: 0.75rem 0; padding: 0.75rem;
+    background: color-mix(in srgb, var(--theme-text) 2%, transparent);
+    border: 1px solid var(--theme-border); border-radius: var(--rounded-md);
+    display: flex; flex-direction: column; gap: 0.375rem;
+  }
+
+  .network-iface-label {
+    margin-bottom: 0;
+    .iface-name { font-family: 'IBM Plex Mono', monospace; font-weight: 500; }
   }
 
   .empty-state { padding: 3rem 2rem; text-align: center; p { color: var(--theme-text-muted); font-size: 0.875rem; } }
