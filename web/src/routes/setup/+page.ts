@@ -13,14 +13,22 @@ interface ServiceStatus {
   reconcileState: string;
 }
 
+interface ConfigEntry {
+  moduleId: string;
+  envVar: string;
+  value: string;
+}
+
 export const load: PageLoad = async () => {
-  const [desiredResult, statusResult] = await Promise.all([
+  const [desiredResult, statusResult, mqttConfigResult] = await Promise.all([
     api<DesiredService[]>('/orchestrator/desired-services'),
     api<ServiceStatus[]>('/orchestrator/service-statuses'),
+    api<ConfigEntry[]>('/config/mqtt'),
   ]);
 
   return {
     desiredServices: desiredResult.data ?? [],
     serviceStatuses: statusResult.data ?? [],
+    mqttConfig: mqttConfigResult.data ?? [],
   };
 };

@@ -27,18 +27,45 @@
     'nat-gateway': ['architecture', 'review'],
   };
 
-  // Wizard state
-  let currentStep = $state(0);
-  let selectedArchetype = $state<string | null>(null);
-  let selectedProtocols = $state<Set<string>>(new Set());
-  let mqttConfig = $state<MqttConfig>({
+  // Pre-populate from existing config
+  const SCANNER_MODULE_IDS = new Set(['ethernetip', 'opcua', 'modbus', 'snmp']);
+  const MQTT_FIELDS: (keyof MqttConfig)[] = [
+    'MQTT_BROKER_URL', 'MQTT_CLIENT_ID', 'MQTT_GROUP_ID',
+    'MQTT_EDGE_NODE', 'MQTT_USERNAME', 'MQTT_PASSWORD',
+  ];
+  const MQTT_DEFAULTS: MqttConfig = {
     MQTT_BROKER_URL: 'tcp://localhost:1883',
     MQTT_CLIENT_ID: 'tentacle-mqtt',
     MQTT_GROUP_ID: 'TentacleGroup',
     MQTT_EDGE_NODE: 'EdgeNode1',
     MQTT_USERNAME: '',
     MQTT_PASSWORD: '',
-  });
+  };
+
+  function initMqttConfig(): MqttConfig {
+    const config = { ...MQTT_DEFAULTS };
+    for (const entry of data.mqttConfig ?? []) {
+      if (MQTT_FIELDS.includes(entry.envVar as keyof MqttConfig)) {
+        config[entry.envVar as keyof MqttConfig] = entry.value;
+      }
+    }
+    return config;
+  }
+
+  function initProtocols(): Set<string> {
+    const desiredIds = new Set((data.desiredServices ?? []).map(d => d.moduleId));
+    const active = new Set<string>();
+    for (const id of SCANNER_MODULE_IDS) {
+      if (desiredIds.has(id)) active.add(id);
+    }
+    return active;
+  }
+
+  // Wizard state
+  let currentStep = $state(0);
+  let selectedArchetype = $state<string | null>(null);
+  let selectedProtocols = $state<Set<string>>(initProtocols());
+  let mqttConfig = $state<MqttConfig>(initMqttConfig());
 
   // Dynamic steps based on selected archetype
   const activeSteps = $derived<StepId[]>(
