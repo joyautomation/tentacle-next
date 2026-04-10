@@ -166,7 +166,8 @@
             </div>
             <div class="key-actions">
               <button class="btn secondary copy-btn" onclick={copyPublicKey}>
-                {copied ? 'Copied!' : 'Copy Public Key'}
+                <span class="copy-label" class:hidden={copied}>Copy Public Key</span>
+                <span class="copy-confirm" class:visible={copied}>Copied!</span>
               </button>
               <a
                 class="btn secondary"
@@ -575,8 +576,25 @@
     }
 
     &.copy-btn {
-      min-width: 10rem;
+      position: relative;
     }
+  }
+
+  .copy-label {
+    opacity: 1;
+    transition: opacity 0.15s;
+    &.hidden { opacity: 0; }
+  }
+
+  .copy-confirm {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s;
+    &.visible { opacity: 1; }
   }
 
   .help-text {
