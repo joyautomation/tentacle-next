@@ -472,11 +472,12 @@ func ensureDeps(entry *otypes.ModuleRegistryEntry, log *slog.Logger) bool {
 
 // installAptDeps installs one or more apt packages if not already present.
 func installAptDeps(packages []string, log *slog.Logger) bool {
-	// Check which packages are missing
+	// Check which packages are missing.
+	// Use dpkg-query with Status format — dpkg -s returns 0 for deinstalled packages.
 	var missing []string
 	for _, pkg := range packages {
-		_, _, ok := runCmd("dpkg", "-s", pkg)
-		if !ok {
+		stdout, _, ok := runCmd("dpkg-query", "-W", "-f=${Status}", pkg)
+		if !ok || stdout != "install ok installed" {
 			missing = append(missing, pkg)
 		}
 	}
