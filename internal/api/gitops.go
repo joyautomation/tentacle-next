@@ -112,7 +112,7 @@ func (m *Module) handleTestGitConnection(w http.ResponseWriter, r *http.Request)
 
 	keyPath := m.getGitopsSSHKeyPath()
 
-	cmd := exec.Command("git", "ls-remote", "--exit-code", body.RepoURL)
+	cmd := exec.Command("git", "ls-remote", body.RepoURL)
 	if keyPath != "" {
 		cmd.Env = append(os.Environ(),
 			fmt.Sprintf("GIT_SSH_COMMAND=ssh -i %s -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10", keyPath),
@@ -124,9 +124,13 @@ func (m *Module) handleTestGitConnection(w http.ResponseWriter, r *http.Request)
 
 	err := cmd.Run()
 	if err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false,
-			"error":   strings.TrimSpace(stderr.String()),
+			"error":   errMsg,
 		})
 		return
 	}
