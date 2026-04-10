@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt clean web-build web-install
+.PHONY: build build-cli test vet fmt clean web-build web-install
 
 # Build SvelteKit SPA into internal/web/static/
 web-install:
@@ -11,8 +11,12 @@ web-build: web-install
 build: web-build
 	go build -tags all,web -o bin/tentacle ./cmd/tentacle
 
+# Build tentactl CLI (no build tags, lightweight)
+build-cli:
+	go build -o bin/tentactl ./cmd/tentactl
+
 # Build all standalone binaries
-build-all: build
+build-all: build build-cli
 	go build -tags gateway,api,web -o bin/tentacle-core ./cmd/tentacle-core
 	go build -tags ethernetip -o bin/tentacle-ethernetip ./cmd/tentacle-ethernetip
 	go build -tags opcua -o bin/tentacle-opcua ./cmd/tentacle-opcua
