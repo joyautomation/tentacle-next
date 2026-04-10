@@ -4,6 +4,7 @@ export const SERVICE_NAMES: Record<string, string> = {
   ethernetip: 'EtherNet/IP',
   'ethernetip-server': 'EtherNet/IP Server',
   gateway: 'Gateway',
+  gitops: 'GitOps',
   graphql: 'GraphQL',
   mqtt: 'MQTT',
   nats: 'NATS',
@@ -20,6 +21,7 @@ export const SERVICE_NAMES: Record<string, string> = {
 export const MODULE_NAMES: Record<string, string> = {
   'tentacle-ethernetip': 'EtherNet/IP',
   'tentacle-ethernetip-server': 'EtherNet/IP Server',
+  gitops: 'GitOps',
   'tentacle-history': 'History',
   'tentacle-modbus': 'Modbus',
   'tentacle-modbus-server': 'Modbus Server',

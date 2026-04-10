@@ -103,7 +103,7 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 	{
 		Repo:        "tentacle-next",
 		ModuleID:    "gitops",
-		Description: "GitOps config sync",
+		Description: "GitOps Config Sync",
 		Category:    "optional",
 		Runtime:     "embedded",
 		RequiredConfig: []otypes.ConfigField{
