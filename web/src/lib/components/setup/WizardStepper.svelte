@@ -49,8 +49,8 @@
     height: 2px;
     background: var(--theme-border);
     transition: background 0.3s;
-    // Align to the vertical center of the step-number circle (2rem / 2 = 1rem)
-    margin-top: calc(1rem - 1px);
+    // Align to the vertical center of the step-number circle (0.25rem padding + 2rem/2 = 1.25rem)
+    margin-top: calc(1.25rem - 1px);
 
     &.completed {
       background: var(--theme-primary);
@@ -65,7 +65,7 @@
     background: none;
     border: none;
     cursor: default;
-    padding: 0 0.5rem;
+    padding: 0.25rem 0.5rem 0;
 
     &.completed {
       cursor: pointer;
