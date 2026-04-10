@@ -6,6 +6,7 @@
   import { state as saltState } from '@joyautomation/salt';
   import { apiPut } from '$lib/api/client';
   import { slide } from 'svelte/transition';
+  import GitOpsSettings from '$lib/components/GitOpsSettings.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -110,79 +111,83 @@
   }
 </script>
 
-<div class="settings-page">
-  {#if data.error}
-    <div class="error-box">
-      <p>{data.error}</p>
-    </div>
-  {/if}
+{#if serviceType === 'gitops'}
+  <GitOpsSettings config={configEntries} schema={schema} />
+{:else}
+  <div class="settings-page">
+    {#if data.error}
+      <div class="error-box">
+        <p>{data.error}</p>
+      </div>
+    {/if}
 
-  {#if fieldGroups.length > 0}
-    <form onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
-      {#each fieldGroups as group}
-        <section class="form-group">
-          <h2>{group.name}</h2>
-          {#each group.fields as field}
-            {#if isFieldVisible(field)}
-              <div class="form-field" transition:slide={{ duration: 200 }}>
-                {#if field.type === 'boolean'}
-                  <div class="toggle-row">
-                    <span class="field-label">{field.label}</span>
-                    <button
-                      type="button"
-                      class="toggle-switch"
-                      class:on={formValues[field.envVar] === 'true'}
-                      onclick={() => { formValues[field.envVar] = formValues[field.envVar] === 'true' ? 'false' : 'true'; }}
-                    >
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                {:else if field.toggleable}
-                  <div class="toggle-row">
-                    <span class="field-label">{field.toggleLabel ?? field.label}</span>
-                    <button
-                      type="button"
-                      class="toggle-switch"
-                      class:on={isToggleOn(field)}
-                      onclick={() => handleToggle(field, !isToggleOn(field))}
-                    >
-                      <span class="toggle-knob"></span>
-                    </button>
-                  </div>
-                  {#if isToggleOn(field)}
-                    <div class="toggle-body" transition:slide={{ duration: 200 }}>
-                      <label class="field-label">{field.label}</label>
-                      <input
-                        type={field.type === 'password' ? 'password' : 'text'}
-                        value={formValues[field.envVar]}
-                        oninput={(e) => { formValues[field.envVar] = (e.target as HTMLInputElement).value; }}
-                      />
+    {#if fieldGroups.length > 0}
+      <form onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
+        {#each fieldGroups as group}
+          <section class="form-group">
+            <h2>{group.name}</h2>
+            {#each group.fields as field}
+              {#if isFieldVisible(field)}
+                <div class="form-field" transition:slide={{ duration: 200 }}>
+                  {#if field.type === 'boolean'}
+                    <div class="toggle-row">
+                      <span class="field-label">{field.label}</span>
+                      <button
+                        type="button"
+                        class="toggle-switch"
+                        class:on={formValues[field.envVar] === 'true'}
+                        onclick={() => { formValues[field.envVar] = formValues[field.envVar] === 'true' ? 'false' : 'true'; }}
+                      >
+                        <span class="toggle-knob"></span>
+                      </button>
                     </div>
+                  {:else if field.toggleable}
+                    <div class="toggle-row">
+                      <span class="field-label">{field.toggleLabel ?? field.label}</span>
+                      <button
+                        type="button"
+                        class="toggle-switch"
+                        class:on={isToggleOn(field)}
+                        onclick={() => handleToggle(field, !isToggleOn(field))}
+                      >
+                        <span class="toggle-knob"></span>
+                      </button>
+                    </div>
+                    {#if isToggleOn(field)}
+                      <div class="toggle-body" transition:slide={{ duration: 200 }}>
+                        <label class="field-label">{field.label}</label>
+                        <input
+                          type={field.type === 'password' ? 'password' : 'text'}
+                          value={formValues[field.envVar]}
+                          oninput={(e) => { formValues[field.envVar] = (e.target as HTMLInputElement).value; }}
+                        />
+                      </div>
+                    {/if}
+                  {:else}
+                    <label class="field-label">{field.label}</label>
+                    <input
+                      type={field.type === 'password' ? 'password' : 'text'}
+                      value={formValues[field.envVar]}
+                      oninput={(e) => { formValues[field.envVar] = (e.target as HTMLInputElement).value; }}
+                    />
                   {/if}
-                {:else}
-                  <label class="field-label">{field.label}</label>
-                  <input
-                    type={field.type === 'password' ? 'password' : 'text'}
-                    value={formValues[field.envVar]}
-                    oninput={(e) => { formValues[field.envVar] = (e.target as HTMLInputElement).value; }}
-                  />
-                {/if}
-              </div>
-            {/if}
-          {/each}
-        </section>
-      {/each}
+                </div>
+              {/if}
+            {/each}
+          </section>
+        {/each}
 
-      <button type="submit" class="save-btn" disabled={saving}>
-        {saving ? 'Saving...' : 'Save All'}
-      </button>
-    </form>
-  {:else if !data.error}
-    <div class="empty-state">
-      <p>No configuration found. Start the service to populate config from environment variables.</p>
-    </div>
-  {/if}
-</div>
+        <button type="submit" class="save-btn" disabled={saving}>
+          {saving ? 'Saving...' : 'Save All'}
+        </button>
+      </form>
+    {:else if !data.error}
+      <div class="empty-state">
+        <p>No configuration found. Start the service to populate config from environment variables.</p>
+      </div>
+    {/if}
+  </div>
+{/if}
 
 <style lang="scss">
   .settings-page {
