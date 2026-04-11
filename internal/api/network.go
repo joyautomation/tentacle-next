@@ -13,8 +13,9 @@ import (
 )
 
 // syncNetworkInterfaces auto-discovers network interfaces via the network
-// module and ensures they exist as gateway devices with UDT variables.
-// Called during gateway config GET so interfaces appear automatically.
+// module and ensures they exist as UDT variables under a single "network"
+// gateway device. Called during gateway config GET so interfaces appear
+// automatically in the Variables page.
 func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
 	// Ask the network module for discovered interfaces.
 	resp, err := m.bus.Request(topics.Browse("network"), []byte("{}"), 2*time.Second)
@@ -33,68 +34,98 @@ func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
 
 	ensureMaps(cfg)
 
-	// Build set of discovered interface names.
-	discovered := make(map[string]bool, len(browseResult.Instances))
-	for _, inst := range browseResult.Instances {
-		discovered[inst.Name] = true
-	}
-
-	// Remove network devices that no longer exist.
-	changed := false
-	for deviceID, dev := range cfg.Devices {
-		if dev.Protocol == "network" && !discovered[deviceID] {
-			delete(cfg.Devices, deviceID)
-			delete(cfg.UdtVariables, deviceID)
-			changed = true
-		}
-	}
-
 	memberNames := []string{
 		"operstate", "carrier", "speed", "mtu", "mac",
 		"rxBytes", "txBytes", "rxPackets", "txPackets",
 		"rxErrors", "txErrors", "rxDropped", "txDropped",
 	}
 
-	// Add any missing interfaces.
+	// Build set of discovered interface names.
+	discovered := make(map[string]bool, len(browseResult.Instances))
 	for _, inst := range browseResult.Instances {
-		if _, ok := cfg.Devices[inst.Name]; ok {
-			continue // already configured
-		}
+		discovered[inst.Name] = true
+	}
 
-		// Ensure the template exists.
-		if _, ok := cfg.UdtTemplates["NetworkInterface"]; !ok {
-			cfg.UdtTemplates["NetworkInterface"] = itypes.GatewayUdtTemplateConfig{
-				Name:    "NetworkInterface",
-				Version: "1.0",
-				Members: []itypes.GatewayUdtTemplateMemberConfig{
-					{Name: "operstate", Datatype: "string"},
-					{Name: "carrier", Datatype: "boolean"},
-					{Name: "speed", Datatype: "number"},
-					{Name: "mtu", Datatype: "number"},
-					{Name: "mac", Datatype: "string"},
-					{Name: "rxBytes", Datatype: "number"},
-					{Name: "txBytes", Datatype: "number"},
-					{Name: "rxPackets", Datatype: "number"},
-					{Name: "txPackets", Datatype: "number"},
-					{Name: "rxErrors", Datatype: "number"},
-					{Name: "txErrors", Datatype: "number"},
-					{Name: "rxDropped", Datatype: "number"},
-					{Name: "txDropped", Datatype: "number"},
-				},
-			}
-		}
+	changed := false
 
-		cfg.Devices[inst.Name] = itypes.GatewayDeviceConfig{
+	// Ensure single "network" device exists.
+	if _, ok := cfg.Devices["network"]; !ok {
+		cfg.Devices["network"] = itypes.GatewayDeviceConfig{
 			Protocol: "network",
 		}
+		changed = true
+	}
 
+	// Clean up old per-interface devices from previous config format.
+	for deviceID, dev := range cfg.Devices {
+		if dev.Protocol == "network" && deviceID != "network" {
+			delete(cfg.Devices, deviceID)
+			changed = true
+		}
+	}
+
+	// Ensure the template exists.
+	if _, ok := cfg.UdtTemplates["NetworkInterface"]; !ok {
+		cfg.UdtTemplates["NetworkInterface"] = itypes.GatewayUdtTemplateConfig{
+			Name:    "NetworkInterface",
+			Version: "1.0",
+			Members: []itypes.GatewayUdtTemplateMemberConfig{
+				{Name: "operstate", Datatype: "string"},
+				{Name: "carrier", Datatype: "boolean"},
+				{Name: "speed", Datatype: "number"},
+				{Name: "mtu", Datatype: "number"},
+				{Name: "mac", Datatype: "string"},
+				{Name: "rxBytes", Datatype: "number"},
+				{Name: "txBytes", Datatype: "number"},
+				{Name: "rxPackets", Datatype: "number"},
+				{Name: "txPackets", Datatype: "number"},
+				{Name: "rxErrors", Datatype: "number"},
+				{Name: "txErrors", Datatype: "number"},
+				{Name: "rxDropped", Datatype: "number"},
+				{Name: "txDropped", Datatype: "number"},
+			},
+		}
+		changed = true
+	}
+
+	// Remove UDT variables for interfaces that no longer exist.
+	for id, uv := range cfg.UdtVariables {
+		if uv.DeviceID == "network" && uv.TemplateName == "NetworkInterface" && !discovered[id] {
+			delete(cfg.UdtVariables, id)
+			changed = true
+		}
+	}
+
+	// Also fix UDT variables that reference old per-interface device IDs.
+	for id, uv := range cfg.UdtVariables {
+		if uv.TemplateName == "NetworkInterface" && uv.DeviceID != "network" {
+			delete(cfg.UdtVariables, id)
+			changed = true
+		}
+	}
+
+	// Add UDT variables for any new interfaces.
+	for _, inst := range browseResult.Instances {
+		if _, ok := cfg.UdtVariables[inst.Name]; ok {
+			// Already exists — make sure memberTags use compound format.
+			existing := cfg.UdtVariables[inst.Name]
+			if existing.DeviceID != "network" {
+				existing.DeviceID = "network"
+				cfg.UdtVariables[inst.Name] = existing
+				changed = true
+			}
+			continue
+		}
+
+		// Member tags use compound format: {iface}_{prop}
+		sanitizedIface := inst.Name // SanitizeForSubject is applied by the gateway
 		memberTags := make(map[string]string, len(memberNames))
 		for _, name := range memberNames {
-			memberTags[name] = name
+			memberTags[name] = sanitizedIface + "_" + name
 		}
 		cfg.UdtVariables[inst.Name] = itypes.GatewayUdtVariableConfig{
 			ID:           inst.Name,
-			DeviceID:     inst.Name,
+			DeviceID:     "network",
 			Tag:          inst.Name,
 			TemplateName: "NetworkInterface",
 			MemberTags:   memberTags,

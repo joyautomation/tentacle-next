@@ -1406,6 +1406,7 @@
             {#if dirtyDevices.has(device.deviceId)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
             <span class="side-device-name">{device.deviceId}</span>
             <span class="side-proto">{device.protocol}</span>
+            {#if device.protocol !== 'network'}
             <span class="side-browse-area">
               {#if isBusy && browseState}
                 <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
@@ -1428,6 +1429,7 @@
                 </button>
               {/if}
             </span>
+            {/if}
           </div>
           {#if device.protocol === 'snmp' && !isBusy}
             <div class="snmp-root-oid">
@@ -1455,7 +1457,7 @@
               <span class="tc-side-count">{device.atomicCount}</span>
             </button>
           {/if}
-          {#if device.atomicCount === 0 && !cache}
+          {#if device.atomicCount === 0 && !cache && device.protocol !== 'network'}
             <div class="tc-side-empty">Click <button class="side-refresh-link" onclick={() => refreshDevice(device.deviceId)}>browse</button> to discover tags</div>
           {/if}
         {/each}

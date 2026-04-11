@@ -201,7 +201,9 @@ func (n *Network) publishInterfaces() {
 }
 
 // publishInterfaceProperties publishes individual PlcDataMessage values for
-// each property of a network interface to network.data.{ifaceName}.{prop}.
+// each property of a network interface to network.data.network.{iface}_{prop}.
+// All interfaces share the single "network" device ID so the gateway treats
+// them as UDT variables under one device.
 func (n *Network) publishInterfaceProperties(iface itypes.NetworkInterface, nowMs int64) {
 	props := map[string]struct {
 		value    interface{}
@@ -250,10 +252,12 @@ func (n *Network) publishInterfaceProperties(iface itypes.NetworkInterface, nowM
 
 	sanitizedIface := types.SanitizeForSubject(iface.Name)
 	for prop, pv := range props {
+		// Compound tag: {iface}_{prop} e.g. "eth0_operstate"
+		tag := sanitizedIface + "_" + prop
 		dataMsg := types.PlcDataMessage{
 			ModuleID:   "network",
-			DeviceID:   iface.Name,
-			VariableID: prop,
+			DeviceID:   "network",
+			VariableID: tag,
 			Value:      pv.value,
 			Timestamp:  nowMs,
 			Datatype:   pv.datatype,
@@ -262,7 +266,8 @@ func (n *Network) publishInterfaceProperties(iface itypes.NetworkInterface, nowM
 		if err != nil {
 			continue
 		}
-		subject := topics.NetworkData(sanitizedIface + "." + prop)
+		// Subject: network.data.network.{iface}_{prop}
+		subject := fmt.Sprintf("network.data.network.%s", tag)
 		_ = n.b.Publish(subject, data)
 	}
 }
