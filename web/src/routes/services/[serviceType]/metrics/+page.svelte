@@ -97,76 +97,81 @@
 
   let vizMode: VizMode = $state('tree');
 
-  // Organize metrics into: template instances (grouped by templateRef) and scalar metrics (grouped by device)
+  // Organize metrics by device, then split into template instances and scalars within each device
+  type DeviceMetrics = {
+    templateInstances: Record<string, MetricInfo[]>; // templateName → instances
+    scalars: MetricInfo[];
+  };
   const organized = $derived.by(() => {
     void updateVersion; // depend on debounced version
     const allMetrics = [...metricMap.values()];
-    const templateInstances: Record<string, MetricInfo[]> = {};
-    const scalarsByDevice: Record<string, MetricInfo[]> = {};
+    const byDevice: Record<string, DeviceMetrics> = {};
 
     for (const metric of allMetrics) {
+      const dev = metric.deviceId || 'unknown';
+      if (!byDevice[dev]) byDevice[dev] = { templateInstances: {}, scalars: [] };
+
       if (metric.templateRef) {
-        if (!templateInstances[metric.templateRef]) {
-          templateInstances[metric.templateRef] = [];
+        if (!byDevice[dev].templateInstances[metric.templateRef]) {
+          byDevice[dev].templateInstances[metric.templateRef] = [];
         }
-        templateInstances[metric.templateRef].push(metric);
+        byDevice[dev].templateInstances[metric.templateRef].push(metric);
       } else if (metric.sparkplugType !== 'template') {
-        const dev = metric.deviceId || 'unknown';
-        if (!scalarsByDevice[dev]) scalarsByDevice[dev] = [];
-        scalarsByDevice[dev].push(metric);
+        byDevice[dev].scalars.push(metric);
       }
     }
 
-    // Sort metrics within each device group
-    for (const metrics of Object.values(scalarsByDevice)) {
-      metrics.sort((a, b) => a.name.localeCompare(b.name));
+    // Sort scalars within each device group
+    for (const dm of Object.values(byDevice)) {
+      dm.scalars.sort((a, b) => a.name.localeCompare(b.name));
     }
-    return { templateInstances, scalarsByDevice };
+    return byDevice;
   });
 
   // Build D3 hierarchy for sunburst visualization
   type SunburstNode = { name: string; children?: SunburstNode[]; value?: number; displayValue?: string };
   const sunburstData = $derived.by((): SunburstNode => {
     const org = organized;
-    const children: SunburstNode[] = [];
+    const deviceChildren: SunburstNode[] = [];
 
-    const instEntries = Object.entries(org.templateInstances);
-    if (instEntries.length > 0) {
-      const instanceChildren = instEntries.map(([templateName, instances]) => ({
-        name: templateName,
-        children: instances.map(inst => {
-          const members: SunburstNode[] = [];
-          if (typeof inst.value === 'object' && inst.value !== null) {
-            if ('metrics' in (inst.value as Record<string, unknown>)) {
-              for (const m of (inst.value as { metrics: { name: string; value?: unknown }[] }).metrics) {
-                members.push({ name: m.name, value: 1, displayValue: formatValue(m.value) });
-              }
-            } else {
-              for (const [key, val] of Object.entries(inst.value as Record<string, unknown>)) {
-                members.push({ name: key, value: 1, displayValue: formatValue(val) });
+    for (const [devId, dm] of Object.entries(org).sort(([a], [b]) => a.localeCompare(b))) {
+      const devChildren: SunburstNode[] = [];
+
+      // Template instances
+      for (const [templateName, instances] of Object.entries(dm.templateInstances)) {
+        devChildren.push({
+          name: templateName,
+          children: instances.map(inst => {
+            const members: SunburstNode[] = [];
+            if (typeof inst.value === 'object' && inst.value !== null) {
+              if ('metrics' in (inst.value as Record<string, unknown>)) {
+                for (const m of (inst.value as { metrics: { name: string; value?: unknown }[] }).metrics) {
+                  members.push({ name: m.name, value: 1, displayValue: formatValue(m.value) });
+                }
+              } else {
+                for (const [key, val] of Object.entries(inst.value as Record<string, unknown>)) {
+                  members.push({ name: key, value: 1, displayValue: formatValue(val) });
+                }
               }
             }
-          }
-          return members.length > 0
-            ? { name: inst.name, children: members }
-            : { name: inst.name, value: 1 };
-        }),
-      }));
-      children.push({ name: 'Template Instances', children: instanceChildren });
+            return members.length > 0
+              ? { name: inst.name, children: members }
+              : { name: inst.name, value: 1 };
+          }),
+        });
+      }
+
+      // Scalars
+      for (const m of dm.scalars) {
+        devChildren.push({ name: m.name, value: 1, displayValue: formatValue(m.value) });
+      }
+
+      if (devChildren.length > 0) {
+        deviceChildren.push({ name: devId, children: devChildren });
+      }
     }
 
-    const deviceEntries = Object.entries(org.scalarsByDevice).sort(([a], [b]) => a.localeCompare(b));
-    if (deviceEntries.length > 0) {
-      children.push({
-        name: 'Atomic',
-        children: deviceEntries.map(([devId, metrics]) => ({
-          name: devId,
-          children: metrics.map(m => ({ name: m.name, value: 1, displayValue: formatValue(m.value) })),
-        })),
-      });
-    }
-
-    return { name: 'Metrics', children };
+    return { name: 'Metrics', children: deviceChildren };
   });
 
   function toggleInstance(name: string) {
@@ -210,99 +215,98 @@
 
   {#if vizMode === 'tree'}
   <div class="tree-content">
-  <!-- Template Instances (with definition info inline) -->
-  {#if Object.keys(organized.templateInstances).length > 0}
-    <section class="section">
-      <h2>Template Instances</h2>
-      <div class="tree">
-        {#each Object.entries(organized.templateInstances).sort(([a], [b]) => a.localeCompare(b)) as [templateName, instances]}
-          {@const template = templates.find(t => t.name === templateName)}
-          <div class="tree-node">
-            <button class="tree-toggle" onclick={() => toggleTemplate(templateName)}>
-              <svg class="chevron" class:expanded={expandedTemplates[templateName]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 18l6-6-6-6"/>
-              </svg>
-              <span class="template-icon">T</span>
-              <span class="tree-label">{templateName}</span>
-              {#if template?.version}
-                <span class="version-badge">v{template.version}</span>
-              {/if}
-              <span class="member-count">{instances.length} {instances.length === 1 ? 'instance' : 'instances'} · {template?.members.length ?? 0} members</span>
-            </button>
-            {#if expandedTemplates[templateName]}
-              <div class="tree-children">
-                {#each instances as metric}
-                  <div class="tree-node">
-                    <button class="tree-toggle" onclick={() => toggleInstance(metric.name)}>
-                      <svg class="chevron" class:expanded={expandedInstances[metric.name]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M9 18l6-6-6-6"/>
-                      </svg>
-                      <span class="freshness-dot" style="--dot-color: var(--color-purple-400, #c084fc); --dot-glow: none;"></span>
-                      <span class="tree-label">{metric.name}</span>
-                      <span class="leaf-type">template</span>
-                    </button>
-                    {#if expandedInstances[metric.name]}
-                      <div class="tree-children">
-                        {#if typeof metric.value === 'object' && metric.value !== null}
-                          {#if template && typeof metric.value === 'object' && 'metrics' in (metric.value as Record<string, unknown>)}
-                            {#each (metric.value as { metrics: Array<{ name: string; value: unknown; type: string }> }).metrics as member}
-                              {@const memberDef = template.members.find(m => m.name === member.name)}
+  {#each Object.entries(organized).sort(([a], [b]) => a.localeCompare(b)) as [devId, dm]}
+    {@const hasTemplates = Object.keys(dm.templateInstances).length > 0}
+    {@const hasScalars = dm.scalars.length > 0}
+    {#if hasTemplates || hasScalars}
+      <section class="section">
+        <h2>{devId}</h2>
+
+        <!-- Template Instances for this device -->
+        {#if hasTemplates}
+          <div class="tree" style:margin-bottom={hasScalars ? '0.75rem' : undefined}>
+            {#each Object.entries(dm.templateInstances).sort(([a], [b]) => a.localeCompare(b)) as [templateName, instances]}
+              {@const template = templates.find(t => t.name === templateName)}
+              <div class="tree-node">
+                <button class="tree-toggle" onclick={() => toggleTemplate(`${devId}:${templateName}`)}>
+                  <svg class="chevron" class:expanded={expandedTemplates[`${devId}:${templateName}`]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                  <span class="template-icon">T</span>
+                  <span class="tree-label">{templateName}</span>
+                  {#if template?.version}
+                    <span class="version-badge">v{template.version}</span>
+                  {/if}
+                  <span class="member-count">{instances.length} {instances.length === 1 ? 'instance' : 'instances'} · {template?.members.length ?? 0} members</span>
+                </button>
+                {#if expandedTemplates[`${devId}:${templateName}`]}
+                  <div class="tree-children">
+                    {#each instances as metric}
+                      <div class="tree-node">
+                        <button class="tree-toggle" onclick={() => toggleInstance(metric.name)}>
+                          <svg class="chevron" class:expanded={expandedInstances[metric.name]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18l6-6-6-6"/>
+                          </svg>
+                          <span class="freshness-dot" style="--dot-color: var(--color-purple-400, #c084fc); --dot-glow: none;"></span>
+                          <span class="tree-label">{metric.name}</span>
+                          <span class="leaf-type">template</span>
+                        </button>
+                        {#if expandedInstances[metric.name]}
+                          <div class="tree-children">
+                            {#if typeof metric.value === 'object' && metric.value !== null}
+                              {#if template && typeof metric.value === 'object' && 'metrics' in (metric.value as Record<string, unknown>)}
+                                {#each (metric.value as { metrics: Array<{ name: string; value: unknown; type: string }> }).metrics as member}
+                                  {@const memberDef = template.members.find(m => m.name === member.name)}
+                                  <div class="tree-leaf">
+                                    <span
+                                      class="freshness-dot"
+                                      title={formatAge(metric.lastUpdated)}
+                                      style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
+                                    ></span>
+                                    <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
+                                    <span class="leaf-name">{member.name}</span>
+                                    <span class="leaf-value">{formatValue(member.value)}</span>
+                                    <span class="leaf-type">{memberDef?.datatype ?? member.type}</span>
+                                  </div>
+                                {/each}
+                              {:else}
+                                {#each Object.entries(metric.value as Record<string, unknown>) as [key, val]}
+                                  {@const memberDef = template?.members.find(m => m.name === key)}
+                                  <div class="tree-leaf">
+                                    <span
+                                      class="freshness-dot"
+                                      title={formatAge(metric.lastUpdated)}
+                                      style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
+                                    ></span>
+                                    <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
+                                    <span class="leaf-name">{key}</span>
+                                    <span class="leaf-value">{formatValue(val)}</span>
+                                    {#if memberDef}
+                                      <span class="leaf-type">{memberDef.datatype}</span>
+                                    {/if}
+                                  </div>
+                                {/each}
+                              {/if}
+                            {:else}
                               <div class="tree-leaf">
-                                <span
-                                  class="freshness-dot"
-                                  title={formatAge(metric.lastUpdated)}
-                                  style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
-                                ></span>
-                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
-                                <span class="leaf-name">{member.name}</span>
-                                <span class="leaf-value">{formatValue(member.value)}</span>
-                                <span class="leaf-type">{memberDef?.datatype ?? member.type}</span>
+                                <span class="leaf-value">{formatValue(metric.value)}</span>
                               </div>
-                            {/each}
-                          {:else}
-                            {#each Object.entries(metric.value as Record<string, unknown>) as [key, val]}
-                              {@const memberDef = template?.members.find(m => m.name === key)}
-                              <div class="tree-leaf">
-                                <span
-                                  class="freshness-dot"
-                                  title={formatAge(metric.lastUpdated)}
-                                  style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
-                                ></span>
-                                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
-                                <span class="leaf-name">{key}</span>
-                                <span class="leaf-value">{formatValue(val)}</span>
-                                {#if memberDef}
-                                  <span class="leaf-type">{memberDef.datatype}</span>
-                                {/if}
-                              </div>
-                            {/each}
-                          {/if}
-                        {:else}
-                          <div class="tree-leaf">
-                            <span class="leaf-value">{formatValue(metric.value)}</span>
+                            {/if}
                           </div>
                         {/if}
                       </div>
-                    {/if}
+                    {/each}
                   </div>
-                {/each}
+                {/if}
               </div>
-            {/if}
+            {/each}
           </div>
-        {/each}
-      </div>
-    </section>
-  {/if}
+        {/if}
 
-  <!-- Atomic Metrics grouped by device -->
-  {#if Object.keys(organized.scalarsByDevice).length > 0}
-    <section class="section">
-      <h2>Atomic</h2>
-      {#each Object.entries(organized.scalarsByDevice).sort(([a], [b]) => a.localeCompare(b)) as [devId, metrics]}
-        <div class="device-group">
-          <div class="device-group-header">{devId}</div>
+        <!-- Atomic metrics for this device -->
+        {#if hasScalars}
           <div class="tree">
-            {#each metrics as metric}
+            {#each dm.scalars as metric}
               <div class="tree-leaf">
                 <span
                   class="freshness-dot"
@@ -316,10 +320,10 @@
               </div>
             {/each}
           </div>
-        </div>
-      {/each}
-    </section>
-  {/if}
+        {/if}
+      </section>
+    {/if}
+  {/each}
 
   {#if metricMap.size === 0 && !data.error}
     <div class="empty-state">
@@ -565,19 +569,6 @@
     font-size: 0.6875rem;
     color: var(--theme-text-muted);
     font-style: italic;
-  }
-
-  .device-group {
-    margin-bottom: 0.75rem;
-  }
-
-  .device-group-header {
-    font-size: 0.75rem;
-    font-weight: 600;
-    font-family: 'IBM Plex Mono', monospace;
-    color: var(--theme-text-muted);
-    padding: 0.25rem 0;
-    margin-bottom: 0.25rem;
   }
 
   .template-ref {
