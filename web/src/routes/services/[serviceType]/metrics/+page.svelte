@@ -121,9 +121,12 @@
       }
     }
 
-    // Sort scalars within each device group
+    // Sort within each device group
     for (const dm of Object.values(byDevice)) {
       dm.scalars.sort((a, b) => a.name.localeCompare(b.name));
+      for (const instances of Object.values(dm.templateInstances)) {
+        instances.sort((a, b) => a.name.localeCompare(b.name));
+      }
     }
     return byDevice;
   });
