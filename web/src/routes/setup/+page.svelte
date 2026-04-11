@@ -7,24 +7,32 @@
   import NatDiagram from '$lib/components/setup/NatDiagram.svelte';
   import ProtocolSelector from '$lib/components/setup/ProtocolSelector.svelte';
   import MqttConfigForm from '$lib/components/setup/MqttConfigForm.svelte';
+  import AddOnSelector from '$lib/components/setup/AddOnSelector.svelte';
   import ReviewPanel from '$lib/components/setup/ReviewPanel.svelte';
 
   let { data }: { data: PageData } = $props();
 
   // Step IDs used by archetypes
-  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'review';
+  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'review';
 
   const STEP_LABELS: Record<StepId, string> = {
     'architecture': 'Architecture',
     'protocols': 'Protocols',
     'mqtt-config': 'MQTT Config',
+    'add-ons': 'Add-ons',
     'review': 'Review',
   };
 
   // Each archetype defines which steps it needs (architecture + review are always first/last)
   const ARCHETYPE_STEPS: Record<string, StepId[]> = {
-    'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'review'],
-    'nat-gateway': ['architecture', 'review'],
+    'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'add-ons', 'review'],
+    'nat-gateway': ['architecture', 'add-ons', 'review'],
+  };
+
+  // Add-on modules that are NOT already core to each archetype
+  const ARCHETYPE_ADDONS: Record<string, Set<string>> = {
+    'sparkplug-gateway': new Set(['network', 'gitops']),
+    'nat-gateway': new Set(['gitops']),
   };
 
   // Pre-populate from existing config
@@ -52,6 +60,8 @@
     return config;
   }
 
+  const ADDON_MODULE_IDS = new Set(['network', 'gitops']);
+
   function initProtocols(): Set<string> {
     const desiredIds = new Set((data.desiredServices ?? []).map(d => d.moduleId));
     const active = new Set<string>();
@@ -61,10 +71,20 @@
     return active;
   }
 
+  function initAddOns(): Set<string> {
+    const desiredIds = new Set((data.desiredServices ?? []).map(d => d.moduleId));
+    const active = new Set<string>();
+    for (const id of ADDON_MODULE_IDS) {
+      if (desiredIds.has(id)) active.add(id);
+    }
+    return active;
+  }
+
   // Wizard state
   let currentStep = $state(0);
   let selectedArchetype = $state<string | null>(null);
   let selectedProtocols = $state<Set<string>>(initProtocols());
+  let selectedAddOns = $state<Set<string>>(initAddOns());
   let mqttConfig = $state<MqttConfig>(initMqttConfig());
 
   // Dynamic steps based on selected archetype
@@ -83,6 +103,7 @@
       case 'mqtt-config': return mqttConfig.MQTT_BROKER_URL.trim() !== '' &&
                      mqttConfig.MQTT_GROUP_ID.trim() !== '' &&
                      mqttConfig.MQTT_EDGE_NODE.trim() !== '';
+      case 'add-ons': return true;
       case 'review': return true;
       default: return false;
     }
@@ -180,10 +201,22 @@
         onchange={(c) => { mqttConfig = c; }}
       />
 
+    {:else if currentStepId === 'add-ons'}
+      <div class="step-intro">
+        <h2>Add-ons</h2>
+        <p>Enable optional modules to extend your tentacle's capabilities.</p>
+      </div>
+      <AddOnSelector
+        available={ARCHETYPE_ADDONS[selectedArchetype ?? ''] ?? new Set()}
+        selected={selectedAddOns}
+        onchange={(s) => { selectedAddOns = s; }}
+      />
+
     {:else if currentStepId === 'review'}
       <ReviewPanel
         archetype={selectedArchetype ?? 'sparkplug-gateway'}
         {selectedProtocols}
+        {selectedAddOns}
         {mqttConfig}
       />
     {/if}

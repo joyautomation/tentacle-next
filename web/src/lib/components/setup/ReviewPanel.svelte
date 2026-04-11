@@ -5,13 +5,19 @@
   import { apiPut, api } from '$lib/api/client';
   import { getServiceName } from '$lib/constants/services';
 
+  const ADDON_NAMES: Record<string, string> = {
+    network: 'Network',
+    gitops: 'GitOps',
+  };
+
   interface Props {
     archetype: string;
     selectedProtocols: Set<string>;
+    selectedAddOns: Set<string>;
     mqttConfig: MqttConfig;
   }
 
-  let { archetype, selectedProtocols, mqttConfig }: Props = $props();
+  let { archetype, selectedProtocols, selectedAddOns, mqttConfig }: Props = $props();
 
   const ARCHETYPE_NAMES: Record<string, string> = {
     'sparkplug-gateway': 'Sparkplug Gateway',
@@ -116,8 +122,13 @@
     if (!await enableModule('gateway', 'Enabling Gateway')) return false;
     if (!await enableModule('mqtt', 'Enabling MQTT bridge')) return false;
 
+    // Enable add-ons
+    for (const addon of selectedAddOns) {
+      if (!await enableModule(addon, `Enabling ${ADDON_NAMES[addon] ?? addon}`)) return false;
+    }
+
     // Wait for all
-    const expected = new Set([...protocols, 'gateway', 'mqtt']);
+    const expected = new Set([...protocols, 'gateway', 'mqtt', ...selectedAddOns]);
     return await waitForModules(expected);
   }
 
@@ -125,7 +136,12 @@
     if (!await enableModule('network', 'Enabling Network Manager')) return false;
     if (!await enableModule('nftables', 'Enabling Firewall (nftables)')) return false;
 
-    return await waitForModules(new Set(['network', 'nftables']));
+    // Enable add-ons
+    for (const addon of selectedAddOns) {
+      if (!await enableModule(addon, `Enabling ${ADDON_NAMES[addon] ?? addon}`)) return false;
+    }
+
+    return await waitForModules(new Set(['network', 'nftables', ...selectedAddOns]));
   }
 
   async function applyConfiguration() {
@@ -198,6 +214,17 @@
           <span class="summary-value">
             <span class="badge">Network Manager</span>
             <span class="badge">Firewall (nftables)</span>
+          </span>
+        </div>
+      {/if}
+
+      {#if selectedAddOns.size > 0}
+        <div class="summary-row">
+          <span class="summary-label">Add-ons</span>
+          <span class="summary-value">
+            {#each [...selectedAddOns] as addon}
+              <span class="badge">{ADDON_NAMES[addon] ?? addon}</span>
+            {/each}
           </span>
         </div>
       {/if}
