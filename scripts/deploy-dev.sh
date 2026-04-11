@@ -5,6 +5,9 @@ CONTAINER="tentacle-next-dev-1"
 BINARY="bin/tentacle"
 REMOTE_PATH="/usr/local/bin/tentacle"
 
+echo "==> Building web assets..."
+(cd web && npm run build)
+
 echo "==> Building tentacle..."
 CGO_ENABLED=1 CGO_LDFLAGS="-L/tmp/libplctag-check/build/bin_dist" \
   go build -tags all -o "$BINARY" ./cmd/tentacle
