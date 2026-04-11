@@ -366,7 +366,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 			}
 		}
 
-		assembler := NewUdtAssembler(g.b, g.gatewayID, varID, udtVar, tmpl, udtDeadband, udtDisableRBE, memberDeadbands)
+		assembler := NewUdtAssembler(g.b, g.gatewayID, udtVar.Tag, udtVar, tmpl, udtDeadband, udtDisableRBE, memberDeadbands)
 		g.udtAssemblers[varID] = assembler
 
 		sanitizedDevice := types.SanitizeForSubject(udtVar.DeviceID)
@@ -754,7 +754,7 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 			outMsg := types.PlcDataMessage{
 				ModuleID:    g.gatewayID,
 				DeviceID:    tv.Config.DeviceID,
-				VariableID:  varID,
+				VariableID:  tv.Config.Tag,
 				Value:       value,
 				Timestamp:   nowMs,
 				Datatype:    dt,
@@ -772,7 +772,7 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 				continue
 			}
 
-			pubSubject := topics.Data(g.gatewayID, types.SanitizeForSubject(tv.Config.DeviceID), types.SanitizeForSubject(varID))
+			pubSubject := topics.Data(g.gatewayID, types.SanitizeForSubject(tv.Config.DeviceID), types.SanitizeForSubject(tv.Config.Tag))
 			_ = g.b.Publish(pubSubject, data)
 
 			rbe.RecordPublish(&tv.rbeState, value, nowMs)
@@ -803,15 +803,15 @@ func (g *Gateway) setupVariablesHandlerLocked() {
 		defer g.mu.RUnlock()
 
 		vars := make([]types.VariableInfo, 0, len(g.variables)+len(g.udtAssemblers))
-		for varID, tv := range g.variables {
+		for _, tv := range g.variables {
 			vars = append(vars, types.VariableInfo{
-				ModuleID: g.gatewayID, DeviceID: tv.Config.DeviceID, VariableID: varID,
+				ModuleID: g.gatewayID, DeviceID: tv.Config.DeviceID, VariableID: tv.Config.Tag,
 				Value: tv.Value, Datatype: tv.Config.Datatype, Description: tv.Config.Description,
 				Deadband: tv.Deadband, DisableRBE: tv.DisableRBE,
 			})
 		}
 
-		for varID, assembler := range g.udtAssemblers {
+		for _, assembler := range g.udtAssemblers {
 			tmpl := assembler.template
 			members := make([]types.UdtMemberDefinition, len(tmpl.Members))
 			for i, m := range tmpl.Members {
@@ -824,7 +824,7 @@ func (g *Gateway) setupVariablesHandlerLocked() {
 				members[i] = types.UdtMemberDefinition{Name: m.Name, Datatype: datatype, TemplateRef: m.TemplateRef}
 			}
 			vars = append(vars, types.VariableInfo{
-				ModuleID: g.gatewayID, DeviceID: assembler.config.DeviceID, VariableID: varID,
+				ModuleID: g.gatewayID, DeviceID: assembler.config.DeviceID, VariableID: assembler.config.Tag,
 				Value: assembler.Value(), Datatype: "udt",
 				UdtTemplate: &types.UdtTemplateDefinition{Name: tmpl.Name, Version: tmpl.Version, Members: members},
 			})
@@ -854,11 +854,18 @@ func (g *Gateway) setupCommandRoutingLocked() {
 		if len(parts) < 3 {
 			return
 		}
-		varID := parts[2]
+		cmdTag := parts[2]
 
 		g.mu.RLock()
-		tv, ok := g.variables[varID]
-		if !ok || !tv.Config.Bidirectional {
+		// Look up variable by sanitized tag (command subjects use tag, not config key)
+		var tv *TrackedVariable
+		for _, v := range g.variables {
+			if types.SanitizeForSubject(v.Config.Tag) == cmdTag && v.Config.Bidirectional {
+				tv = v
+				break
+			}
+		}
+		if tv == nil {
 			g.mu.RUnlock()
 			return
 		}
@@ -867,11 +874,10 @@ func (g *Gateway) setupCommandRoutingLocked() {
 			g.mu.RUnlock()
 			return
 		}
-		tag := tv.Config.Tag
 		protocol := device.Protocol
 		g.mu.RUnlock()
 
-		cmdSubject := fmt.Sprintf("%s.command.%s", protocol, types.SanitizeForSubject(tag))
+		cmdSubject := fmt.Sprintf("%s.command.%s", protocol, types.SanitizeForSubject(tv.Config.Tag))
 		_ = g.b.Publish(cmdSubject, data)
 	})
 	if err != nil {
