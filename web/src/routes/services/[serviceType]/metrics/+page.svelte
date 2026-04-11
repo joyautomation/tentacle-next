@@ -27,16 +27,21 @@
     members: { name: string; datatype: string }[];
   };
 
-  // Live-updating metric map keyed by name
+  // Live-updating metric map keyed by deviceId:name to prevent collisions
+  // when different devices have metrics with the same name (e.g. "uptime").
   let metricMap: Map<string, MetricInfo> = $state(new Map());
   let templates: TemplateInfo[] = $state(data.templates as TemplateInfo[]);
   let deviceId: string = $state(data.deviceId);
+
+  function metricKey(metric: MetricInfo): string {
+    return `${metric.deviceId || ''}:${metric.name}`;
+  }
 
   // Initialize from server data
   $effect(() => {
     const m = new Map<string, MetricInfo>();
     for (const metric of data.metrics as MetricInfo[]) {
-      m.set(metric.name, metric);
+      m.set(metricKey(metric), metric);
     }
     metricMap = m;
   });
@@ -75,7 +80,7 @@
         if (msg.deviceId) deviceId = msg.deviceId;
         if (msg.metrics) {
           for (const metric of msg.metrics) {
-            metricMap.set(metric.name, metric);
+            metricMap.set(metricKey(metric), metric);
           }
           scheduleFlush();
         }
