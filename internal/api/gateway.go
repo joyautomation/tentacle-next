@@ -134,6 +134,15 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-sync network interfaces: discover and add any new ones,
+	// remove any that no longer exist. Runs in the background of GET
+	// so network interfaces appear automatically in the Variables page.
+	if m.syncNetworkInterfaces(cfg) {
+		if err := m.putGatewayConfig(cfg); err != nil {
+			m.log.Warn("api: failed to persist network auto-sync", "error", err)
+		}
+	}
+
 	// Convert device map to array
 	devices := make([]gatewayDeviceResponse, 0, len(cfg.Devices))
 	for id, dev := range cfg.Devices {

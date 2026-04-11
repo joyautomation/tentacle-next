@@ -218,8 +218,6 @@ func (m *Module) routes() http.Handler {
 		r.Post("/scanner/{protocol}/unsubscribe", m.handleScannerUnsubscribe)
 
 		// Network
-		r.Get("/gateways/{gatewayId}/network/discover", m.handleDiscoverNetworkInterfaces)
-		r.Post("/gateways/{gatewayId}/network/add", m.handleAddNetworkInterfaces)
 		r.Get("/network/interfaces", m.handleGetNetworkInterfaces)
 		r.Get("/network/config", m.handleGetNetworkConfig)
 		r.Put("/network/config", m.handleApplyNetworkConfig)

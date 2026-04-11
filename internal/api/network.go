@@ -4,15 +4,106 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 )
+
+// syncNetworkInterfaces auto-discovers network interfaces via the network
+// module and ensures they exist as gateway devices with UDT variables.
+// Called during gateway config GET so interfaces appear automatically.
+func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
+	// Ask the network module for discovered interfaces.
+	resp, err := m.bus.Request(topics.Browse("network"), []byte("{}"), 2*time.Second)
+	if err != nil {
+		return false // network module not running — nothing to sync
+	}
+
+	var browseResult struct {
+		Instances []struct {
+			Name string `json:"name"`
+		} `json:"instances"`
+	}
+	if err := json.Unmarshal(resp, &browseResult); err != nil || len(browseResult.Instances) == 0 {
+		return false
+	}
+
+	ensureMaps(cfg)
+
+	// Build set of discovered interface names.
+	discovered := make(map[string]bool, len(browseResult.Instances))
+	for _, inst := range browseResult.Instances {
+		discovered[inst.Name] = true
+	}
+
+	// Remove network devices that no longer exist.
+	changed := false
+	for deviceID, dev := range cfg.Devices {
+		if dev.Protocol == "network" && !discovered[deviceID] {
+			delete(cfg.Devices, deviceID)
+			delete(cfg.UdtVariables, deviceID)
+			changed = true
+		}
+	}
+
+	memberNames := []string{
+		"operstate", "carrier", "speed", "mtu", "mac",
+		"rxBytes", "txBytes", "rxPackets", "txPackets",
+		"rxErrors", "txErrors", "rxDropped", "txDropped",
+	}
+
+	// Add any missing interfaces.
+	for _, inst := range browseResult.Instances {
+		if _, ok := cfg.Devices[inst.Name]; ok {
+			continue // already configured
+		}
+
+		// Ensure the template exists.
+		if _, ok := cfg.UdtTemplates["NetworkInterface"]; !ok {
+			cfg.UdtTemplates["NetworkInterface"] = itypes.GatewayUdtTemplateConfig{
+				Name:    "NetworkInterface",
+				Version: "1.0",
+				Members: []itypes.GatewayUdtTemplateMemberConfig{
+					{Name: "operstate", Datatype: "string"},
+					{Name: "carrier", Datatype: "boolean"},
+					{Name: "speed", Datatype: "number"},
+					{Name: "mtu", Datatype: "number"},
+					{Name: "mac", Datatype: "string"},
+					{Name: "rxBytes", Datatype: "number"},
+					{Name: "txBytes", Datatype: "number"},
+					{Name: "rxPackets", Datatype: "number"},
+					{Name: "txPackets", Datatype: "number"},
+					{Name: "rxErrors", Datatype: "number"},
+					{Name: "txErrors", Datatype: "number"},
+					{Name: "rxDropped", Datatype: "number"},
+					{Name: "txDropped", Datatype: "number"},
+				},
+			}
+		}
+
+		cfg.Devices[inst.Name] = itypes.GatewayDeviceConfig{
+			Protocol: "network",
+		}
+
+		memberTags := make(map[string]string, len(memberNames))
+		for _, name := range memberNames {
+			memberTags[name] = name
+		}
+		cfg.UdtVariables[inst.Name] = itypes.GatewayUdtVariableConfig{
+			ID:           inst.Name,
+			DeviceID:     inst.Name,
+			Tag:          inst.Name,
+			TemplateName: "NetworkInterface",
+			MemberTags:   memberTags,
+		}
+		changed = true
+	}
+
+	return changed
+}
 
 // handleGetNetworkInterfaces returns the current network interface state.
 // GET /api/v1/network/interfaces
@@ -87,150 +178,6 @@ func (m *Module) handleApplyNetworkConfig(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
-}
-
-// handleDiscoverNetworkInterfaces returns available network interfaces for
-// gateway configuration. Each interface can be added as a gateway device.
-// GET /api/v1/gateways/{gatewayId}/network/discover
-func (m *Module) handleDiscoverNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
-	gatewayID := chi.URLParam(r, "gatewayId")
-
-	// Call network.browse to discover interfaces.
-	resp, err := m.bus.Request(topics.Browse("network"), []byte("{}"), busTimeout)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "network module not running or failed to discover: "+err.Error())
-		return
-	}
-
-	// Parse the browse result to extract interface names.
-	var browseResult struct {
-		Instances []struct {
-			Name         string            `json:"name"`
-			TemplateName string            `json:"templateName"`
-			MemberTags   map[string]string `json:"memberTags"`
-		} `json:"instances"`
-		Udts map[string]json.RawMessage `json:"udts"`
-	}
-	if err := json.Unmarshal(resp, &browseResult); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to parse browse result: "+err.Error())
-		return
-	}
-
-	// Check which interfaces are already configured as gateway devices.
-	var configuredInterfaces map[string]bool
-	cfg, err := m.getGatewayConfig(gatewayID)
-	if err == nil {
-		configuredInterfaces = make(map[string]bool)
-		for deviceID, dev := range cfg.Devices {
-			if dev.Protocol == "network" {
-				configuredInterfaces[deviceID] = true
-			}
-		}
-	}
-
-	type discoveredInterface struct {
-		Name       string `json:"name"`
-		Configured bool   `json:"configured"`
-	}
-	interfaces := make([]discoveredInterface, 0, len(browseResult.Instances))
-	for _, inst := range browseResult.Instances {
-		interfaces = append(interfaces, discoveredInterface{
-			Name:       inst.Name,
-			Configured: configuredInterfaces[inst.Name],
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"interfaces": interfaces,
-	})
-}
-
-// handleAddNetworkInterfaces adds selected network interfaces as gateway
-// devices with UDT variables.
-// POST /api/v1/gateways/{gatewayId}/network/add
-func (m *Module) handleAddNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
-	gatewayID := chi.URLParam(r, "gatewayId")
-
-	var body struct {
-		Interfaces []string `json:"interfaces"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
-		return
-	}
-	if len(body.Interfaces) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one interface is required")
-		return
-	}
-
-	cfg, err := m.getGatewayConfig(gatewayID)
-	if err != nil {
-		cfg = &itypes.GatewayConfigKV{
-			GatewayID:    gatewayID,
-			Devices:      make(map[string]itypes.GatewayDeviceConfig),
-			Variables:    make(map[string]itypes.GatewayVariableConfig),
-			UdtTemplates: make(map[string]itypes.GatewayUdtTemplateConfig),
-			UdtVariables: make(map[string]itypes.GatewayUdtVariableConfig),
-		}
-	}
-	ensureMaps(cfg)
-
-	// Ensure the NetworkInterface UDT template exists.
-	if _, ok := cfg.UdtTemplates["NetworkInterface"]; !ok {
-		cfg.UdtTemplates["NetworkInterface"] = itypes.GatewayUdtTemplateConfig{
-			Name:    "NetworkInterface",
-			Version: "1.0",
-			Members: []itypes.GatewayUdtTemplateMemberConfig{
-				{Name: "operstate", Datatype: "string"},
-				{Name: "carrier", Datatype: "boolean"},
-				{Name: "speed", Datatype: "number"},
-				{Name: "mtu", Datatype: "number"},
-				{Name: "mac", Datatype: "string"},
-				{Name: "rxBytes", Datatype: "number"},
-				{Name: "txBytes", Datatype: "number"},
-				{Name: "rxPackets", Datatype: "number"},
-				{Name: "txPackets", Datatype: "number"},
-				{Name: "rxErrors", Datatype: "number"},
-				{Name: "txErrors", Datatype: "number"},
-				{Name: "rxDropped", Datatype: "number"},
-				{Name: "txDropped", Datatype: "number"},
-			},
-		}
-	}
-
-	memberNames := []string{
-		"operstate", "carrier", "speed", "mtu", "mac",
-		"rxBytes", "txBytes", "rxPackets", "txPackets",
-		"rxErrors", "txErrors", "rxDropped", "txDropped",
-	}
-
-	for _, ifaceName := range body.Interfaces {
-		// Create device.
-		cfg.Devices[ifaceName] = itypes.GatewayDeviceConfig{
-			Protocol: "network",
-		}
-
-		// Create UDT variable with member tags mapping member name → member name
-		// (network module uses the member name directly as the tag).
-		memberTags := make(map[string]string, len(memberNames))
-		for _, name := range memberNames {
-			memberTags[name] = name
-		}
-
-		cfg.UdtVariables[ifaceName] = itypes.GatewayUdtVariableConfig{
-			ID:           ifaceName,
-			DeviceID:     ifaceName,
-			Tag:          ifaceName,
-			TemplateName: "NetworkInterface",
-			MemberTags:   memberTags,
-		}
-	}
-
-	if err := m.putGatewayConfig(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, cfg)
 }
 
 // handleStreamNetworkState streams network interface state changes via SSE.
