@@ -6,7 +6,7 @@
   import { fly, slide } from 'svelte/transition';
   import { untrack } from 'svelte';
   import { state as saltState } from '@joyautomation/salt';
-  import { ArrowPath, ExclamationTriangle, PencilSquare, Signal } from '@joyautomation/salt/icons';
+  import { ArrowPath, ChevronRight, ExclamationTriangle, PencilSquare, Signal } from '@joyautomation/salt/icons';
   import { mapDatatype, type RbeState, type InstanceInfo, type ActiveSection } from './utils';
   import TemplateDefaultsTab from './TemplateDefaultsTab.svelte';
   import InstancesTab from './InstancesTab.svelte';
@@ -21,6 +21,7 @@
 
   let activeSection: ActiveSection | null = $state<ActiveSection | null>(null);
   let activeTab: 'template' | 'instances' = $state('instances');
+  let templatesExpanded = $state(false);
 
   // ── Derived data ──
   const templates = $derived(gatewayConfig?.udtTemplates ?? []);
@@ -1377,25 +1378,33 @@
       <!-- Side nav (desktop) -->
       <nav class="tc-side-nav">
         {#if mergedTemplates.length > 0}
-          <div class="tc-side-section-label">Templates</div>
-          {#each mergedTemplates as tmpl}
-            <button
-              class="tc-side-item"
-              class:active={activeSection?.kind === 'template' && activeSection.templateName === tmpl.name}
-              onclick={() => { activeSection = { kind: 'template', templateName: tmpl.name }; activeTab = 'instances'; }}
-            >
-              {#if dirtySidebarSections.has(`t::${tmpl.name}`)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
-              <span class="tc-side-icon t-icon">T</span>
-              <span class="tc-side-name">{tmpl.name}</span>
-              {#if tmpl.hasConflict}
-                <span class="conflict-icon" title="Template members differ across devices — first device's definition will be used">
-                  <ExclamationTriangle size="1rem" />
-                </span>
-              {/if}
-              {#if publishedTemplateSections.has(tmpl.name)}<span class="mqtt-icon" title="Has MQTT-published instances"><Signal size="1rem" /></span>{/if}
-              <span class="tc-side-count">{tmpl.totalInstanceCount}</span>
-            </button>
-          {/each}
+          <button class="tc-side-section-label" onclick={() => templatesExpanded = !templatesExpanded}>
+            <span class="section-chevron" class:expanded={templatesExpanded}><ChevronRight size="0.75rem" /></span>
+            Templates
+            <span class="tc-side-count">{mergedTemplates.length}</span>
+          </button>
+          {#if templatesExpanded}
+            <div transition:slide|local={{ duration: 150 }}>
+              {#each mergedTemplates as tmpl}
+                <button
+                  class="tc-side-item"
+                  class:active={activeSection?.kind === 'template' && activeSection.templateName === tmpl.name}
+                  onclick={() => { activeSection = { kind: 'template', templateName: tmpl.name }; activeTab = 'instances'; }}
+                >
+                  {#if dirtySidebarSections.has(`t::${tmpl.name}`)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
+                  <span class="tc-side-icon t-icon">T</span>
+                  <span class="tc-side-name">{tmpl.name}</span>
+                  {#if tmpl.hasConflict}
+                    <span class="conflict-icon" title="Template members differ across devices — first device's definition will be used">
+                      <ExclamationTriangle size="1rem" />
+                    </span>
+                  {/if}
+                  {#if publishedTemplateSections.has(tmpl.name)}<span class="mqtt-icon" title="Has MQTT-published instances"><Signal size="1rem" /></span>{/if}
+                  <span class="tc-side-count">{tmpl.totalInstanceCount}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
         {/if}
 
         {#each sideNavDevices as device}
@@ -1727,10 +1736,17 @@
   .a-icon { background: var(--badge-teal-bg); color: var(--badge-teal-text); }
 
   .tc-side-section-label {
+    display: flex; align-items: center; gap: 0.25rem; width: 100%;
     padding: 0.5rem 1rem 0.25rem; font-size: 0.625rem; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--theme-text-muted);
+    color: var(--theme-text-muted); background: none; border: none; cursor: pointer;
     &:not(:first-child) { border-top: 1px solid var(--theme-border); margin-top: 0.25rem; padding-top: 0.625rem; }
+    &:hover { color: var(--theme-text); }
+    .tc-side-count { margin-left: auto; }
+  }
+  .section-chevron {
+    display: inline-flex; flex-shrink: 0; transition: transform 0.15s ease;
+    &.expanded { transform: rotate(90deg); }
   }
 
   .tc-side-name { font-family: 'IBM Plex Mono', monospace; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
