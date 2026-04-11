@@ -57,6 +57,7 @@
     switch (type) {
       case 'nats':
       case 'bus': return 'var(--color-purple-500, #a855f7)';
+      case 'mqtt':
       case 'device': return 'var(--color-amber-500, #f59e0b)';
       default: return 'var(--color-teal-500, #14b8a6)';
     }
