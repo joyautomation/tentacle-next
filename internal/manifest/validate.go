@@ -38,6 +38,8 @@ func Validate(resources []any) error {
 			validateNftables(r, i, ve)
 		case *NetworkResource:
 			validateNetwork(r, i, ve)
+		case *PlcResource:
+			validatePlc(r, i, ve)
 		default:
 			ve.add("resource %d: unknown type %T", i, res)
 		}
@@ -124,6 +126,49 @@ func validateNftables(r *NftablesResource, idx int, ve *ValidationError) {
 			ve.add("%s: duplicate rule id %q", prefix, rule.ID)
 		}
 		ids[rule.ID] = true
+	}
+}
+
+func validatePlc(r *PlcResource, idx int, ve *ValidationError) {
+	prefix := fmt.Sprintf("Plc %q (resource %d)", r.Metadata.Name, idx)
+
+	if r.Metadata.Name == "" {
+		ve.add("%s: metadata.name is required", prefix)
+	}
+
+	// Check that input variables with sources reference defined devices.
+	for varID, v := range r.Spec.Variables {
+		if v.Source != nil && v.Source.DeviceID != "" {
+			if _, ok := r.Spec.Devices[v.Source.DeviceID]; !ok {
+				ve.add("%s: variable %q source references unknown device %q", prefix, varID, v.Source.DeviceID)
+			}
+		}
+	}
+
+	// Check that tasks reference programs that exist in the manifest.
+	for taskID, t := range r.Spec.Tasks {
+		if t.ProgramRef == "" {
+			ve.add("%s: task %q has no programRef", prefix, taskID)
+		} else if r.Spec.Programs != nil {
+			if _, ok := r.Spec.Programs[t.ProgramRef]; !ok {
+				ve.add("%s: task %q references unknown program %q", prefix, taskID, t.ProgramRef)
+			}
+		}
+		if t.ScanRateMs <= 0 {
+			ve.add("%s: task %q has invalid scanRateMs %d", prefix, taskID, t.ScanRateMs)
+		}
+	}
+
+	// Check device protocols.
+	validProtocols := map[string]bool{
+		"ethernetip": true, "opcua": true, "snmp": true, "modbus": true,
+	}
+	for devID, d := range r.Spec.Devices {
+		if d.Protocol == "" {
+			ve.add("%s: device %q has no protocol", prefix, devID)
+		} else if !validProtocols[d.Protocol] {
+			ve.add("%s: device %q has unknown protocol %q", prefix, devID, d.Protocol)
+		}
 	}
 }
 

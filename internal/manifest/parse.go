@@ -91,6 +91,12 @@ func decodeResource(raw map[string]any) (any, error) {
 			return nil, fmt.Errorf("decode Network: %w", err)
 		}
 		return &res, nil
+	case KindPlc:
+		var res PlcResource
+		if err := json.Unmarshal(jsonBytes, &res); err != nil {
+			return nil, fmt.Errorf("decode Plc: %w", err)
+		}
+		return &res, nil
 	default:
 		return nil, fmt.Errorf("unhandled kind: %q", kind)
 	}

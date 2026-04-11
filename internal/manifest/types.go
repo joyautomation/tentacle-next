@@ -13,6 +13,7 @@ const (
 	KindModuleConfig = "ModuleConfig"
 	KindNftables     = "Nftables"
 	KindNetwork      = "Network"
+	KindPlc          = "Plc"
 )
 
 // AllKinds lists every known resource kind.
@@ -22,6 +23,7 @@ var AllKinds = []string{
 	KindModuleConfig,
 	KindNftables,
 	KindNetwork,
+	KindPlc,
 }
 
 // ResourceHeader is the common envelope for all manifest resources.
@@ -104,6 +106,30 @@ type NetworkResource struct {
 // NetworkSpec wraps the interface configurations.
 type NetworkSpec struct {
 	Interfaces []itypes.NetworkInterfaceConfig `yaml:"interfaces" json:"interfaces"`
+}
+
+// ─── Plc ────────────────────────────────────────────────────────────────────
+
+// PlcResource is the manifest representation of a PLC configuration.
+type PlcResource struct {
+	ResourceHeader `yaml:",inline"`
+	Spec           PlcSpec `yaml:"spec" json:"spec"`
+}
+
+// PlcSpec is the PLC config for GitOps.
+type PlcSpec struct {
+	Devices      map[string]itypes.PlcDeviceConfigKV      `yaml:"devices" json:"devices"`
+	Variables    map[string]itypes.PlcVariableConfigKV     `yaml:"variables" json:"variables"`
+	UdtTemplates map[string]itypes.PlcUdtTemplateConfigKV `yaml:"udtTemplates,omitempty" json:"udtTemplates,omitempty"`
+	Tasks        map[string]itypes.PlcTaskConfigKV         `yaml:"tasks" json:"tasks"`
+	Programs     map[string]PlcProgramSpec                 `yaml:"programs,omitempty" json:"programs,omitempty"`
+}
+
+// PlcProgramSpec is the manifest representation of a PLC program.
+type PlcProgramSpec struct {
+	Language string `yaml:"language" json:"language"` // "ladder", "st", "starlark"
+	Source   string `yaml:"source" json:"source"`
+	StSource string `yaml:"stSource,omitempty" json:"stSource,omitempty"`
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

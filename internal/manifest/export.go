@@ -70,6 +70,16 @@ func Export(b bus.Bus, opts ExportOptions) ([]any, error) {
 		}
 	}
 
+	// PLC configs.
+	if includeAll || kindSet[KindPlc] {
+		plcs, err := exportPlcs(b)
+		if err != nil {
+			slog.Warn("export: skipping plcs", "error", err)
+		} else {
+			resources = append(resources, plcs...)
+		}
+	}
+
 	// Network config.
 	if includeAll || kindSet[KindNetwork] {
 		net, err := exportNetwork(b)
@@ -258,6 +268,73 @@ func exportNetwork(b bus.Bus) (any, error) {
 		ResourceHeader: NewHeader(KindNetwork, "default"),
 		Spec:           NetworkSpec{Interfaces: cmdResp.Config},
 	}, nil
+}
+
+func exportPlcs(b bus.Bus) ([]any, error) {
+	keys, err := b.KVKeys(topics.BucketPlcConfig)
+	if err != nil {
+		return nil, fmt.Errorf("list plc config keys: %w", err)
+	}
+
+	var resources []any
+	for _, key := range keys {
+		data, _, err := b.KVGet(topics.BucketPlcConfig, key)
+		if err != nil {
+			slog.Warn("export: skipping plc", "key", key, "error", err)
+			continue
+		}
+		var kv itypes.PlcConfigKV
+		if err := json.Unmarshal(data, &kv); err != nil {
+			slog.Warn("export: skipping plc", "key", key, "error", err)
+			continue
+		}
+
+		spec := PlcSpec{
+			Devices:      kv.Devices,
+			Variables:    kv.Variables,
+			UdtTemplates: kv.UdtTemplates,
+			Tasks:        kv.Tasks,
+			Programs:     make(map[string]PlcProgramSpec),
+		}
+		if spec.Devices == nil {
+			spec.Devices = make(map[string]itypes.PlcDeviceConfigKV)
+		}
+		if spec.Variables == nil {
+			spec.Variables = make(map[string]itypes.PlcVariableConfigKV)
+		}
+		if spec.Tasks == nil {
+			spec.Tasks = make(map[string]itypes.PlcTaskConfigKV)
+		}
+
+		// Load programs referenced by tasks.
+		progRefs := make(map[string]bool)
+		for _, task := range kv.Tasks {
+			if task.ProgramRef != "" {
+				progRefs[task.ProgramRef] = true
+			}
+		}
+		for progRef := range progRefs {
+			progData, _, err := b.KVGet(topics.BucketPlcPrograms, progRef)
+			if err != nil {
+				continue
+			}
+			var prog itypes.PlcProgramKV
+			if err := json.Unmarshal(progData, &prog); err != nil {
+				continue
+			}
+			spec.Programs[progRef] = PlcProgramSpec{
+				Language: prog.Language,
+				Source:   prog.Source,
+				StSource: prog.StSource,
+			}
+		}
+
+		resources = append(resources, &PlcResource{
+			ResourceHeader: NewHeader(KindPlc, key),
+			Spec:           spec,
+		})
+	}
+	return resources, nil
 }
 
 func sortedMapKeys[V any](m map[string]V) []string {

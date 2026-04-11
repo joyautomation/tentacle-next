@@ -70,6 +70,12 @@ func Apply(b bus.Bus, resources []any, source string) (*ApplyResult, error) {
 				return result, fmt.Errorf("apply Network %q: %w", r.Metadata.Name, err)
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindNetwork, Name: r.Metadata.Name})
+
+		case *PlcResource:
+			if err := applyPlc(b, r, source); err != nil {
+				return result, fmt.Errorf("apply Plc %q: %w", r.Metadata.Name, err)
+			}
+			result.Applied = append(result.Applied, AppliedResource{Kind: KindPlc, Name: r.Metadata.Name})
 		}
 	}
 
@@ -215,6 +221,59 @@ func applyNetwork(b bus.Bus, r *NetworkResource, source string) error {
 	if !cmdResp.Success {
 		return fmt.Errorf("network: %s", cmdResp.Error)
 	}
+	return nil
+}
+
+func applyPlc(b bus.Bus, r *PlcResource, source string) error {
+	kv := itypes.PlcConfigKV{
+		PlcID:        r.Metadata.Name,
+		Devices:      r.Spec.Devices,
+		Variables:    r.Spec.Variables,
+		UdtTemplates: r.Spec.UdtTemplates,
+		Tasks:        r.Spec.Tasks,
+		UpdatedAt:    time.Now().UnixMilli(),
+	}
+	if kv.Devices == nil {
+		kv.Devices = make(map[string]itypes.PlcDeviceConfigKV)
+	}
+	if kv.Variables == nil {
+		kv.Variables = make(map[string]itypes.PlcVariableConfigKV)
+	}
+	if kv.Tasks == nil {
+		kv.Tasks = make(map[string]itypes.PlcTaskConfigKV)
+	}
+
+	data, err := json.Marshal(kv)
+	if err != nil {
+		return err
+	}
+	if _, err := b.KVPut(topics.BucketPlcConfig, kv.PlcID, data); err != nil {
+		return err
+	}
+	writeSourceMetadata(b, topics.BucketPlcConfig, kv.PlcID, source)
+
+	// Write programs to plc_programs bucket.
+	for progName, progSpec := range r.Spec.Programs {
+		prog := itypes.PlcProgramKV{
+			Name:      progName,
+			Language:  progSpec.Language,
+			Source:    progSpec.Source,
+			StSource:  progSpec.StSource,
+			UpdatedAt: time.Now().UnixMilli(),
+			UpdatedBy: source,
+		}
+		progData, err := json.Marshal(prog)
+		if err != nil {
+			slog.Warn("apply: failed to marshal plc program", "program", progName, "error", err)
+			continue
+		}
+		if _, err := b.KVPut(topics.BucketPlcPrograms, progName, progData); err != nil {
+			slog.Warn("apply: failed to write plc program", "program", progName, "error", err)
+			continue
+		}
+		writeSourceMetadata(b, topics.BucketPlcPrograms, progName, source)
+	}
+
 	return nil
 }
 
