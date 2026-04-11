@@ -366,7 +366,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 			}
 		}
 
-		assembler := NewUdtAssembler(g.b, g.gatewayID, udtVar.Tag, udtVar, tmpl, udtDeadband, udtDisableRBE, memberDeadbands)
+		assembler := NewUdtAssembler(g.b, g.gatewayID, udtVar.ID, udtVar, tmpl, udtDeadband, udtDisableRBE, memberDeadbands)
 		g.udtAssemblers[varID] = assembler
 
 		sanitizedDevice := types.SanitizeForSubject(udtVar.DeviceID)
@@ -754,7 +754,7 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 			outMsg := types.PlcDataMessage{
 				ModuleID:    g.gatewayID,
 				DeviceID:    tv.Config.DeviceID,
-				VariableID:  tv.Config.Tag,
+				VariableID:  tv.Config.ID,
 				Value:       value,
 				Timestamp:   nowMs,
 				Datatype:    dt,
@@ -805,7 +805,7 @@ func (g *Gateway) setupVariablesHandlerLocked() {
 		vars := make([]types.VariableInfo, 0, len(g.variables)+len(g.udtAssemblers))
 		for _, tv := range g.variables {
 			vars = append(vars, types.VariableInfo{
-				ModuleID: g.gatewayID, DeviceID: tv.Config.DeviceID, VariableID: tv.Config.Tag,
+				ModuleID: g.gatewayID, DeviceID: tv.Config.DeviceID, VariableID: tv.Config.ID,
 				Value: tv.Value, Datatype: tv.Config.Datatype, Description: tv.Config.Description,
 				Deadband: tv.Deadband, DisableRBE: tv.DisableRBE,
 			})
@@ -824,7 +824,7 @@ func (g *Gateway) setupVariablesHandlerLocked() {
 				members[i] = types.UdtMemberDefinition{Name: m.Name, Datatype: datatype, TemplateRef: m.TemplateRef}
 			}
 			vars = append(vars, types.VariableInfo{
-				ModuleID: g.gatewayID, DeviceID: assembler.config.DeviceID, VariableID: assembler.config.Tag,
+				ModuleID: g.gatewayID, DeviceID: assembler.config.DeviceID, VariableID: assembler.config.ID,
 				Value: assembler.Value(), Datatype: "udt",
 				UdtTemplate: &types.UdtTemplateDefinition{Name: tmpl.Name, Version: tmpl.Version, Members: members},
 			})
