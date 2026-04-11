@@ -228,7 +228,7 @@
   .diagram-content { display: flex; justify-content: center; }
 
   .variables-header {
-    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.5rem;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem;
     h1 { font-size: 1.5rem; font-weight: 600; color: var(--theme-text); margin: 0; }
   }
 

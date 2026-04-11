@@ -377,6 +377,7 @@
   .metrics-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.75rem;
     margin-bottom: 1.5rem;
 
