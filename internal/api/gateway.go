@@ -138,7 +138,7 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 	// variables so they appear automatically in the Variables page.
 	configChanged := m.syncNetworkInterfaces(cfg)
 	for _, mt := range []string{"gateway", "mqtt"} {
-		if m.syncModuleStatus(cfg, mt) {
+		if m.syncModuleStatus(cfg, gatewayID, mt) {
 			configChanged = true
 		}
 	}
