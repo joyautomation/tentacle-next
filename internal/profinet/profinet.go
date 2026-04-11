@@ -56,7 +56,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 	// Create and start manager
 	m.manager = NewManager(b, m.moduleID, m.log)
-	m.manager.Start()
+	m.manager.Start(ctx)
 
 	// Start heartbeat
 	m.stopHB = heartbeat.Start(b, m.moduleID, defaultServiceType, func() map[string]interface{} {

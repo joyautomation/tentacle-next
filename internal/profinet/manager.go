@@ -3,9 +3,11 @@
 package profinet
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -16,14 +18,16 @@ import (
 )
 
 // Manager coordinates bus subscriptions, tag value tracking, I/O buffer
-// management, and (in the future) the p-net device lifecycle.
+// management, and the PROFINET device lifecycle.
 type Manager struct {
 	b        bus.Bus
 	moduleID string
 	log      *slog.Logger
+	ctx      context.Context
 
 	config *ProfinetConfig
 	status ProfinetStatus
+	device *Device
 
 	// Current tag values for input (device -> controller) packing
 	tagValues map[string]interface{}
@@ -47,7 +51,8 @@ func NewManager(b bus.Bus, moduleID string, log *slog.Logger) *Manager {
 }
 
 // Start registers bus request handlers.
-func (m *Manager) Start() {
+func (m *Manager) Start(ctx context.Context) {
+	m.ctx = ctx
 	m.registerHandler(topics.ProfinetConfigure, m.handleConfigure)
 	m.registerHandler(topics.ProfinetVariables, m.handleVariables)
 	m.registerHandler(topics.ProfinetStatus, m.handleStatus)
@@ -90,6 +95,11 @@ func (m *Manager) Start() {
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.device != nil {
+		m.device.Stop()
+		m.device = nil
+	}
 
 	for subj, sub := range m.dataSubs {
 		if err := sub.Unsubscribe(); err != nil {
@@ -186,10 +196,16 @@ func (m *Manager) handleGsdml(_ string, _ []byte, reply bus.ReplyFunc) {
 	})
 }
 
-// applyConfig applies a new configuration, updating subscriptions and status.
+// applyConfig applies a new configuration, updating subscriptions, status, and the device.
 func (m *Manager) applyConfig(cfg *ProfinetConfig) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Stop existing device if running
+	if m.device != nil {
+		m.device.Stop()
+		m.device = nil
+	}
 
 	// Tear down existing data subscriptions
 	for subj, sub := range m.dataSubs {
@@ -226,12 +242,29 @@ func (m *Manager) applyConfig(cfg *ProfinetConfig) {
 	}
 
 	m.status = ProfinetStatus{
-		Connected:     false, // Will be true once p-net AR is established
+		Connected:     false,
 		StationName:   cfg.StationName,
 		InterfaceName: cfg.InterfaceName,
 		InputSlots:    inputSlots,
 		OutputSlots:   outputSlots,
 	}
+
+	// Start the PROFINET device (DCP responder + future RPC/RT)
+	device := NewDevice(cfg, DeviceCallbacks{
+		OnIPSet: func(ip, mask, gateway net.IP) {
+			m.log.Info("profinet: controller assigned IP via DCP", "ip", ip, "mask", mask, "gateway", gateway)
+		},
+		OnNameSet: func(name string) {
+			m.log.Info("profinet: controller assigned station name via DCP", "name", name)
+		},
+	}, m.log)
+	m.device = device
+
+	go func() {
+		if err := device.Start(m.ctx); err != nil && m.ctx.Err() == nil {
+			m.log.Error("profinet: device stopped with error", "error", err)
+		}
+	}()
 
 	m.log.Info("profinet: configuration applied",
 		"stationName", cfg.StationName,
