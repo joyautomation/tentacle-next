@@ -1162,7 +1162,7 @@
             const key = `${deviceId}::${item.tag}`;
             const rbe = rbeOverrides.get(key);
             return {
-              id: item.name || item.tag,
+              id: `${deviceId}/${item.name || item.tag}`,
               deviceId,
               tag: item.tag,
               datatype: item.datatype,
