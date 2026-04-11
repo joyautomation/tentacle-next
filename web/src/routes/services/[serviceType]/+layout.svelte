@@ -108,7 +108,7 @@
         Overview
       </a>
       <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
-        Devices
+        Sources
       </a>
       <a href="/services/{serviceType}/tag-config" class="tab" class:active={currentTab() === 'tag-config'}>
         Variables

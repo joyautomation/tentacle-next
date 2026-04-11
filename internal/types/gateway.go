@@ -16,6 +16,7 @@ type GatewayConfigKV struct {
 // GatewayDeviceConfig is a protocol-specific device connection configuration.
 type GatewayDeviceConfig struct {
 	Protocol              string                   `json:"protocol"` // "ethernetip", "opcua", "snmp", "modbus"
+	AutoManaged           bool                     `json:"autoManaged,omitempty"` // true for module-created devices (network, gateway status, etc.)
 	Host                  string                   `json:"host,omitempty"`
 	Port                  *int                     `json:"port,omitempty"`
 	EndpointURL           string                   `json:"endpointUrl,omitempty"` // OPC UA

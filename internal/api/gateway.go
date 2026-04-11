@@ -134,12 +134,17 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-sync network interfaces: discover and add any new ones,
-	// remove any that no longer exist. Runs in the background of GET
-	// so network interfaces appear automatically in the Variables page.
-	if m.syncNetworkInterfaces(cfg) {
+	// Auto-sync module sources: discover interfaces and module status
+	// variables so they appear automatically in the Variables page.
+	configChanged := m.syncNetworkInterfaces(cfg)
+	for _, mt := range []string{"gateway", "mqtt"} {
+		if m.syncModuleStatus(cfg, mt) {
+			configChanged = true
+		}
+	}
+	if configChanged {
 		if err := m.putGatewayConfig(cfg); err != nil {
-			m.log.Warn("api: failed to persist network auto-sync", "error", err)
+			m.log.Warn("api: failed to persist auto-sync", "error", err)
 		}
 	}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/config"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/module"
 	"github.com/joyautomation/tentacle/internal/topics"
 	"github.com/joyautomation/tentacle/types"
 )
@@ -31,6 +32,7 @@ type Module struct {
 	b             bus.Bus
 	log           *slog.Logger
 	bridge        *Bridge
+	startedAt     time.Time
 	stopHeartbeat func()
 	subs          []bus.Subscription
 }
@@ -69,6 +71,8 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.subs = append(m.subs, schemaSub)
 	}
 
+	m.startedAt = time.Now()
+
 	// Start heartbeat
 	m.stopHeartbeat = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
 		meta := map[string]interface{}{
@@ -80,6 +84,32 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 		return meta
 	})
+
+	// Subscribe to status browse for module status variables.
+	statusVars := []module.StatusVar{
+		{Name: "uptime", Datatype: "number"},
+		{Name: "connected", Datatype: "boolean"},
+		{Name: "publishRate", Datatype: "number"},
+		{Name: "storeForward", Datatype: "boolean"},
+	}
+	statusBrowseSub, _ := b.Subscribe(topics.StatusBrowse(serviceType), func(_ string, _ []byte, reply bus.ReplyFunc) {
+		module.HandleStatusBrowse(statusVars, reply)
+	})
+	m.subs = append(m.subs, statusBrowseSub)
+
+	// Publish status data every 10s.
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.publishStatus()
+			}
+		}
+	}()
 
 	// Create and start the bridge
 	m.bridge = NewBridge(b, m.moduleID, cfg, m.log)
@@ -158,6 +188,32 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	case <-sigChan:
 	}
 	return nil
+}
+
+// publishStatus publishes MQTT bridge status variables via the bus.
+func (m *Module) publishStatus() {
+	uptimeSeconds := int64(time.Since(m.startedAt).Seconds())
+
+	connected := false
+	storeForward := false
+	publishRate := float64(0)
+
+	if m.bridge != nil {
+		if m.bridge.node != nil {
+			connected = m.bridge.node.State() == StateBorn
+		}
+		if m.bridge.sf != nil {
+			storeForward = m.bridge.sf.State() != SFOnline
+			publishRate = m.bridge.sf.PublishRate()
+		}
+	}
+
+	module.PublishStatus(m.b, serviceType, map[string]module.StatusValue{
+		"uptime":       {Value: uptimeSeconds, Datatype: "number"},
+		"connected":    {Value: connected, Datatype: "boolean"},
+		"publishRate":  {Value: publishRate, Datatype: "number"},
+		"storeForward": {Value: storeForward, Datatype: "boolean"},
+	})
 }
 
 // Stop gracefully shuts down the module.

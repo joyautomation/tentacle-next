@@ -10,6 +10,9 @@ func ScannerSubscribe(protocol string) string          { return protocol + ".sub
 func ScannerUnsubscribe(protocol string) string        { return protocol + ".unsubscribe" }
 func ScannerVariables(protocol string) string          { return protocol + ".variables" }
 
+// Module status browse (distinct from protocol tag browse).
+func StatusBrowse(moduleType string) string { return moduleType + ".status.browse" }
+
 // Data subjects.
 func Data(moduleID, deviceID, variableID string) string { return fmt.Sprintf("%s.data.%s.%s", moduleID, deviceID, variableID) }
 func DataWildcard(moduleID string) string               { return moduleID + ".data.>" }

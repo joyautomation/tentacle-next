@@ -20,6 +20,7 @@ import (
 
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/module"
 	"github.com/joyautomation/tentacle/internal/rbe"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
@@ -67,6 +68,7 @@ type Gateway struct {
 	varSub bus.Subscription
 	cmdSub bus.Subscription
 
+	startedAt     time.Time
 	stopHeartbeat func()
 }
 
@@ -103,6 +105,8 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 		}
 	}
 
+	g.startedAt = time.Now()
+
 	// Start heartbeat
 	g.stopHeartbeat = heartbeat.Start(b, g.gatewayID, serviceType, func() map[string]interface{} {
 		return map[string]interface{}{
@@ -110,6 +114,34 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 			"hasConfig":     g.HasConfig(),
 		}
 	})
+
+	// Subscribe to status browse for module status variables.
+	statusVars := []module.StatusVar{
+		{Name: "uptime", Datatype: "number"},
+		{Name: "variableCount", Datatype: "number"},
+		{Name: "udtVariableCount", Datatype: "number"},
+		{Name: "deviceCount", Datatype: "number"},
+	}
+	statusBrowseSub, _ := b.Subscribe(topics.StatusBrowse(serviceType), func(_ string, _ []byte, reply bus.ReplyFunc) {
+		module.HandleStatusBrowse(statusVars, reply)
+	})
+	g.mu.Lock()
+	g.subs = append(g.subs, statusBrowseSub)
+	g.mu.Unlock()
+
+	// Publish status data every 10s.
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				g.publishStatus()
+			}
+		}
+	}()
 
 	// Load initial config
 	if data, _, err := b.KVGet(topics.BucketGatewayConfig, g.gatewayID); err == nil {
@@ -212,6 +244,27 @@ func (g *Gateway) HasConfig() bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.config != nil
+}
+
+// publishStatus publishes gateway status variables via the bus.
+func (g *Gateway) publishStatus() {
+	g.mu.RLock()
+	deviceCount := 0
+	if g.config != nil {
+		deviceCount = len(g.config.Devices)
+	}
+	varCount := len(g.variables)
+	udtCount := len(g.udtAssemblers)
+	g.mu.RUnlock()
+
+	uptimeSeconds := int64(time.Since(g.startedAt).Seconds())
+
+	module.PublishStatus(g.b, serviceType, map[string]module.StatusValue{
+		"uptime":           {Value: uptimeSeconds, Datatype: "number"},
+		"variableCount":    {Value: varCount, Datatype: "number"},
+		"udtVariableCount": {Value: udtCount, Datatype: "number"},
+		"deviceCount":      {Value: deviceCount, Datatype: "number"},
+	})
 }
 
 // ApplyConfig stops any current subscriptions and applies a new configuration.
@@ -456,15 +509,17 @@ func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.Gateway
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
+	// Auto-managed devices (network, module status) self-publish their data
+	// and don't need scanner subscription config.
+	if device.AutoManaged {
+		return
+	}
+
 	subscriberID := fmt.Sprintf("gateway-%s", g.gatewayID)
 
 	bucket := topics.ScannerBucket(device.Protocol)
 	if bucket == "" {
-		// Self-polling protocols (e.g. "network") manage their own data
-		// publishing and don't need scanner subscription config.
-		if device.Protocol != "network" {
-			g.log.Warn("gateway: unknown protocol", "protocol", device.Protocol, "device", deviceID)
-		}
+		g.log.Warn("gateway: unknown protocol", "protocol", device.Protocol, "device", deviceID)
 		return
 	}
 

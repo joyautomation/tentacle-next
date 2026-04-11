@@ -8,6 +8,7 @@ export interface DeadBandConfig {
 export interface GatewayDevice {
   deviceId: string;
   protocol: string;
+  autoManaged?: boolean;
   host?: string;
   port?: number | null;
   endpointUrl?: string;

@@ -49,10 +49,15 @@ func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
 	changed := false
 
 	// Ensure single "network" device exists.
-	if _, ok := cfg.Devices["network"]; !ok {
+	if dev, ok := cfg.Devices["network"]; !ok {
 		cfg.Devices["network"] = itypes.GatewayDeviceConfig{
-			Protocol: "network",
+			Protocol:    "network",
+			AutoManaged: true,
 		}
+		changed = true
+	} else if !dev.AutoManaged {
+		dev.AutoManaged = true
+		cfg.Devices["network"] = dev
 		changed = true
 	}
 

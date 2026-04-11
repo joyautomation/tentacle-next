@@ -1282,6 +1282,7 @@
   type SideNavDevice = {
     deviceId: string;
     protocol: string;
+    autoManaged?: boolean;
     atomicCount: number;
   };
 
@@ -1344,9 +1345,9 @@
         const structTags = cache.structTags ?? {};
         const isSnmp = cache.protocol === 'snmp';
         const atomicCount = cache.items.filter(item => !structTags[item.tag] && (isSnmp || !item.tag.includes('.'))).length;
-        result.push({ deviceId: device.deviceId, protocol: device.protocol, atomicCount });
+        result.push({ deviceId: device.deviceId, protocol: device.protocol, autoManaged: device.autoManaged, atomicCount });
       } else {
-        result.push({ deviceId: device.deviceId, protocol: device.protocol, atomicCount: 0 });
+        result.push({ deviceId: device.deviceId, protocol: device.protocol, autoManaged: device.autoManaged, atomicCount: 0 });
       }
     }
 
@@ -1406,7 +1407,7 @@
             {#if dirtyDevices.has(device.deviceId)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
             <span class="side-device-name">{device.deviceId}</span>
             <span class="side-proto">{device.protocol}</span>
-            {#if device.protocol !== 'network'}
+            {#if !device.autoManaged}
             <span class="side-browse-area">
               {#if isBusy && browseState}
                 <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
@@ -1457,7 +1458,7 @@
               <span class="tc-side-count">{device.atomicCount}</span>
             </button>
           {/if}
-          {#if device.atomicCount === 0 && !cache && device.protocol !== 'network'}
+          {#if device.atomicCount === 0 && !cache && !device.autoManaged}
             <div class="tc-side-empty">Click <button class="side-refresh-link" onclick={() => refreshDevice(device.deviceId)}>browse</button> to discover tags</div>
           {/if}
         {/each}
