@@ -508,7 +508,8 @@
   .tree-leaf {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
     padding: 0.5rem 1rem;
     font-size: 0.8125rem;
 
@@ -542,17 +543,19 @@
   .leaf-name {
     font-family: 'IBM Plex Mono', monospace;
     color: var(--theme-text);
-  }
-
-  .leaf-value {
-    margin-left: auto;
-    font-family: 'IBM Plex Mono', monospace;
-    color: var(--theme-text-muted);
-    font-size: 0.75rem;
-    max-width: 300px;
+    flex: 1 1 0;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .leaf-value {
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--theme-text-muted);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .staleness-label {
