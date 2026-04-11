@@ -45,7 +45,7 @@
   }
 
   .connector {
-    flex: 0 0 3rem;
+    flex: 0 0 2rem;
     height: 2px;
     background: var(--theme-border);
     transition: background 0.3s;
@@ -65,7 +65,9 @@
     background: none;
     border: none;
     cursor: default;
-    padding: 0.25rem 0.5rem 0;
+    padding: 0.25rem 0 0;
+    flex: 1 1 0;
+    min-width: 0;
 
     &.completed {
       cursor: pointer;
