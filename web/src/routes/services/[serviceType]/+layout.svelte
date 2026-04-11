@@ -20,6 +20,7 @@
     if (path.endsWith('/devices')) return 'devices';
     if (path.endsWith('/oids')) return 'oids';
     if (path.endsWith('/modules')) return 'modules';
+    if (path.endsWith('/history')) return 'history';
     return 'default';
   });
 </script>
@@ -139,6 +140,9 @@
     {:else if serviceType === 'gitops'}
       <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
         Overview
+      </a>
+      <a href="/services/{serviceType}/history" class="tab" class:active={currentTab() === 'history'}>
+        History
       </a>
       <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
         Settings

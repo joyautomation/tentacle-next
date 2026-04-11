@@ -247,6 +247,10 @@ func (m *Module) routes() http.Handler {
 		r.Post("/gitops/ssh-key/generate", m.handleGenerateSSHKey)
 		r.Post("/gitops/test-connection", m.handleTestGitConnection)
 
+		// GitOps history
+		r.Get("/gitops/history", m.handleGetGitopsHistory)
+		r.Get("/gitops/history/diff", m.handleGetGitopsHistoryDiff)
+
 		// System
 		r.Get("/system/hostname", m.handleGetHostname)
 
