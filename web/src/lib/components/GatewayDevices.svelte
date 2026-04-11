@@ -214,11 +214,49 @@
       <div class="tree">
         {#each moduleDevices as device}
           <div class="tree-node">
-            <div class="module-row">
+            <div class="device-row" role="button" tabindex="0" onclick={() => toggleDeviceSettings(device)} onkeydown={(e) => e.key === 'Enter' && toggleDeviceSettings(device)}>
+              <span class="chevron" class:expanded={expandedDevice === device.deviceId}><ChevronRight size="0.875rem" /></span>
               <span class="protocol-badge">{protocolLabels[device.protocol] ?? device.protocol}</span>
               <span class="leaf-name">{device.deviceId}</span>
+              {#if device.disableRBE}
+                <span class="setting-badge warn">RBE off</span>
+              {:else if device.deadband}
+                <span class="setting-badge">DB {device.deadband.value}</span>
+              {/if}
               <span class="var-count">{varCount(device)} vars</span>
             </div>
+            {#if expandedDevice === device.deviceId}
+              <div class="device-settings" transition:slide|local={{ duration: 200 }}>
+                <div class="settings-grid">
+                  <div class="setting-group">
+                    <h3>RBE / Deadband</h3>
+                    <label class="checkbox-label">
+                      <input type="checkbox" bind:checked={editDisableRBE} />
+                      <span>Disable RBE (publish every update)</span>
+                    </label>
+                    {#if !editDisableRBE}
+                      <div class="form-row">
+                        <label for="db-val-{device.deviceId}">Deadband</label>
+                        <input id="db-val-{device.deviceId}" type="number" bind:value={editDeadbandValue} placeholder="0" min="0" step="0.1" />
+                      </div>
+                      <div class="form-row">
+                        <label for="db-min-{device.deviceId}">Min Time (ms)</label>
+                        <input id="db-min-{device.deviceId}" type="number" bind:value={editDeadbandMinTime} placeholder="none" min="0" step="100" />
+                      </div>
+                      <div class="form-row">
+                        <label for="db-max-{device.deviceId}">Max Time (ms)</label>
+                        <input id="db-max-{device.deviceId}" type="number" bind:value={editDeadbandMaxTime} placeholder="none" min="0" step="1000" />
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="save-btn" onclick={() => saveDeviceSettings(device)} disabled={saving}>
+                    {saving ? 'Saving...' : 'Save Settings'}
+                  </button>
+                </div>
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -422,11 +460,6 @@
     &:not(:last-child) { border-bottom: 1px solid color-mix(in srgb, var(--theme-border) 50%, transparent); }
   }
 
-  .module-row {
-    display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem;
-    font-size: 0.8125rem;
-  }
-
   .device-row {
     display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem;
     font-size: 0.8125rem; cursor: pointer;
@@ -589,7 +622,7 @@
       flex-direction: column; align-items: stretch; gap: 0.25rem;
       label { min-width: unset; }
     }
-    .device-row, .module-row {
+    .device-row {
       flex-wrap: wrap; gap: 0.375rem 0.5rem; padding: 0.75rem 0.75rem;
     }
     .device-host { order: 10; width: 100%; margin-top: 0.125rem; }
