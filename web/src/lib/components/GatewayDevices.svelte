@@ -216,8 +216,7 @@
           <div class="tree-node">
             <div class="device-row" role="button" tabindex="0" onclick={() => toggleDeviceSettings(device)} onkeydown={(e) => e.key === 'Enter' && toggleDeviceSettings(device)}>
               <span class="chevron" class:expanded={expandedDevice === device.deviceId}><ChevronRight size="0.875rem" /></span>
-              <span class="protocol-badge">{protocolLabels[device.protocol] ?? device.protocol}</span>
-              <span class="leaf-name">{device.deviceId}</span>
+              <span class="leaf-name">{protocolLabels[device.protocol] ?? device.protocol}</span>
               {#if device.disableRBE}
                 <span class="setting-badge warn">RBE off</span>
               {:else if device.deadband}
