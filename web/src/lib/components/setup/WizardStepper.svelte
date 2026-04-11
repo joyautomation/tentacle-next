@@ -42,6 +42,8 @@
     justify-content: center;
     gap: 0;
     padding: 1.5rem 1rem;
+    max-width: 550px;
+    margin: 0 auto;
   }
 
   .connector {
