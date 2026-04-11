@@ -26,6 +26,9 @@ const (
 	BucketScannerModbus     = "scanner_config_modbus"
 	BucketScannerSNMP       = "scanner_config_snmp"
 
+	// PROFINET IO Device configuration bucket.
+	BucketProfinetConfig = "profinet_config"
+
 	// Config metadata tracks the source of each config write (gui, cli, gitops)
 	// to prevent feedback loops in bidirectional sync.
 	BucketConfigMetadata = "config_metadata"
@@ -63,6 +66,7 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketScannerOpcUA:      {History: 1},
 		BucketScannerModbus:     {History: 1},
 		BucketScannerSNMP:       {History: 1},
+		BucketProfinetConfig:    {History: 5},
 		BucketConfigMetadata:    {History: 1},
 	}
 }

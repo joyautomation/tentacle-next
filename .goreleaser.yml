@@ -214,6 +214,19 @@ builds:
       - amd64
       - arm64
 
+  - id: tentacle-profinet
+    dir: cmd/tentacle-profinet
+    binary: tentacle-profinet
+    tags:
+      - profinet
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
 archives:
   - formats:
       - tar.gz
