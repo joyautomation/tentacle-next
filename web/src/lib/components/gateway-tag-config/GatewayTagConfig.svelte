@@ -1333,6 +1333,20 @@
   });
 
   /** Devices for sidebar (atomic tags + browse button only) */
+  /** Build a synthetic BrowseCache for a module device from its config variables */
+  function moduleDeviceBrowseCache(deviceId: string, protocol: string): BrowseCache | null {
+    const vars = (gatewayConfig?.variables ?? []).filter(v => v.deviceId === deviceId);
+    if (vars.length === 0) return null;
+    return {
+      deviceId,
+      protocol,
+      items: vars.map(v => ({ tag: v.tag, name: v.tag, datatype: v.datatype, value: v.default ?? null, protocolType: '' })),
+      udts: [],
+      structTags: {},
+      cachedAt: null,
+    };
+  }
+
   const sideNavDevices = $derived.by((): SideNavDevice[] => {
     const cacheMap = new Map((browseCaches ?? []).map(c => [c.deviceId, c]));
     const result: SideNavDevice[] = [];
@@ -1341,7 +1355,11 @@
     for (const device of devices) {
       seen.add(device.deviceId);
       const cache = cacheMap.get(device.deviceId);
-      if (cache) {
+      if (device.autoManaged) {
+        // Module devices: count config variables, not browse cache
+        const configVarCount = (gatewayConfig?.variables ?? []).filter(v => v.deviceId === device.deviceId).length;
+        result.push({ deviceId: device.deviceId, protocol: device.protocol, autoManaged: true, atomicCount: configVarCount });
+      } else if (cache) {
         const structTags = cache.structTags ?? {};
         const isSnmp = cache.protocol === 'snmp';
         const atomicCount = cache.items.filter(item => !structTags[item.tag] && (isSnmp || !item.tag.includes('.'))).length;
@@ -1592,7 +1610,7 @@
         {:else if activeSection?.kind === 'atomic' && activeDeviceId}
           <AtomicTagsTab
             deviceId={activeDeviceId}
-            browseCache={browseCaches.find(c => c.deviceId === activeDeviceId) ?? null}
+            browseCache={browseCaches.find(c => c.deviceId === activeDeviceId) ?? (() => { const dev = devices.find(d => d.deviceId === activeDeviceId); return dev?.autoManaged ? moduleDeviceBrowseCache(activeDeviceId, dev.protocol) : null; })()}
             deviceDeadband={atomicDeviceDeadband}
             {checkedAtomicTags}
             {rbeOverrides}
