@@ -11,10 +11,12 @@
 		analogMembers,
 		expandedInstances,
 		checkedInstances,
+		checkedHistoryInstances,
 		workingOverrides,
 		editingCell,
 		editDraft,
 		onTogglePublish,
+		onToggleHistoryPublish,
 		onToggleExpand,
 		onStartEdit,
 		onCancelEdit,
@@ -28,6 +30,8 @@
 		onBatchClearFiltered,
 		onBatchMqttEnable,
 		onBatchMqttDisable,
+		onBatchHistoryEnable,
+		onBatchHistoryDisable,
 		dirtyInstanceKeys,
 		dirtyInstanceMembers
 	}: {
@@ -37,10 +41,12 @@
 		dirtyInstanceMembers: Map<string, Set<string>>;
 		expandedInstances: Set<string>;
 		checkedInstances: Set<string>;
+		checkedHistoryInstances: Set<string>;
 		workingOverrides: Map<string, Record<string, DeadBandConfig>>;
 		editingCell: string | null;
 		editDraft: string;
 		onTogglePublish: (deviceId: string, tag: string) => void;
+		onToggleHistoryPublish: (deviceId: string, tag: string) => void;
 		onToggleExpand: (id: string) => void;
 		onStartEdit: (key: string, value: number) => void;
 		onCancelEdit: () => void;
@@ -54,6 +60,8 @@
 		onBatchClearFiltered: (instanceIds: string[], memberNames: string[]) => void;
 		onBatchMqttEnable: (keys: string[]) => void;
 		onBatchMqttDisable: (keys: string[]) => void;
+		onBatchHistoryEnable: (keys: string[]) => void;
+		onBatchHistoryDisable: (keys: string[]) => void;
 	} = $props();
 
 	// Local filter state
@@ -91,6 +99,14 @@
 	function handleBatchMqttDisable() {
 		onBatchMqttDisable(getFilteredInstanceKeys());
 	}
+
+	function handleBatchHistoryEnable() {
+		onBatchHistoryEnable(getFilteredInstanceKeys());
+	}
+
+	function handleBatchHistoryDisable() {
+		onBatchHistoryDisable(getFilteredInstanceKeys());
+	}
 </script>
 
 <TabToolbar
@@ -102,6 +118,8 @@
 	onBatchClear={handleBatchClear}
 	onBatchMqttEnable={handleBatchMqttEnable}
 	onBatchMqttDisable={handleBatchMqttDisable}
+	onBatchHistoryEnable={handleBatchHistoryEnable}
+	onBatchHistoryDisable={handleBatchHistoryDisable}
 />
 
 <div class="inst-toolbar">
@@ -128,11 +146,19 @@
 			<div class="inst-head" onclick={() => onToggleExpand(inst.id)}>
 				{#if dirtyInstanceKeys.has(publishKey)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->
-				<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()}>
+				<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="MQTT">
 					<input
 						type="checkbox"
 						checked={isPublished}
 						onchange={() => onTogglePublish(inst.deviceId, inst.tag)}
+					/>
+					<span class="toggle-track"></span>
+				</label>
+				<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="History">
+					<input
+						type="checkbox"
+						checked={checkedHistoryInstances.has(publishKey)}
+						onchange={() => onToggleHistoryPublish(inst.deviceId, inst.tag)}
 					/>
 					<span class="toggle-track"></span>
 				</label>

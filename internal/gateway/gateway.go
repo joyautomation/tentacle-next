@@ -707,6 +707,9 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 			if tv.DisableRBE {
 				outMsg.DisableRBE = true
 			}
+			if tv.Config.HistoryEnabled {
+				outMsg.HistoryEnabled = true
+			}
 
 			data, err := json.Marshal(outMsg)
 			if err != nil {

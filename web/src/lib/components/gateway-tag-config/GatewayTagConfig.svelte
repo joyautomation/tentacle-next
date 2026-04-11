@@ -55,6 +55,16 @@
     (gatewayConfig?.variables ?? []).map(v => `${v.deviceId}::${v.tag}`)
   ));
 
+  // ── History enable state ──
+  let checkedHistoryAtomicTags: Set<string> = $state(new Set());
+  const publishedHistoryAtomicTags = $derived(new Set(
+    (gatewayConfig?.variables ?? []).filter(v => v.historyEnabled).map(v => `${v.deviceId}::${v.tag}`)
+  ));
+  let checkedHistoryUdtInstances: Set<string> = $state(new Set());
+  const publishedHistoryUdtInstances = $derived(new Set(
+    (gatewayConfig?.udtVariables ?? []).filter(v => v.historyEnabled).map(v => `${v.deviceId}::${v.tag}`)
+  ));
+
   let rbeOverrides: Map<string, RbeState> = $state(new Map());
   let initialRbeOverrides: Map<string, RbeState> = $state(new Map());
 
@@ -178,6 +188,10 @@
 
     // Atomic tag state
     checkedAtomicTags = new Set(publishedAtomicTags);
+
+    // History state
+    checkedHistoryAtomicTags = new Set(publishedHistoryAtomicTags);
+    checkedHistoryUdtInstances = new Set(publishedHistoryUdtInstances);
 
     // Atomic RBE overrides
     const overrides = new Map<string, RbeState>();
@@ -386,10 +400,20 @@
     for (const key of checkedAtomicTags) { if (!publishedAtomicTags.has(key)) return true; }
     for (const key of publishedAtomicTags) { if (!checkedAtomicTags.has(key)) return true; }
 
+    // History atomic tag selection
+    if (checkedHistoryAtomicTags.size !== publishedHistoryAtomicTags.size) return true;
+    for (const key of checkedHistoryAtomicTags) { if (!publishedHistoryAtomicTags.has(key)) return true; }
+    for (const key of publishedHistoryAtomicTags) { if (!checkedHistoryAtomicTags.has(key)) return true; }
+
     // UDT instance selection
     if (checkedUdtInstances.size !== publishedUdtInstances.size) return true;
     for (const key of checkedUdtInstances) { if (!publishedUdtInstances.has(key)) return true; }
     for (const key of publishedUdtInstances) { if (!checkedUdtInstances.has(key)) return true; }
+
+    // History UDT instance selection
+    if (checkedHistoryUdtInstances.size !== publishedHistoryUdtInstances.size) return true;
+    for (const key of checkedHistoryUdtInstances) { if (!publishedHistoryUdtInstances.has(key)) return true; }
+    for (const key of publishedHistoryUdtInstances) { if (!checkedHistoryUdtInstances.has(key)) return true; }
 
     // Atomic RBE changes
     if (rbeOverrides.size !== initialRbeOverrides.size) return true;
@@ -469,6 +493,8 @@
     const dirty = new Set<string>();
     for (const key of checkedAtomicTags) { if (!publishedAtomicTags.has(key)) dirty.add(key); }
     for (const key of publishedAtomicTags) { if (!checkedAtomicTags.has(key)) dirty.add(key); }
+    for (const key of checkedHistoryAtomicTags) { if (!publishedHistoryAtomicTags.has(key)) dirty.add(key); }
+    for (const key of publishedHistoryAtomicTags) { if (!checkedHistoryAtomicTags.has(key)) dirty.add(key); }
     for (const [key, state] of rbeOverrides) {
       const initial = initialRbeOverrides.get(key);
       if (!initial) { dirty.add(key); continue; }
@@ -529,6 +555,9 @@
     // MQTT toggle
     for (const key of checkedUdtInstances) { if (!publishedUdtInstances.has(key)) dirty.add(key); }
     for (const key of publishedUdtInstances) { if (!checkedUdtInstances.has(key)) dirty.add(key); }
+    // History toggle
+    for (const key of checkedHistoryUdtInstances) { if (!publishedHistoryUdtInstances.has(key)) dirty.add(key); }
+    for (const key of publishedHistoryUdtInstances) { if (!checkedHistoryUdtInstances.has(key)) dirty.add(key); }
     // Override changes - map instance.id → publish key
     for (const inst of allConfigInstances) {
       const pubKey = `${inst.deviceId}::${inst.tag}`;
@@ -943,6 +972,28 @@
     saltState.addNotification({ message: `Disabled MQTT for ${keys.length} instances`, type: 'success' });
   }
 
+  // ── UDT instance history toggle ──
+  function toggleHistoryUdtInstance(deviceId: string, tag: string) {
+    const key = `${deviceId}::${tag}`;
+    const next = new Set(checkedHistoryUdtInstances);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    checkedHistoryUdtInstances = next;
+  }
+
+  function batchHistoryEnableInstances(keys: string[]) {
+    const next = new Set(checkedHistoryUdtInstances);
+    for (const key of keys) next.add(key);
+    checkedHistoryUdtInstances = next;
+    saltState.addNotification({ message: `Enabled History for ${keys.length} instances`, type: 'success' });
+  }
+
+  function batchHistoryDisableInstances(keys: string[]) {
+    const next = new Set(checkedHistoryUdtInstances);
+    for (const key of keys) next.delete(key);
+    checkedHistoryUdtInstances = next;
+    saltState.addNotification({ message: `Disabled History for ${keys.length} instances`, type: 'success' });
+  }
+
   // ── Atomic tag toggle ──
   function toggleAtomicTag(deviceId: string, tag: string) {
     const key = `${deviceId}::${tag}`;
@@ -963,6 +1014,28 @@
     for (const key of keys) next.delete(key);
     checkedAtomicTags = next;
     saltState.addNotification({ message: `Disabled MQTT for ${keys.length} tags`, type: 'success' });
+  }
+
+  // ── Atomic history toggle ──
+  function toggleHistoryAtomicTag(deviceId: string, tag: string) {
+    const key = `${deviceId}::${tag}`;
+    const next = new Set(checkedHistoryAtomicTags);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    checkedHistoryAtomicTags = next;
+  }
+
+  function batchHistoryEnable(keys: string[]) {
+    const next = new Set(checkedHistoryAtomicTags);
+    for (const key of keys) next.add(key);
+    checkedHistoryAtomicTags = next;
+    saltState.addNotification({ message: `Enabled History for ${keys.length} tags`, type: 'success' });
+  }
+
+  function batchHistoryDisable(keys: string[]) {
+    const next = new Set(checkedHistoryAtomicTags);
+    for (const key of keys) next.delete(key);
+    checkedHistoryAtomicTags = next;
+    saltState.addNotification({ message: `Disabled History for ${keys.length} tags`, type: 'success' });
   }
 
   // ── Atomic RBE ──
@@ -1169,6 +1242,7 @@
               ...(item.protocolType ? { cipType: item.protocolType } : {}),
               ...(rbe?.mode === 'custom' && rbe.deadband ? { deadband: { value: rbe.deadband.value, ...(rbe.deadband.minTime != null ? { minTime: rbe.deadband.minTime } : {}), ...(rbe.deadband.maxTime != null ? { maxTime: rbe.deadband.maxTime } : {}) } } : {}),
               ...(rbe?.disableRBE ? { disableRBE: true } : {}),
+              ...(checkedHistoryAtomicTags.has(`${deviceId}::${item.tag}`) ? { historyEnabled: true } : {}),
             };
           });
 
@@ -1206,7 +1280,7 @@
             memberTags[m.name] = `${tag}.${m.name}`;
             memberCipTypes[m.name] = m.cipType || m.datatype;
           }
-          udtVariables.push({ id: tag, deviceId, tag, templateName: resolved, memberTags, memberCipTypes });
+          udtVariables.push({ id: tag, deviceId, tag, templateName: resolved, memberTags, memberCipTypes, ...(checkedHistoryUdtInstances.has(`${deviceId}::${tag}`) ? { historyEnabled: true } : {}) });
         }
 
         const syncResult = await apiPost(`/gateways/gateway/devices/${deviceId}/sync`, { atomicVariables, udtTemplates, udtVariables });
@@ -1565,12 +1639,14 @@
               analogMembers={enabledAnalogMembers}
               {expandedInstances}
               checkedInstances={checkedUdtInstances}
+              checkedHistoryInstances={checkedHistoryUdtInstances}
               {dirtyInstanceKeys}
               {dirtyInstanceMembers}
               workingOverrides={workingInstanceOverrides}
               {editingCell}
               {editDraft}
               onTogglePublish={toggleUdtPublish}
+              onToggleHistoryPublish={toggleHistoryUdtInstance}
               onToggleExpand={toggleExpand}
               onStartEdit={startEdit}
               onCancelEdit={cancelEdit}
@@ -1584,6 +1660,8 @@
               onBatchClearFiltered={instancesBatchClear}
               onBatchMqttEnable={batchMqttEnableInstances}
               onBatchMqttDisable={batchMqttDisableInstances}
+              onBatchHistoryEnable={batchHistoryEnableInstances}
+              onBatchHistoryDisable={batchHistoryDisableInstances}
             />
           {/if}
         {:else if activeSection?.kind === 'atomic' && activeDeviceId}
@@ -1592,11 +1670,13 @@
             browseCache={browseCaches.find(c => c.deviceId === activeDeviceId) ?? null}
             deviceDeadband={atomicDeviceDeadband}
             {checkedAtomicTags}
+            {checkedHistoryAtomicTags}
             {rbeOverrides}
             {dirtyAtomicKeys}
             {editingCell}
             {editDraft}
             onToggleTag={toggleAtomicTag}
+            onToggleHistoryTag={toggleHistoryAtomicTag}
             onStartEdit={startEdit}
             onCancelEdit={cancelEdit}
             onSetRbeMode={setRbeMode}
@@ -1606,6 +1686,8 @@
             onBatchClear={atomicBatchClear}
             onBatchMqttEnable={batchMqttEnable}
             onBatchMqttDisable={batchMqttDisable}
+            onBatchHistoryEnable={batchHistoryEnable}
+            onBatchHistoryDisable={batchHistoryDisable}
           />
         {/if}
       </div>

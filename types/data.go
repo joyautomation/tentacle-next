@@ -12,6 +12,7 @@ type PlcDataMessage struct {
 	Description     string                    `json:"description,omitempty"`
 	Deadband        *DeadBandConfig           `json:"deadband,omitempty"`
 	DisableRBE      bool                      `json:"disableRBE,omitempty"`
+	HistoryEnabled  bool                      `json:"historyEnabled,omitempty"`
 	UdtTemplate     *UdtTemplateDefinition    `json:"udtTemplate,omitempty"`
 	MemberDeadbands map[string]DeadBandConfig `json:"memberDeadbands,omitempty"`
 }

@@ -8,35 +8,45 @@ import (
 	"log/slog"
 )
 
-// enableHypertable converts the history table to a TimescaleDB hypertable.
-// This is a no-op if TimescaleDB is not installed, returning false instead of
-// an error so callers can gracefully fall back.
-func enableHypertable(db *sql.DB, log *slog.Logger) bool {
+// enableHypertables converts the history and history_properties tables to
+// TimescaleDB hypertables. Returns false if TimescaleDB is not installed.
+func enableHypertables(db *sql.DB, log *slog.Logger) bool {
 	_, err := db.Exec(`SELECT create_hypertable('history', 'timestamp', if_not_exists => TRUE)`)
 	if err != nil {
 		log.Warn("history: could not create hypertable (TimescaleDB may not be installed)", "error", err)
 		return false
 	}
 	log.Info("history: hypertable enabled on history table")
+
+	_, err = db.Exec(`SELECT create_hypertable('history_properties', 'timestamp', if_not_exists => TRUE)`)
+	if err != nil {
+		log.Warn("history: could not create hypertable on history_properties", "error", err)
+	} else {
+		log.Info("history: hypertable enabled on history_properties table")
+	}
+
+	// Set daily chunk intervals to match mantle.
+	db.Exec(`SELECT set_chunk_time_interval('history', INTERVAL '1 day')`)
+	db.Exec(`SELECT set_chunk_time_interval('history_properties', INTERVAL '1 day')`)
+
 	return true
 }
 
-// enableCompressionPolicy sets a compression policy on the hypertable.
-// Segments by (module_id, variable_id), orders by timestamp DESC, and
-// compresses chunks older than 1 hour.
+// enableCompressionPolicy sets compression policies on the hypertables.
+// Segments by (group_id, node_id, device_id, metric_id), orders by timestamp DESC.
 func enableCompressionPolicy(db *sql.DB, log *slog.Logger) error {
-	const alterCompression = `
+	const alterHistory = `
 ALTER TABLE history SET (
     timescaledb.compress,
-    timescaledb.compress_segmentby = 'module_id, variable_id',
-    timescaledb.compress_orderby = 'timestamp DESC'
+    timescaledb.compress_segmentby = 'group_id, node_id, device_id, metric_id',
+    timescaledb.compress_orderby = 'timestamp DESC NULLS FIRST'
 );`
-	if _, err := db.Exec(alterCompression); err != nil {
+	if _, err := db.Exec(alterHistory); err != nil {
 		return fmt.Errorf("history: enable compression settings: %w", err)
 	}
 
-	const addPolicy = `SELECT add_compression_policy('history', INTERVAL '1 hour', if_not_exists => TRUE)`
-	if _, err := db.Exec(addPolicy); err != nil {
+	const addHistoryPolicy = `SELECT add_compression_policy('history', INTERVAL '1 hour', if_not_exists => TRUE)`
+	if _, err := db.Exec(addHistoryPolicy); err != nil {
 		return fmt.Errorf("history: add compression policy: %w", err)
 	}
 

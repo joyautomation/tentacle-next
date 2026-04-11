@@ -51,6 +51,7 @@ type GatewayVariableConfig struct {
 	Bidirectional  bool                    `json:"bidirectional,omitempty"`
 	Deadband       *ttypes.DeadBandConfig  `json:"deadband,omitempty"`
 	DisableRBE     bool                    `json:"disableRBE,omitempty"`
+	HistoryEnabled bool                    `json:"historyEnabled,omitempty"`
 	FunctionCode   *int                    `json:"functionCode,omitempty"`
 	ModbusDatatype string                  `json:"modbusDatatype,omitempty"`
 	ByteOrder      string                  `json:"byteOrder,omitempty"`
@@ -83,6 +84,7 @@ type GatewayUdtVariableConfig struct {
 	MemberDeadbands map[string]ttypes.DeadBandOverride `json:"memberDeadbands,omitempty"`
 	Deadband        *ttypes.DeadBandConfig            `json:"deadband,omitempty"`
 	DisableRBE      bool                              `json:"disableRBE,omitempty"`
+	HistoryEnabled  bool                              `json:"historyEnabled,omitempty"`
 }
 
 // ─── Scanner Subscribe Requests ─────────────────────────────────────────────

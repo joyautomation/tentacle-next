@@ -11,10 +11,12 @@
 		browseCache,
 		deviceDeadband,
 		checkedAtomicTags,
+		checkedHistoryAtomicTags,
 		rbeOverrides,
 		editingCell,
 		editDraft,
 		onToggleTag,
+		onToggleHistoryTag,
 		onStartEdit,
 		onCancelEdit,
 		onSetRbeMode,
@@ -24,17 +26,21 @@
 		onBatchClear,
 		onBatchMqttEnable,
 		onBatchMqttDisable,
+		onBatchHistoryEnable,
+		onBatchHistoryDisable,
 		dirtyAtomicKeys
 	}: {
 		deviceId: string;
 		browseCache: BrowseCache | null;
 		deviceDeadband: DeadBandConfig | null;
 		checkedAtomicTags: Set<string>;
+		checkedHistoryAtomicTags: Set<string>;
 		rbeOverrides: Map<string, RbeState>;
 		dirtyAtomicKeys: Set<string>;
 		editingCell: string | null;
 		editDraft: string;
 		onToggleTag: (deviceId: string, tag: string) => void;
+		onToggleHistoryTag: (deviceId: string, tag: string) => void;
 		onStartEdit: (key: string, value: number) => void;
 		onCancelEdit: () => void;
 		onSetRbeMode: (key: string, mode: 'default' | 'custom') => void;
@@ -48,12 +54,14 @@
 		onBatchClear: (keys: string[]) => void;
 		onBatchMqttEnable: (keys: string[]) => void;
 		onBatchMqttDisable: (keys: string[]) => void;
+		onBatchHistoryEnable: (keys: string[]) => void;
+		onBatchHistoryDisable: (keys: string[]) => void;
 	} = $props();
 
 	// Local filter/sort state
 	let filter = $state('');
 
-	type SortCol = 'tag' | 'value' | 'type' | 'mqtt' | 'rbe' | 'deadband' | 'minTime' | 'maxTime' | 'status';
+	type SortCol = 'tag' | 'value' | 'type' | 'mqtt' | 'history' | 'rbe' | 'deadband' | 'minTime' | 'maxTime' | 'status';
 	let sortCol: SortCol = $state('tag');
 	let sortAsc = $state(true);
 
@@ -95,6 +103,7 @@
 					case 'value': return dir * String(a.value ?? '').localeCompare(String(b.value ?? ''));
 					case 'type': return dir * a.datatype.localeCompare(b.datatype);
 					case 'mqtt': return dir * (Number(pubA) - Number(pubB));
+					case 'history': return dir * (Number(checkedHistoryAtomicTags.has(keyA)) - Number(checkedHistoryAtomicTags.has(keyB)));
 					case 'rbe': return dir * (Number(!!rbeA?.disableRBE) - Number(!!rbeB?.disableRBE));
 					case 'deadband': return dir * ((rbeA?.deadband?.value ?? 0) - (rbeB?.deadband?.value ?? 0));
 					case 'minTime': return dir * ((rbeA?.deadband?.minTime ?? 0) - (rbeB?.deadband?.minTime ?? 0));
@@ -137,6 +146,14 @@
 	function handleBatchMqttDisable() {
 		onBatchMqttDisable(getFilteredTagKeys());
 	}
+
+	function handleBatchHistoryEnable() {
+		onBatchHistoryEnable(getFilteredTagKeys());
+	}
+
+	function handleBatchHistoryDisable() {
+		onBatchHistoryDisable(getFilteredTagKeys());
+	}
 </script>
 
 <TabToolbar
@@ -147,6 +164,8 @@
 	onBatchClear={handleBatchClear}
 	onBatchMqttEnable={handleBatchMqttEnable}
 	onBatchMqttDisable={handleBatchMqttDisable}
+	onBatchHistoryEnable={handleBatchHistoryEnable}
+	onBatchHistoryDisable={handleBatchHistoryDisable}
 />
 
 <div class="tc-scroll">
@@ -166,7 +185,8 @@
 				{#if hasValues}<th style="width: 12%" class="sortable" class:sorted={sortCol === 'value'} onclick={() => toggleSort('value')}>Value <span class="sort-arrow">{sortCol === 'value' ? (sortAsc ? '▲' : '▼') : ''}</span></th>{/if}
 				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'type'} onclick={() => toggleSort('type')}>Type <span class="sort-arrow">{sortCol === 'type' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'mqtt'} onclick={() => toggleSort('mqtt')}>MQTT <span class="sort-arrow">{sortCol === 'mqtt' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
-				<th style="width: 8%" class="sortable" class:sorted={sortCol === 'rbe'} onclick={() => toggleSort('rbe')}>RBE <span class="sort-arrow">{sortCol === 'rbe' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
+				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'history'} onclick={() => toggleSort('history')}>History <span class="sort-arrow">{sortCol === 'history' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
+				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'rbe'} onclick={() => toggleSort('rbe')}>RBE <span class="sort-arrow">{sortCol === 'rbe' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 12%" class="sortable" class:sorted={sortCol === 'deadband'} onclick={() => toggleSort('deadband')}>Deadband <span class="sort-arrow">{sortCol === 'deadband' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 11%" class="sortable" class:sorted={sortCol === 'minTime'} onclick={() => toggleSort('minTime')}>Min (ms) <span class="sort-arrow">{sortCol === 'minTime' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 11%" class="sortable" class:sorted={sortCol === 'maxTime'} onclick={() => toggleSort('maxTime')}>Max (ms) <span class="sort-arrow">{sortCol === 'maxTime' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
@@ -209,6 +229,16 @@
 								type="checkbox"
 								checked={published}
 								onchange={() => onToggleTag(deviceId, item.tag)}
+							/>
+							<span class="toggle-track"></span>
+						</label>
+					</td>
+					<td data-label="History">
+						<label class="toggle-switch">
+							<input
+								type="checkbox"
+								checked={checkedHistoryAtomicTags.has(key)}
+								onchange={() => onToggleHistoryTag(deviceId, item.tag)}
 							/>
 							<span class="toggle-track"></span>
 						</label>

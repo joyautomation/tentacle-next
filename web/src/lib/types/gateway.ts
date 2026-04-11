@@ -32,6 +32,7 @@ export interface GatewayVariable {
   cipType?: string;
   deadband?: DeadBandConfig | null;
   disableRBE?: boolean | null;
+  historyEnabled?: boolean | null;
 }
 
 export interface GatewayUdtTemplateMember {
@@ -55,6 +56,7 @@ export interface GatewayUdtVariable {
   memberTags?: Record<string, string>;
   memberCipTypes?: Record<string, string> | null;
   memberDeadbands?: Record<string, DeadBandConfig> | null;
+  historyEnabled?: boolean | null;
 }
 
 export interface BrowseCacheItem {
