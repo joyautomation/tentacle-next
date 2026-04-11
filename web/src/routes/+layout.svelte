@@ -12,11 +12,13 @@
   import { goto, onNavigate } from "$app/navigation";
   import { themeState, type Theme } from "./theme.svelte";
   import { api } from "$lib/api/client";
+  import { isMonolith } from "$lib/stores/mode";
 
   interface Service {
     serviceType: string;
     moduleId: string;
     enabled: boolean;
+    metadata?: Record<string, unknown>;
   }
 
   interface ModuleRegistryInfo {
@@ -61,6 +63,11 @@
         }
         if (servicesResult.data) {
           services = servicesResult.data;
+          isMonolith.set(
+            servicesResult.data.some(
+              (s) => s.serviceType === 'orchestrator' && (s.metadata as any)?.mode === 'monolith'
+            )
+          );
         }
       } catch {
         // API unreachable — mode stays 'unknown'

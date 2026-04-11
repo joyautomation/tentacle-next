@@ -2,9 +2,11 @@
   import type { PageData } from './$types';
   import type { ModuleInfo, ServiceStatus, DesiredService } from './+page';
   import { getModuleName } from '$lib/constants/services';
-  import { invalidateAll } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import { apiPut, apiDelete } from '$lib/api/client';
   import { state as saltState } from '@joyautomation/salt';
+  import { isMonolith } from '$lib/stores/mode';
+  import { get } from 'svelte/store';
 
   let { data }: { data: PageData } = $props();
 
@@ -37,24 +39,8 @@
 
   let busyModuleId: string | null = $state(null);
 
-  async function installModule(moduleId: string) {
-    busyModuleId = moduleId;
-    try {
-      const result = await apiPut(`/orchestrator/desired-services/${moduleId}`, {
-        version: 'latest',
-        running: true,
-      });
-      if (result.error) {
-        saltState.addNotification({ message: result.error.error, type: 'error' });
-      } else {
-        saltState.addNotification({ message: `${getModuleName(moduleId)} installed`, type: 'success' });
-        await invalidateAll();
-      }
-    } catch (err) {
-      saltState.addNotification({ message: err instanceof Error ? err.message : 'Failed', type: 'error' });
-    } finally {
-      busyModuleId = null;
-    }
+  function navigateToModule(moduleId: string) {
+    goto(`/modules/${moduleId}`);
   }
 
   async function uninstallModule(moduleId: string) {
@@ -64,7 +50,7 @@
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
-        saltState.addNotification({ message: `${getModuleName(moduleId)} uninstalled`, type: 'success' });
+        saltState.addNotification({ message: `${getModuleName(moduleId)} ${get(isMonolith) ? 'disabled' : 'uninstalled'}`, type: 'success' });
         await invalidateAll();
       }
     } catch (err) {
@@ -121,19 +107,19 @@
 
   <div class="modules-header">
     <h1>Modules</h1>
-    <span class="count-badge">{installed().length} installed</span>
+    <span class="count-badge">{installed().length} {$isMonolith ? 'enabled' : 'installed'}</span>
     <span class="count-badge secondary">{available().length} available</span>
   </div>
 
   <!-- Installed Modules -->
   {#if installed().length > 0}
     <section class="section">
-      <h2>Installed</h2>
+      <h2>{$isMonolith ? 'Enabled' : 'Installed'}</h2>
       <div class="modules-list">
         {#each installed() as mod}
           {@const status = statusMap().get(mod.moduleId)}
           {@const ds = desiredMap().get(mod.moduleId)}
-          <div class="module-card" class:active={status?.systemdState === 'active'}>
+          <a href="/modules/{mod.moduleId}" class="module-card clickable" class:active={status?.systemdState === 'active'}>
             <div class="module-header">
               <span class="module-name">{getModuleName(mod.moduleId)}</span>
               <span class="module-id">{mod.moduleId}</span>
@@ -145,12 +131,14 @@
             <p class="module-desc">{mod.description}</p>
             <div class="module-meta">
               <span class="meta-badge">{mod.category}</span>
-              <span class="meta-badge">{mod.runtime}</span>
+              {#if !$isMonolith}
+                <span class="meta-badge">{mod.runtime}</span>
+              {/if}
               {#if status}
                 {@const badge = getReconcileBadge(status.reconcileState)}
                 <span class="meta-badge" style="color: {badge.color}">{badge.label}</span>
               {/if}
-              {#if ds}
+              {#if ds && !$isMonolith}
                 <span class="meta-badge">v{ds.version}</span>
               {/if}
             </div>
@@ -159,7 +147,8 @@
             {/if}
             <div class="module-actions">
               {#if ds}
-                <label class="toggle" title={ds.running ? 'Stop module' : 'Start module'}>
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <label class="toggle" title={ds.running ? 'Stop module' : 'Start module'} onclick={(e) => e.preventDefault()}>
                   <input
                     type="checkbox"
                     checked={ds.running}
@@ -172,10 +161,10 @@
               <button
                 class="action-btn danger"
                 disabled={busyModuleId === mod.moduleId}
-                onclick={() => uninstallModule(mod.moduleId)}
-              >Uninstall</button>
+                onclick={(e) => { e.preventDefault(); uninstallModule(mod.moduleId); }}
+              >{$isMonolith ? 'Disable' : 'Uninstall'}</button>
             </div>
-          </div>
+          </a>
         {/each}
       </div>
     </section>
@@ -187,7 +176,7 @@
       <h2>Available</h2>
       <div class="modules-list">
         {#each available() as mod}
-          <div class="module-card available">
+          <a href="/modules/{mod.moduleId}" class="module-card available clickable">
             <div class="module-header">
               <span class="module-name">{getModuleName(mod.moduleId)}</span>
               <span class="module-id">{mod.moduleId}</span>
@@ -195,16 +184,17 @@
             <p class="module-desc">{mod.description}</p>
             <div class="module-meta">
               <span class="meta-badge">{mod.category}</span>
-              <span class="meta-badge">{mod.runtime}</span>
+              {#if !$isMonolith}
+                <span class="meta-badge">{mod.runtime}</span>
+              {/if}
             </div>
             <div class="module-actions">
               <button
                 class="action-btn primary"
-                disabled={busyModuleId === mod.moduleId}
-                onclick={() => installModule(mod.moduleId)}
-              >Install</button>
+                onclick={(e) => { e.preventDefault(); navigateToModule(mod.moduleId); }}
+              >{$isMonolith ? 'Enable' : 'Install'}</button>
             </div>
-          </div>
+          </a>
         {/each}
       </div>
     </section>
@@ -246,6 +236,17 @@
     border: 1px solid var(--theme-border);
     border-radius: var(--rounded-lg);
     padding: 1rem 1.25rem;
+
+    &.clickable {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s;
+
+      &:hover {
+        border-color: var(--theme-primary);
+      }
+    }
 
     &.active {
       border-color: color-mix(in srgb, var(--color-green-500, #22c55e) 30%, var(--theme-border));

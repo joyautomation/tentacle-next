@@ -10,6 +10,8 @@
     ArrowDownTray,
   } from '@joyautomation/salt/icons';
   import GitOpsSetup from '$lib/components/GitOpsSetup.svelte';
+  import { isMonolith } from '$lib/stores/mode';
+  import { get } from 'svelte/store';
 
   let { data }: { data: PageData } = $props();
 
@@ -96,8 +98,9 @@
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
+        const desc = data.module?.description ?? data.moduleId;
         saltState.addNotification({
-          message: `Installing ${data.module?.description ?? data.moduleId}...`,
+          message: get(isMonolith) ? `Enabling ${desc}...` : `Installing ${desc}...`,
           type: 'success',
         });
         await invalidateAll();
@@ -123,7 +126,7 @@
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
         saltState.addNotification({
-          message: `Removed ${data.moduleId} from managed services`,
+          message: get(isMonolith) ? `Disabled ${data.moduleId}` : `Removed ${data.moduleId} from managed services`,
           type: 'success',
         });
         await invalidateAll();
@@ -157,91 +160,95 @@
           {isRunning ? 'Running' : reconcileState ?? 'Stopped'}
         </span>
       {:else}
-        <span class="status-badge not-installed">Not Installed</span>
+        <span class="status-badge not-installed">{$isMonolith ? 'Disabled' : 'Not Installed'}</span>
       {/if}
     </div>
 
-    <!-- Internet Connectivity -->
-    <div class="section">
-      <div class="detail-row">
-        <span class="label">
-          <GlobeAlt size="1rem" />
-          Internet
-        </span>
-        <span class="value connectivity" class:online={data.online} class:offline={!data.online}>
-          {#if data.online}
-            <CheckCircle size="1rem" />
-            Connected
-          {:else}
-            <XCircle size="1rem" />
-            Offline
-          {/if}
-        </span>
+    {#if !$isMonolith}
+      <!-- Internet Connectivity -->
+      <div class="section">
+        <div class="detail-row">
+          <span class="label">
+            <GlobeAlt size="1rem" />
+            Internet
+          </span>
+          <span class="value connectivity" class:online={data.online} class:offline={!data.online}>
+            {#if data.online}
+              <CheckCircle size="1rem" />
+              Connected
+            {:else}
+              <XCircle size="1rem" />
+              Offline
+            {/if}
+          </span>
+        </div>
       </div>
-    </div>
 
-    <!-- Version Information -->
-    <div class="section">
-      <h2>Versions</h2>
+      <!-- Version Information -->
+      <div class="section">
+        <h2>Versions</h2>
 
-      {#if data.versions?.latestVersion}
-        <div class="detail-row">
-          <span class="label">Latest (GitHub)</span>
-          <span class="value">{data.versions.latestVersion}</span>
-        </div>
-      {:else}
-        <div class="detail-row">
-          <span class="label">Latest (GitHub)</span>
-          <span class="value muted">{data.online ? 'No releases found' : 'Unavailable (offline)'}</span>
-        </div>
-      {/if}
+        {#if data.versions?.latestVersion}
+          <div class="detail-row">
+            <span class="label">Latest (GitHub)</span>
+            <span class="value">{data.versions.latestVersion}</span>
+          </div>
+        {:else}
+          <div class="detail-row">
+            <span class="label">Latest (GitHub)</span>
+            <span class="value muted">{data.online ? 'No releases found' : 'Unavailable (offline)'}</span>
+          </div>
+        {/if}
 
-      {#if data.versions?.activeVersion}
-        <div class="detail-row">
-          <span class="label">Active Version</span>
-          <span class="value">{data.versions.activeVersion}</span>
-        </div>
-      {/if}
+        {#if data.versions?.activeVersion}
+          <div class="detail-row">
+            <span class="label">Active Version</span>
+            <span class="value">{data.versions.activeVersion}</span>
+          </div>
+        {/if}
 
-      {#if (data.versions?.installedVersions ?? []).length > 0}
-        <div class="detail-row">
-          <span class="label">Installed on Disk</span>
-          <span class="value">{data.versions?.installedVersions.join(', ')}</span>
-        </div>
-      {/if}
-    </div>
+        {#if (data.versions?.installedVersions ?? []).length > 0}
+          <div class="detail-row">
+            <span class="label">Installed on Disk</span>
+            <span class="value">{data.versions?.installedVersions.join(', ')}</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Install / Manage -->
     <div class="section">
-      <h2>{isInstalled ? 'Manage' : 'Install'}</h2>
+      <h2>{isInstalled ? 'Manage' : ($isMonolith ? 'Enable' : 'Install')}</h2>
 
       {#if !isInstalled}
         <div class="install-controls">
-          <div class="version-select">
-            <label for="version-select">Version</label>
-            <select id="version-select" bind:value={selectedVersion}>
-              {#each versionOptions() as version}
-                <option value={version}>
-                  {version}{version === 'latest' && data.versions?.latestVersion ? ` (${data.versions.latestVersion})` : ''}
-                </option>
-              {/each}
-            </select>
-          </div>
+          {#if !$isMonolith}
+            <div class="version-select">
+              <label for="version-select">Version</label>
+              <select id="version-select" bind:value={selectedVersion}>
+                {#each versionOptions() as version}
+                  <option value={version}>
+                    {version}{version === 'latest' && data.versions?.latestVersion ? ` (${data.versions.latestVersion})` : ''}
+                  </option>
+                {/each}
+              </select>
+            </div>
+          {/if}
           <button
             class="install-btn"
             onclick={installModule}
-            disabled={installing || (!data.online && (data.versions?.installedVersions ?? []).length === 0)}
+            disabled={installing || (!$isMonolith && !data.online && (data.versions?.installedVersions ?? []).length === 0)}
           >
-            <ArrowDownTray size="1rem" />
-            {installing ? 'Installing...' : 'Install & Start'}
+            {#if !$isMonolith}<ArrowDownTray size="1rem" />{/if}
+            {installing ? ($isMonolith ? 'Enabling...' : 'Installing...') : ($isMonolith ? 'Enable' : 'Install & Start')}
           </button>
-          {#if !data.online && (data.versions?.installedVersions ?? []).length === 0}
+          {#if !$isMonolith && !data.online && (data.versions?.installedVersions ?? []).length === 0}
             <p class="help-text">No local versions available and server is offline. Connect to the internet to download.</p>
           {/if}
         </div>
       {:else}
         <!-- Already installed — show current state and options -->
-        {#if data.desiredService}
+        {#if data.desiredService && !$isMonolith}
           <div class="detail-row">
             <span class="label">Desired Version</span>
             <span class="value">{data.desiredService.version}</span>
@@ -285,7 +292,7 @@
             onclick={uninstallModule}
             disabled={installing}
           >
-            {installing ? 'Removing...' : 'Remove from Managed Services'}
+            {installing ? ($isMonolith ? 'Disabling...' : 'Removing...') : ($isMonolith ? 'Disable' : 'Remove from Managed Services')}
           </button>
         </div>
       {/if}
