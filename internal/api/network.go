@@ -176,9 +176,30 @@ func (m *Module) handleGetNetworkConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Unwrap the command response — the frontend expects a plain config array.
+	var cmdResp itypes.NetworkCommandResponse
+	if err := json.Unmarshal(resp, &cmdResp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to parse network config response: "+err.Error())
+		return
+	}
+	if !cmdResp.Success {
+		writeError(w, http.StatusInternalServerError, cmdResp.Error)
+		return
+	}
+
+	configs := cmdResp.Config
+	if configs == nil {
+		configs = []itypes.NetworkInterfaceConfig{}
+	}
+	data, err := json.Marshal(configs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to marshal config: "+err.Error())
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(resp)
+	w.Write(data)
 }
 
 // handleApplyNetworkConfig applies a new network configuration.
