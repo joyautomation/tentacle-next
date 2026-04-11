@@ -114,6 +114,7 @@
       }
     }
 
+    scalars.sort((a, b) => a.name.localeCompare(b.name));
     return { templateInstances, scalars };
   });
 
