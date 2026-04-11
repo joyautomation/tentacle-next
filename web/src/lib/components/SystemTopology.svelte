@@ -57,7 +57,6 @@
     switch (type) {
       case 'nats':
       case 'bus': return 'var(--color-purple-500, #a855f7)';
-      case 'mqtt':
       case 'device': return 'var(--color-amber-500, #f59e0b)';
       default: return 'var(--color-teal-500, #14b8a6)';
     }
@@ -433,7 +432,14 @@
       .data(uniLinks)
       .join('line')
       .attr('class', d => d.flowDirection === -1 ? 'flow-line flow-reverse' : 'flow-line')
-      .attr('stroke', 'var(--color-sky-400, #38bdf8)')
+      .attr('stroke', d => {
+        const tgtId = typeof d.target === 'string' ? d.target : (d.target as NodeDatum).id;
+        const srcId = typeof d.source === 'string' ? d.source : (d.source as NodeDatum).id;
+        const tgt = nodes.find(n => n.id === tgtId);
+        const src = nodes.find(n => n.id === srcId);
+        if (tgt?.type === 'mqtt' || src?.type === 'mqtt') return 'var(--color-amber-400, #fbbf24)';
+        return 'var(--color-sky-400, #38bdf8)';
+      })
       .attr('stroke-width', 2)
       .attr('stroke-opacity', 0.7)
       .attr('stroke-dasharray', '6 8');
