@@ -28,6 +28,7 @@ type MqttMetricInfo struct {
 	SparkplugType string     `json:"sparkplugType"` // "double", "boolean", "string", "template"
 	Value        interface{} `json:"value,omitempty"`
 	ModuleID     string      `json:"moduleId"`
+	DeviceID     string      `json:"deviceId"`
 	Datatype     string      `json:"datatype"` // "number", "boolean", "string", "udt"
 	TemplateRef  string      `json:"templateRef,omitempty"`
 	LastUpdated  int64       `json:"lastUpdated,omitempty"`

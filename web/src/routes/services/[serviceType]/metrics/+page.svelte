@@ -15,6 +15,7 @@
     sparkplugType: string;
     value: unknown;
     moduleId: string;
+    deviceId: string;
     datatype: string;
     templateRef: string | null;
     lastUpdated?: number | null;
@@ -96,12 +97,12 @@
 
   let vizMode: VizMode = $state('tree');
 
-  // Organize metrics into: template instances (grouped by templateRef) and scalar metrics
+  // Organize metrics into: template instances (grouped by templateRef) and scalar metrics (grouped by device)
   const organized = $derived.by(() => {
     void updateVersion; // depend on debounced version
     const allMetrics = [...metricMap.values()];
     const templateInstances: Record<string, MetricInfo[]> = {};
-    const scalars: MetricInfo[] = [];
+    const scalarsByDevice: Record<string, MetricInfo[]> = {};
 
     for (const metric of allMetrics) {
       if (metric.templateRef) {
@@ -110,12 +111,17 @@
         }
         templateInstances[metric.templateRef].push(metric);
       } else if (metric.sparkplugType !== 'template') {
-        scalars.push(metric);
+        const dev = metric.deviceId || 'unknown';
+        if (!scalarsByDevice[dev]) scalarsByDevice[dev] = [];
+        scalarsByDevice[dev].push(metric);
       }
     }
 
-    scalars.sort((a, b) => a.name.localeCompare(b.name));
-    return { templateInstances, scalars };
+    // Sort metrics within each device group
+    for (const metrics of Object.values(scalarsByDevice)) {
+      metrics.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return { templateInstances, scalarsByDevice };
   });
 
   // Build D3 hierarchy for sunburst visualization
@@ -149,10 +155,14 @@
       children.push({ name: 'Template Instances', children: instanceChildren });
     }
 
-    if (org.scalars.length > 0) {
+    const deviceEntries = Object.entries(org.scalarsByDevice).sort(([a], [b]) => a.localeCompare(b));
+    if (deviceEntries.length > 0) {
       children.push({
         name: 'Atomic',
-        children: org.scalars.map(m => ({ name: m.name, value: 1, displayValue: formatValue(m.value) })),
+        children: deviceEntries.map(([devId, metrics]) => ({
+          name: devId,
+          children: metrics.map(m => ({ name: m.name, value: 1, displayValue: formatValue(m.value) })),
+        })),
       });
     }
 
@@ -200,63 +210,26 @@
 
   {#if vizMode === 'tree'}
   <div class="tree-content">
-  <!-- Template Definitions -->
-  {#if templates.length > 0}
-    <section class="section">
-      <h2>Template Definitions</h2>
-      <div class="tree">
-        {#each templates as template}
-          <div class="tree-node">
-            <button class="tree-toggle" onclick={() => toggleTemplate(template.name)}>
-              <svg class="chevron" class:expanded={expandedTemplates[template.name]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M9 18l6-6-6-6"/>
-              </svg>
-              <span class="template-icon">T</span>
-              <span class="tree-label">{template.name}</span>
-              {#if template.version}
-                <span class="version-badge">v{template.version}</span>
-              {/if}
-              <span class="member-count">{template.members.length} members</span>
-            </button>
-            {#if expandedTemplates[template.name]}
-              <div class="tree-children">
-                {#each template.members as member}
-                  <div class="tree-leaf">
-                    <span class="freshness-dot" style="--dot-color: rgb(156, 163, 175); --dot-glow: none;" title="Definition"></span>
-                    <span class="leaf-name">{member.name}</span>
-                    <span class="leaf-type">{member.datatype}</span>
-                    {#if member.templateRef}
-                      <span class="template-ref">-> {member.templateRef}</span>
-                    {/if}
-                    {#if member.description}
-                      <span class="leaf-desc">{member.description}</span>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    </section>
-  {/if}
-
-  <!-- Template Instances -->
+  <!-- Template Instances (with definition info inline) -->
   {#if Object.keys(organized.templateInstances).length > 0}
     <section class="section">
       <h2>Template Instances</h2>
       <div class="tree">
-        {#each Object.entries(organized.templateInstances) as [templateName, instances]}
+        {#each Object.entries(organized.templateInstances).sort(([a], [b]) => a.localeCompare(b)) as [templateName, instances]}
+          {@const template = templates.find(t => t.name === templateName)}
           <div class="tree-node">
-            <button class="tree-toggle" onclick={() => toggleTemplate('inst-' + templateName)}>
-              <svg class="chevron" class:expanded={expandedTemplates['inst-' + templateName]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="tree-toggle" onclick={() => toggleTemplate(templateName)}>
+              <svg class="chevron" class:expanded={expandedTemplates[templateName]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M9 18l6-6-6-6"/>
               </svg>
               <span class="template-icon">T</span>
               <span class="tree-label">{templateName}</span>
-              <span class="member-count">{instances.length} instances</span>
+              {#if template?.version}
+                <span class="version-badge">v{template.version}</span>
+              {/if}
+              <span class="member-count">{instances.length} {instances.length === 1 ? 'instance' : 'instances'} · {template?.members.length ?? 0} members</span>
             </button>
-            {#if expandedTemplates['inst-' + templateName]}
+            {#if expandedTemplates[templateName]}
               <div class="tree-children">
                 {#each instances as metric}
                   <div class="tree-node">
@@ -271,7 +244,6 @@
                     {#if expandedInstances[metric.name]}
                       <div class="tree-children">
                         {#if typeof metric.value === 'object' && metric.value !== null}
-                          {@const template = templates.find(t => t.name === templateName)}
                           {#if template && typeof metric.value === 'object' && 'metrics' in (metric.value as Record<string, unknown>)}
                             {#each (metric.value as { metrics: Array<{ name: string; value: unknown; type: string }> }).metrics as member}
                               {@const memberDef = template.members.find(m => m.name === member.name)}
@@ -322,25 +294,30 @@
     </section>
   {/if}
 
-  <!-- Scalar Metrics -->
-  {#if organized.scalars.length > 0}
+  <!-- Atomic Metrics grouped by device -->
+  {#if Object.keys(organized.scalarsByDevice).length > 0}
     <section class="section">
       <h2>Atomic</h2>
-      <div class="tree">
-        {#each organized.scalars as metric}
-          <div class="tree-leaf">
-            <span
-              class="freshness-dot"
-              title={formatAge(metric.lastUpdated)}
-              style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
-            ></span>
-            <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
-            <span class="leaf-name">{metric.name}</span>
-            <span class="leaf-value">{formatValue(metric.value)}</span>
-            <span class="leaf-type">{metric.sparkplugType}</span>
+      {#each Object.entries(organized.scalarsByDevice).sort(([a], [b]) => a.localeCompare(b)) as [devId, metrics]}
+        <div class="device-group">
+          <div class="device-group-header">{devId}</div>
+          <div class="tree">
+            {#each metrics as metric}
+              <div class="tree-leaf">
+                <span
+                  class="freshness-dot"
+                  title={formatAge(metric.lastUpdated)}
+                  style="--dot-color: {getFreshnessColor(metric.lastUpdated)}; --dot-glow: {getGlowStyle(metric.lastUpdated)};"
+                ></span>
+                <span class="staleness-label" style="color: {getFreshnessColor(metric.lastUpdated)}">{formatAgeShort(metric.lastUpdated)}</span>
+                <span class="leaf-name">{metric.name}</span>
+                <span class="leaf-value">{formatValue(metric.value)}</span>
+                <span class="leaf-type">{metric.sparkplugType}</span>
+              </div>
+            {/each}
           </div>
-        {/each}
-      </div>
+        </div>
+      {/each}
     </section>
   {/if}
 
@@ -588,6 +565,19 @@
     font-size: 0.6875rem;
     color: var(--theme-text-muted);
     font-style: italic;
+  }
+
+  .device-group {
+    margin-bottom: 0.75rem;
+  }
+
+  .device-group-header {
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--theme-text-muted);
+    padding: 0.25rem 0;
+    margin-bottom: 0.25rem;
   }
 
   .template-ref {

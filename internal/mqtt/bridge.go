@@ -621,6 +621,7 @@ func (br *Bridge) subscribeToMetricsRequest() {
 				SparkplugType: sparkplug.TypeToString(pv.SparkplugType),
 				Value:        pv.Value,
 				ModuleID:     pv.ModuleID,
+				DeviceID:     pv.DeviceID,
 				Datatype:     pv.Datatype,
 				LastUpdated:  pv.LastUpdated,
 			}
