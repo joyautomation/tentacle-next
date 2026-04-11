@@ -246,7 +246,10 @@ func (g *Gateway) HasConfig() bool {
 	return g.config != nil
 }
 
-// publishStatus publishes gateway status variables via the bus.
+// publishStatus routes gateway status values through the tag index so they
+// use configured variable names and don't create duplicates in the MQTT bridge.
+// (Using module.PublishStatus would publish on gateway.data.gateway.{name} which
+// the gateway also subscribes to, causing a self-routing loop and duplicate metrics.)
 func (g *Gateway) publishStatus() {
 	g.mu.RLock()
 	deviceCount := 0
@@ -259,12 +262,18 @@ func (g *Gateway) publishStatus() {
 
 	uptimeSeconds := int64(time.Since(g.startedAt).Seconds())
 
-	module.PublishStatus(g.b, serviceType, map[string]module.StatusValue{
-		"uptime":           {Value: uptimeSeconds, Datatype: "number"},
-		"variableCount":    {Value: varCount, Datatype: "number"},
-		"udtVariableCount": {Value: udtCount, Datatype: "number"},
-		"deviceCount":      {Value: deviceCount, Datatype: "number"},
-	})
+	statusValues := map[string]struct {
+		value    interface{}
+		datatype string
+	}{
+		"uptime":           {value: uptimeSeconds, datatype: "number"},
+		"variableCount":    {value: varCount, datatype: "number"},
+		"udtVariableCount": {value: udtCount, datatype: "number"},
+		"deviceCount":      {value: deviceCount, datatype: "number"},
+	}
+	for name, sv := range statusValues {
+		g.routeValue(serviceType, serviceType, name, sv.value, sv.datatype)
+	}
 }
 
 // ApplyConfig stops any current subscriptions and applies a new configuration.
@@ -471,6 +480,12 @@ func (g *Gateway) subscribeToScannersLocked() {
 	}
 
 	for _, grp := range groups {
+		// Skip devices whose protocol matches the gateway's own output prefix.
+		// Their data is routed directly (e.g. via publishStatus → routeValue)
+		// and subscribing would create a self-routing loop.
+		if grp.device.Protocol == g.gatewayID {
+			continue
+		}
 		g.subscribeToDeviceLocked(grp.deviceID, grp.device, grp.variables)
 	}
 }
