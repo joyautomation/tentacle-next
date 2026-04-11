@@ -30,10 +30,12 @@
   ] as const;
 
   const moduleDevices = $derived(
-    gatewayConfig?.devices?.filter(d => d.autoManaged) ?? []
+    (gatewayConfig?.devices?.filter(d => d.autoManaged) ?? [])
+      .sort((a, b) => a.deviceId.localeCompare(b.deviceId))
   );
   const externalDevices = $derived(
-    gatewayConfig?.devices?.filter(d => !d.autoManaged) ?? []
+    (gatewayConfig?.devices?.filter(d => !d.autoManaged) ?? [])
+      .sort((a, b) => a.protocol.localeCompare(b.protocol) || a.deviceId.localeCompare(b.deviceId))
   );
 
   const protocolLabels: Record<string, string> = {
