@@ -48,6 +48,9 @@ type SparkplugNode struct {
 
 	// STATE topic callback (for store-forward)
 	onHostState func(hostID string, online bool)
+
+	// Called before Birth() so the bridge can refresh device metrics and RBE.
+	onBeforeBirth func()
 }
 
 // NewSparkplugNode creates a new edge node but does not connect.
@@ -86,6 +89,14 @@ func (n *SparkplugNode) OnHostState(fn func(hostID string, online bool)) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.onHostState = fn
+}
+
+// OnBeforeBirth sets a callback invoked before Birth() publishes NBIRTH/DBIRTH.
+// The bridge uses this to refresh device metrics with current values and reset RBE.
+func (n *SparkplugNode) OnBeforeBirth(fn func()) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.onBeforeBirth = fn
 }
 
 // Connect creates the MQTT client and connects to the broker.
@@ -195,6 +206,15 @@ func (n *SparkplugNode) onConnect(c pahomqtt.Client) {
 
 // Birth publishes the NBIRTH message with all registered metrics.
 func (n *SparkplugNode) Birth() {
+	// Let the bridge refresh device metrics and reset RBE before we publish.
+	// This runs outside the lock since the bridge acquires its own locks.
+	n.mu.RLock()
+	cb := n.onBeforeBirth
+	n.mu.RUnlock()
+	if cb != nil {
+		cb()
+	}
+
 	n.mu.Lock()
 	defer n.mu.Unlock()
 

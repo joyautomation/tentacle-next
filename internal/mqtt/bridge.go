@@ -65,9 +65,13 @@ func NewBridge(b bus.Bus, moduleID string, config itypes.MqttBridgeConfig, log *
 func (br *Bridge) Start() error {
 	br.node = NewSparkplugNode(br.config, br.log)
 
-	// Set up DCMD callback
+	// Set up callbacks
 	br.node.OnDeviceCommand(br.handleDeviceCommand)
 	br.node.OnNodeCommand(br.handleNodeCommand)
+	br.node.OnBeforeBirth(func() {
+		br.buildDeviceMetrics()
+		br.resetRBEStates()
+	})
 
 	// Set up store-forward
 	br.sf = NewStoreForwardBuffer(br.config.StoreForwardMax, br.config.StoreForwardSize, br.config.DrainRate, br.log)
@@ -80,11 +84,14 @@ func (br *Bridge) Start() error {
 		return fmt.Errorf("mqtt connect: %w", err)
 	}
 
+	// Load initial variables and publish DBIRTH BEFORE subscribing to data.
+	// This prevents a race where DDATA is sent before DBIRTH — Ignition
+	// ignores DDATA for unknown metrics, and RBE marks them as published,
+	// so slowly-changing values never get republished after DBIRTH.
+	br.loadInitialVariables()
+
 	// Subscribe to all data from all scanner modules
 	br.subscribeToData()
-
-	// Load initial variables from running modules
-	br.loadInitialVariables()
 
 	// Start drain goroutine
 	br.drainStop = make(chan struct{})
@@ -187,6 +194,7 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 		pv.SparkplugType = sparkplug.NatsToSparkplugType(msg.Datatype)
 		br.variables[varKey] = pv
 	}
+	isNew := !exists
 
 	pv.Value = msg.Value
 	pv.LastUpdated = msg.Timestamp
@@ -249,8 +257,11 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 	}
 	br.sf.RecordPublish(1)
 
-	// Ensure device metrics are registered (for DBIRTH)
-	br.ensureDeviceMetric(deviceID, varKey, metric)
+	// New variables need a rebirth so they appear in DBIRTH — without it,
+	// Ignition ignores the DDATA because the metric is unknown.
+	if isNew {
+		br.scheduleRebirth()
+	}
 }
 
 // shouldPublishUDT checks per-member deadbands for UDT values.
@@ -393,6 +404,8 @@ func (br *Bridge) scheduleRebirth() {
 	}
 	br.rebirthTimer = time.AfterFunc(500*time.Millisecond, func() {
 		br.updateNodeMetrics()
+		// Rebirth() → Birth() triggers onBeforeBirth which rebuilds device
+		// metrics from current values and resets RBE states.
 		br.node.Rebirth()
 	})
 }
@@ -411,13 +424,17 @@ func (br *Bridge) updateNodeMetrics() {
 	br.node.SetNodeMetrics(nodeMetrics)
 }
 
-// ensureDeviceMetric tracks a metric for device DBIRTH purposes.
-func (br *Bridge) ensureDeviceMetric(deviceID, varKey string, metric sparkplug.Metric) {
+// resetRBEStates clears all RBE tracking so the next value for every variable
+// passes the RBE check. Called before rebirth so that DDATA flows after DBIRTH.
+func (br *Bridge) resetRBEStates() {
 	br.mu.Lock()
 	defer br.mu.Unlock()
-
-	// We don't duplicate-check here for performance; the node handles it via SetDeviceMetrics
-	// This is called on every publish, but the DBIRTH is only sent on birth/rebirth
+	for _, pv := range br.variables {
+		pv.RBEState = rbe.State{}
+		for k := range pv.MemberRBEStates {
+			pv.MemberRBEStates[k] = &rbe.State{}
+		}
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
