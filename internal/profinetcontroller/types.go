@@ -1,4 +1,4 @@
-//go:build profinetcontroller
+//go:build profinetcontroller || all
 
 // Package profinetcontroller implements a PROFINET IO Controller that discovers
 // and polls PROFINET IO Devices, mapping their cyclic I/O data to Tentacle tags.

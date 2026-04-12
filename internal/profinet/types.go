@@ -1,4 +1,4 @@
-//go:build profinet || profinetall || profinetcontroller
+//go:build profinet || profinetcontroller || all
 
 // Package profinet implements a PROFINET IO Device using the p-net stack.
 // It exposes Tentacle's tag space over PROFINET RT, allowing Siemens PLCs
