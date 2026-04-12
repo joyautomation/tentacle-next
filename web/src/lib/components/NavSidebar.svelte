@@ -87,22 +87,27 @@
     gitops: 'data',
   };
 
-  const ROLE_LABELS: Record<ModuleRole, string> = {
+  const ROLE_LABELS: Record<string, string> = {
     client: 'Protocol Clients',
     server: 'Protocol Servers',
-    data: 'Data',
   };
 
-  const ROLE_ORDER: ModuleRole[] = ['client', 'server', 'data'];
+  const FOLDER_ROLES: ModuleRole[] = ['client', 'server'];
 
-  const groupedModules = $derived(() => {
+  /** Modules shown flat at the top level (no folder) */
+  const rootModules = $derived(() =>
+    uninstalledModules().filter((m) => (MODULE_ROLES[m.moduleId] ?? 'data') === 'data')
+  );
+
+  /** Modules grouped into collapsible folders */
+  const folderGroups = $derived(() => {
     const mods = uninstalledModules();
-    const groups: Record<ModuleRole, ModuleRegistryInfo[]> = { client: [], server: [], data: [] };
+    const groups: Record<string, ModuleRegistryInfo[]> = { client: [], server: [] };
     for (const m of mods) {
       const role = MODULE_ROLES[m.moduleId] ?? 'data';
-      groups[role].push(m);
+      if (role !== 'data') groups[role].push(m);
     }
-    return ROLE_ORDER
+    return FOLDER_ROLES
       .filter((r) => groups[r].length > 0)
       .map((r) => ({ role: r, label: ROLE_LABELS[r], modules: groups[r] }));
   });
@@ -307,7 +312,7 @@
 
   </ul>
 
-  {#if groupedModules().length > 0}
+  {#if uninstalledModules().length > 0}
     <div class="sidebar-modules">
       <button class="module-section-header" onclick={toggleModuleSection}>
         <span class="module-group-chevron" class:expanded={moduleSectionOpen}>
@@ -317,7 +322,28 @@
       </button>
       {#if moduleSectionOpen}
         <div transition:slide|local={{ duration: 150 }}>
-          {#each groupedModules() as group}
+          {#if rootModules().length > 0}
+            <ul class="module-group-list">
+              {#each rootModules() as mod}
+                {@const Icon = getModuleIcon(mod.moduleId)}
+                <li>
+                  <a
+                    href="/modules/{mod.moduleId}"
+                    class="sidebar-item"
+                    class:active={$page.url.pathname.startsWith('/modules/' + mod.moduleId)}
+                    onclick={close}
+                  >
+                    <Icon size="1.25rem" />
+                    <span>{getModuleName(mod.moduleId)}</span>
+                    <span class="available-badge">
+                      <PlusCircle size="0.875rem" />
+                    </span>
+                  </a>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#each folderGroups() as group}
             <button class="module-group-header" onclick={() => toggleRole(group.role)}>
               <span class="module-group-chevron" class:expanded={expandedRoles.has(group.role)}>
                 <ChevronRight size="0.625rem" />
