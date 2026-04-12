@@ -251,8 +251,15 @@ func (m *Manager) applyConfig(cfg *ProfinetConfig) {
 
 	// Start the PROFINET device with all protocol layers
 	device := NewDevice(cfg, DeviceCallbacks{
-		OnIPSet: func(ip, mask, gateway net.IP) {
-			m.log.Info("profinet: controller assigned IP via DCP", "ip", ip, "mask", mask, "gateway", gateway)
+		OnIPSet: func(ip, mask, gateway net.IP) error {
+			m.log.Info("profinet: controller assigned IP via DCP, applying to interface",
+				"ip", ip, "mask", mask, "gateway", gateway, "interface", cfg.InterfaceName)
+			if err := ApplyInterfaceIP(cfg.InterfaceName, ip, mask, gateway); err != nil {
+				m.log.Error("profinet: failed to apply IP to interface", "error", err)
+				return err
+			}
+			m.log.Info("profinet: IP applied successfully", "interface", cfg.InterfaceName)
+			return nil
 		},
 		OnNameSet: func(name string) {
 			m.log.Info("profinet: controller assigned station name via DCP", "name", name)

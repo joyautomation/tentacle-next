@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,7 @@ type LLDPSender struct {
 	localIP   net.IP
 	log       *slog.Logger
 	interval  time.Duration
+	mu        sync.RWMutex
 }
 
 // NewLLDPSender creates a new LLDP sender.
@@ -88,7 +90,18 @@ func (s *LLDPSender) sendFrame() {
 	}
 }
 
+// SetIP updates the management IP address advertised in LLDP frames.
+func (s *LLDPSender) SetIP(ip net.IP) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.localIP = ip.To4()
+}
+
 func (s *LLDPSender) buildLLDPPayload() []byte {
+	s.mu.RLock()
+	localIP := s.localIP
+	s.mu.RUnlock()
+
 	var frame []byte
 
 	// Chassis ID TLV (subtype 4 = MAC address)
@@ -121,8 +134,8 @@ func (s *LLDPSender) buildLLDPPayload() []byte {
 	frame = append(frame, encodeLLDPTLV(LLDPTLVSysCapabilities, sysCap)...)
 
 	// Management Address (IPv4)
-	if s.localIP != nil && !s.localIP.Equal(net.IPv4zero) {
-		ip4 := s.localIP.To4()
+	if localIP != nil && !localIP.Equal(net.IPv4zero) {
+		ip4 := localIP.To4()
 		if ip4 != nil {
 			var mgmt []byte
 			mgmt = append(mgmt, 5)    // addr string length (1 subtype + 4 ip)

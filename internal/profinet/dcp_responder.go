@@ -28,7 +28,7 @@ type DCPResponder struct {
 	ipSet       bool
 
 	// Callback for IP/Name changes from the controller
-	onIPSet   func(ip, mask, gateway net.IP)
+	onIPSet   func(ip, mask, gateway net.IP) error
 	onNameSet func(name string)
 }
 
@@ -42,7 +42,7 @@ type DCPResponderConfig struct {
 	Mask        net.IP
 	Gateway     net.IP
 
-	OnIPSet   func(ip, mask, gateway net.IP)
+	OnIPSet   func(ip, mask, gateway net.IP) error
 	OnNameSet func(name string)
 }
 
@@ -205,16 +205,21 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 				continue
 			}
 
+			// Try to apply the IP before committing state
+			if r.onIPSet != nil {
+				if err := r.onIPSet(ip, mask, gw); err != nil {
+					r.log.Warn("dcp: failed to apply IP", "error", err)
+					respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x03))
+					continue
+				}
+			}
+
 			r.ip = ip
 			r.mask = mask
 			r.gateway = gw
 			r.ipSet = !ip.Equal(net.IPv4zero)
 
 			r.log.Info("dcp: IP set by controller", "ip", ip, "mask", mask, "gateway", gw)
-			if r.onIPSet != nil {
-				r.onIPSet(ip, mask, gw)
-			}
-
 			respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x00))
 
 		case block.Option == DCPOptionDeviceProperties && block.SubOption == DCPSubOptionDevNameOfStation:
