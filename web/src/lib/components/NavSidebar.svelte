@@ -36,6 +36,7 @@
     description: string;
     category: string;
     runtime: string;
+    experimental?: boolean;
   }
 
   interface DesiredService {
@@ -127,6 +128,11 @@
     }
     expandedRoles = new Set(expandedRoles);
   }
+
+  // Lookup set for experimental modules — used to badge both running services and available modules
+  const experimentalModuleIds = $derived(
+    new Set(availableModules.filter((m) => m.experimental).map((m) => m.moduleId))
+  );
 
   const serviceIcons: Record<string, typeof Squares2x2> = {
     api: ServerStack,
@@ -302,6 +308,9 @@
           >
             <Icon size="1.25rem" />
             <span>{getServiceName(service.serviceType)}</span>
+            {#if experimentalModuleIds.has(service.moduleId)}
+              <span class="experimental-badge">exp</span>
+            {/if}
             {#if !service.enabled}
               <span class="disabled-badge">off</span>
             {/if}
@@ -335,6 +344,9 @@
                   >
                     <Icon size="1.25rem" />
                     <span>{getModuleName(mod.moduleId)}</span>
+                    {#if mod.experimental}
+                      <span class="experimental-badge">exp</span>
+                    {/if}
                     <span class="available-badge">
                       <PlusCircle size="0.875rem" />
                     </span>
@@ -363,6 +375,9 @@
                     >
                       <Icon size="1.25rem" />
                       <span>{getModuleName(mod.moduleId)}</span>
+                      {#if mod.experimental}
+                        <span class="experimental-badge">exp</span>
+                      {/if}
                       <span class="available-badge">
                         <PlusCircle size="0.875rem" />
                       </span>
@@ -656,6 +671,20 @@
     border: 1px solid var(--badge-muted-border);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+
+  .experimental-badge {
+    margin-left: auto;
+    font-size: 0.5625rem;
+    font-weight: 600;
+    padding: 0.0625rem 0.3125rem;
+    border-radius: var(--rounded-full);
+    background: var(--badge-amber-bg);
+    color: var(--badge-amber-text);
+    border: 1px solid var(--badge-amber-border);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
   }
 
   .available-badge {

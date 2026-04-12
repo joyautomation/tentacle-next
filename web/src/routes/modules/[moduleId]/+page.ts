@@ -14,6 +14,7 @@ interface ModuleRegistryInfo {
 	description: string;
 	category: string;
 	runtime: string;
+	experimental?: boolean;
 	requiredConfig?: ConfigField[];
 }
 

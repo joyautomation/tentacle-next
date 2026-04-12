@@ -27,6 +27,7 @@
     description: string;
     category: string;
     runtime: string;
+    experimental?: boolean;
   }
 
   interface DesiredService {

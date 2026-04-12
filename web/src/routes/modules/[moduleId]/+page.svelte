@@ -155,13 +155,18 @@
         <h1>{data.module.description}</h1>
         <p class="module-meta">{data.module.moduleId} &middot; {data.module.runtime} &middot; {data.module.category}</p>
       </div>
-      {#if isInstalled}
-        <span class="status-badge" class:running={isRunning} class:stopped={!isRunning}>
-          {isRunning ? 'Running' : reconcileState ?? 'Stopped'}
-        </span>
-      {:else}
-        <span class="status-badge not-installed">{$isMonolith ? 'Disabled' : 'Not Installed'}</span>
-      {/if}
+      <div class="header-badges">
+        {#if data.module.experimental}
+          <span class="status-badge experimental">Experimental</span>
+        {/if}
+        {#if isInstalled}
+          <span class="status-badge" class:running={isRunning} class:stopped={!isRunning}>
+            {isRunning ? 'Running' : reconcileState ?? 'Stopped'}
+          </span>
+        {:else}
+          <span class="status-badge not-installed">{$isMonolith ? 'Disabled' : 'Not Installed'}</span>
+        {/if}
+      </div>
     </div>
 
     {#if !$isMonolith}
@@ -332,6 +337,13 @@
     }
   }
 
+  .header-badges {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
   .status-badge {
     padding: 0.25rem 0.75rem;
     border-radius: var(--rounded-full);
@@ -351,6 +363,11 @@
     &.not-installed {
       background: var(--badge-muted-bg);
       color: var(--badge-muted-text);
+    }
+    &.experimental {
+      background: var(--badge-amber-bg);
+      color: var(--badge-amber-text);
+      border: 1px solid var(--badge-amber-border);
     }
   }
 
