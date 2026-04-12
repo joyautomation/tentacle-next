@@ -52,6 +52,8 @@ func ScannerBucket(protocol string) string {
 		return BucketScannerModbus
 	case "snmp":
 		return BucketScannerSNMP
+	case "profinetcontroller":
+		return BucketScannerProfinetController
 	default:
 		return ""
 	}

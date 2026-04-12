@@ -4,6 +4,7 @@
   import { apiPost } from '$lib/api/client';
   import { invalidateAll } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
+  import ProfinetDeviceConfig from '$lib/components/ProfinetDeviceConfig.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -399,7 +400,15 @@
   }
 </script>
 
-{#if serviceType === 'nftables'}
+{#if serviceType === 'profinet'}
+  <ProfinetDeviceConfig
+    config={data.profinetConfig ?? null}
+    status={data.profinetStatus ?? null}
+    interfaces={data.profinetInterfaces ?? []}
+    variables={data.profinetVariables ?? []}
+    error={data.error ?? null}
+  />
+{:else if serviceType === 'nftables'}
 <!-- ═══════════════════════════════════════════════════════════════════════ -->
 <!-- Nftables Config Page — Unified NAT Rules                              -->
 <!-- ═══════════════════════════════════════════════════════════════════════ -->

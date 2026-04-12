@@ -104,6 +104,26 @@
       <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
+    {:else if serviceType === 'profinetcontroller'}
+      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+        Overview
+      </a>
+      <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
+        Devices
+      </a>
+      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+        Logs
+      </a>
+    {:else if serviceType === 'profinet'}
+      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+        Overview
+      </a>
+      <a href="/services/{serviceType}/config" class="tab" class:active={currentTab() === 'config'}>
+        Config
+      </a>
+      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+        Logs
+      </a>
     {:else if serviceType === 'gateway'}
       <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
         Overview

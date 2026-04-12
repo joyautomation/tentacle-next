@@ -1,5 +1,7 @@
 import type { PageLoad } from './$types';
 import { api } from '$lib/api/client';
+import type { ProfinetConfig, ProfinetStatus, NetworkState as PNNetworkState } from '$lib/types/profinet';
+import type { Variable } from '$lib/types/gateway';
 
 interface NetworkInterfaceConfig {
   interfaceName: string;
@@ -40,11 +42,41 @@ interface NftablesConfig {
 }
 
 export const load: PageLoad = async ({ params }) => {
+  if (params.serviceType === 'profinet') {
+    return loadProfinetConfig();
+  }
   if (params.serviceType === 'nftables') {
     return loadNftablesConfig();
   }
   return loadNetworkConfig();
 };
+
+async function loadProfinetConfig() {
+  try {
+    const [configResult, statusResult, ifacesResult, varsResult] = await Promise.all([
+      api<ProfinetConfig | null>('/profinet/config'),
+      api<ProfinetStatus>('/profinet/status').catch(() => ({ data: null })),
+      api<PNNetworkState>('/network/interfaces'),
+      api<Variable[]>('/variables'),
+    ]);
+
+    return {
+      profinetConfig: configResult.data ?? null,
+      profinetStatus: (statusResult as { data: ProfinetStatus | null }).data ?? null,
+      profinetInterfaces: ifacesResult.data?.interfaces ?? [],
+      profinetVariables: varsResult.data ?? [],
+      error: configResult.error?.error ?? null,
+    };
+  } catch (e) {
+    return {
+      profinetConfig: null,
+      profinetStatus: null,
+      profinetInterfaces: [],
+      profinetVariables: [],
+      error: e instanceof Error ? e.message : 'Failed to load PROFINET config',
+    };
+  }
+}
 
 async function loadNetworkConfig() {
   try {

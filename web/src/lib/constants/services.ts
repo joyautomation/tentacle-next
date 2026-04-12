@@ -13,6 +13,8 @@ export const SERVICE_NAMES: Record<string, string> = {
   opcua: 'OPC UA',
   orchestrator: 'Orchestrator',
   plc: 'PLC',
+  profinet: 'PROFINET Device',
+  profinetcontroller: 'PROFINET Controller',
   snmp: 'SNMP',
   web: 'Web UI',
 };
@@ -29,6 +31,8 @@ export const MODULE_NAMES: Record<string, string> = {
   'tentacle-network': 'Network',
   'tentacle-nftables': 'NFTables',
   'tentacle-opcua': 'OPC UA',
+  'tentacle-profinet': 'PROFINET Device',
+  'tentacle-profinet-controller': 'PROFINET Controller',
   'tentacle-snmp': 'SNMP',
 };
 

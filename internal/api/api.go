@@ -217,6 +217,16 @@ func (m *Module) routes() http.Handler {
 		r.Post("/scanner/{protocol}/subscribe", m.handleScannerSubscribe)
 		r.Post("/scanner/{protocol}/unsubscribe", m.handleScannerUnsubscribe)
 
+		// PROFINET IO Device
+		r.Get("/profinet/config", m.handleGetProfinetConfig)
+		r.Put("/profinet/config", m.handlePutProfinetConfig)
+		r.Get("/profinet/status", m.handleGetProfinetStatus)
+		r.Get("/profinet/variables", m.handleGetProfinetVariables)
+		r.Get("/profinet/gsdml", m.handleGetProfinetGsdml)
+
+		// PROFINET IO Controller
+		r.Get("/profinetcontroller/subscriptions", m.handleListPNControllerSubs)
+
 		// Network
 		r.Get("/network/interfaces", m.handleGetNetworkInterfaces)
 		r.Get("/network/config", m.handleGetNetworkConfig)

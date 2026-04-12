@@ -1,6 +1,7 @@
 import type { PageLoad } from './$types';
 import { api } from '$lib/api/client';
 import type { Variable, ActiveDevice, GatewayConfig } from '$lib/types/gateway';
+import type { ControllerSubscription, NetworkState } from '$lib/types/profinet';
 
 interface Service {
   serviceType: string;
@@ -10,6 +11,36 @@ interface Service {
 
 export const load: PageLoad = async ({ params }) => {
   const { serviceType } = params;
+
+  // PROFINET Controller: load subscriptions and network interfaces
+  if (serviceType === 'profinetcontroller') {
+    try {
+      const [subsResult, ifacesResult] = await Promise.all([
+        api<ControllerSubscription[]>('/profinetcontroller/subscriptions'),
+        api<NetworkState>('/network/interfaces'),
+      ]);
+
+      return {
+        serviceType,
+        variables: [],
+        deviceInfo: {} as Record<string, ActiveDevice>,
+        gatewayConfig: null,
+        profinetSubscriptions: subsResult.data ?? [],
+        networkInterfaces: ifacesResult.data?.interfaces ?? [],
+        error: subsResult.error?.error ?? null,
+      };
+    } catch (e) {
+      return {
+        serviceType,
+        variables: [],
+        deviceInfo: {} as Record<string, ActiveDevice>,
+        gatewayConfig: null,
+        profinetSubscriptions: [],
+        networkInterfaces: [],
+        error: e instanceof Error ? e.message : 'Failed to fetch PROFINET subscriptions',
+      };
+    }
+  }
 
   // Gateway: load gateway config (includes availableProtocols from active services)
   if (serviceType === 'gateway') {

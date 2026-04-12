@@ -13,6 +13,7 @@
     { id: 'opcua', name: 'OPC UA', desc: 'Universal industrial protocol', icon: CircleStack },
     { id: 'modbus', name: 'Modbus TCP', desc: 'Classic industrial protocol', icon: ServerStack },
     { id: 'snmp', name: 'SNMP', desc: 'Network device monitoring', icon: ComputerDesktop },
+    { id: 'profinetcontroller', name: 'PROFINET', desc: 'Siemens / PROFINET IO Devices', icon: CpuChip },
   ];
 
   function toggle(id: string) {

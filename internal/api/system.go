@@ -22,6 +22,8 @@ var persistedBuckets = []string{
 	topics.BucketScannerOpcUA,
 	topics.BucketScannerModbus,
 	topics.BucketScannerSNMP,
+	topics.BucketProfinetConfig,
+	topics.BucketScannerProfinetController,
 	topics.BucketConfigMetadata,
 }
 
