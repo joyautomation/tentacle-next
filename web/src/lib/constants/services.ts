@@ -32,7 +32,7 @@ export const MODULE_NAMES: Record<string, string> = {
   'tentacle-nftables': 'NFTables',
   'tentacle-opcua': 'OPC UA',
   'tentacle-profinet': 'PROFINET Device',
-  'tentacle-profinet-controller': 'PROFINET Controller',
+  'tentacle-profinetcontroller': 'PROFINET Controller',
   'tentacle-snmp': 'SNMP',
 };
 
