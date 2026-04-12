@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { slide } from 'svelte/transition';
   import {
     XMark,
     Home,
@@ -16,7 +17,8 @@
     RocketLaunch,
     ArrowPath,
     ArrowDownTray,
-    ArrowUpTray
+    ArrowUpTray,
+    ChevronRight
   } from '@joyautomation/salt/icons';
   import { getServiceName, getModuleName } from '$lib/constants/services';
   import { apiPost } from '$lib/api/client';
@@ -66,6 +68,55 @@
       (m) => m.category === 'optional' && !runningModuleIds.has(m.moduleId) && !desiredModuleIds.has(m.moduleId)
     );
   });
+
+  type ModuleRole = 'client' | 'server' | 'data';
+
+  const MODULE_ROLES: Record<string, ModuleRole> = {
+    'tentacle-ethernetip': 'client',
+    'tentacle-modbus': 'client',
+    'tentacle-opcua': 'client',
+    'tentacle-snmp': 'client',
+    'tentacle-profinetcontroller': 'client',
+    'tentacle-ethernetip-server': 'server',
+    'tentacle-modbus-server': 'server',
+    'tentacle-profinet': 'server',
+    'tentacle-mqtt': 'server',
+    'tentacle-history': 'data',
+    'tentacle-network': 'data',
+    'tentacle-nftables': 'data',
+    gitops: 'data',
+  };
+
+  const ROLE_LABELS: Record<ModuleRole, string> = {
+    client: 'Protocol Clients',
+    server: 'Protocol Servers',
+    data: 'Data',
+  };
+
+  const ROLE_ORDER: ModuleRole[] = ['client', 'server', 'data'];
+
+  const groupedModules = $derived(() => {
+    const mods = uninstalledModules();
+    const groups: Record<ModuleRole, ModuleRegistryInfo[]> = { client: [], server: [], data: [] };
+    for (const m of mods) {
+      const role = MODULE_ROLES[m.moduleId] ?? 'data';
+      groups[role].push(m);
+    }
+    return ROLE_ORDER
+      .filter((r) => groups[r].length > 0)
+      .map((r) => ({ role: r, label: ROLE_LABELS[r], modules: groups[r] }));
+  });
+
+  let expandedRoles = $state<Set<ModuleRole>>(new Set(ROLE_ORDER));
+
+  function toggleRole(role: ModuleRole) {
+    if (expandedRoles.has(role)) {
+      expandedRoles.delete(role);
+    } else {
+      expandedRoles.add(role);
+    }
+    expandedRoles = new Set(expandedRoles);
+  }
 
   const serviceIcons: Record<string, typeof Squares2x2> = {
     api: ServerStack,
@@ -251,27 +302,39 @@
 
   </ul>
 
-  {#if uninstalledModules().length > 0}
-    <ul class="sidebar-nav sidebar-modules">
-      <li class="sidebar-section-label">Available Modules</li>
-      {#each uninstalledModules() as mod}
-        {@const Icon = getModuleIcon(mod.moduleId)}
-        <li>
-          <a
-            href="/modules/{mod.moduleId}"
-            class="sidebar-item"
-            class:active={$page.url.pathname.startsWith('/modules/' + mod.moduleId)}
-            onclick={close}
-          >
-            <Icon size="1.25rem" />
-            <span>{getModuleName(mod.moduleId)}</span>
-            <span class="available-badge">
-              <PlusCircle size="0.875rem" />
-            </span>
-          </a>
-        </li>
+  {#if groupedModules().length > 0}
+    <div class="sidebar-modules">
+      <div class="sidebar-section-label">Available Modules</div>
+      {#each groupedModules() as group}
+        <button class="module-group-header" onclick={() => toggleRole(group.role)}>
+          <span class="module-group-chevron" class:expanded={expandedRoles.has(group.role)}>
+            <ChevronRight size="0.625rem" />
+          </span>
+          <span>{group.label}</span>
+        </button>
+        {#if expandedRoles.has(group.role)}
+          <ul class="module-group-list" transition:slide|local={{ duration: 150 }}>
+            {#each group.modules as mod}
+              {@const Icon = getModuleIcon(mod.moduleId)}
+              <li>
+                <a
+                  href="/modules/{mod.moduleId}"
+                  class="sidebar-item"
+                  class:active={$page.url.pathname.startsWith('/modules/' + mod.moduleId)}
+                  onclick={close}
+                >
+                  <Icon size="1.25rem" />
+                  <span>{getModuleName(mod.moduleId)}</span>
+                  <span class="available-badge">
+                    <PlusCircle size="0.875rem" />
+                  </span>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {/each}
-    </ul>
+    </div>
   {/if}
 
   <div class="sidebar-footer">
@@ -448,8 +511,44 @@
   }
 
   .sidebar-modules {
-    flex: 0;
     border-top: 1px solid var(--theme-border);
+    padding: 0.5rem 0;
+  }
+
+  .module-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.375rem 1rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--theme-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition: color 0.15s;
+
+    &:hover {
+      color: var(--theme-text);
+    }
+  }
+
+  .module-group-chevron {
+    display: inline-flex;
+    transition: transform 0.15s ease;
+
+    &.expanded {
+      transform: rotate(90deg);
+    }
+  }
+
+  .module-group-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
 
   .sidebar-section-label {
