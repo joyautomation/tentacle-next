@@ -13,6 +13,7 @@
   } from '$lib/types/profinet';
   import { PROFINET_TYPES, typeSize } from '$lib/types/profinet';
   import type { Variable } from '$lib/types/gateway';
+  import HexInput from './HexInput.svelte';
 
   interface Props {
     config: ProfinetConfig | null;
@@ -212,14 +213,6 @@
     }
   }
 
-  function hexInput(value: number): string {
-    return value != null ? '0x' + value.toString(16).toUpperCase() : '';
-  }
-
-  function parseHex(s: string): number {
-    if (s.startsWith('0x') || s.startsWith('0X')) return parseInt(s, 16) || 0;
-    return parseInt(s) || 0;
-  }
 </script>
 
 <div class="pn-config">
@@ -268,13 +261,13 @@
       </label>
       <label>
         <span>Vendor ID</span>
-        <input type="text" value={hexInput(form.vendorId)} placeholder="0x0000"
-          oninput={(e) => { form.vendorId = parseHex((e.target as HTMLInputElement).value); }} />
+        <HexInput value={form.vendorId} placeholder="0x0000"
+          onchange={(v) => { form.vendorId = v; }} />
       </label>
       <label>
         <span>Device ID</span>
-        <input type="text" value={hexInput(form.deviceId)} placeholder="0x0000"
-          oninput={(e) => { form.deviceId = parseHex((e.target as HTMLInputElement).value); }} />
+        <HexInput value={form.deviceId} placeholder="0x0000"
+          onchange={(v) => { form.deviceId = v; }} />
       </label>
       <label>
         <span>Device Name</span>
@@ -304,8 +297,8 @@
           <span class="slot-label">Slot {slot.slotNumber}</span>
           <label class="inline-field">
             <span>Module ID</span>
-            <input type="text" value={hexInput(slot.moduleIdentNo)} placeholder="0x00000000"
-              oninput={(e) => { slot.moduleIdentNo = parseHex((e.target as HTMLInputElement).value); form.slots = [...form.slots]; }} />
+            <HexInput value={slot.moduleIdentNo} placeholder="0x00000000"
+              onchange={(v) => { slot.moduleIdentNo = v; form.slots = [...form.slots]; }} />
           </label>
           <button class="remove-btn" onclick={() => removeSlot(slotIdx)}>Remove Slot</button>
         </div>
@@ -322,8 +315,8 @@
                 <span class="subslot-label">Subslot {subslot.subslotNumber}</span>
                 <label class="inline-field">
                   <span>Submodule ID</span>
-                  <input type="text" value={hexInput(subslot.submoduleIdentNo)} placeholder="0x00000000"
-                    oninput={(e) => { subslot.submoduleIdentNo = parseHex((e.target as HTMLInputElement).value); form.slots = [...form.slots]; }} />
+                  <HexInput value={subslot.submoduleIdentNo} placeholder="0x00000000"
+                    onchange={(v) => { subslot.submoduleIdentNo = v; form.slots = [...form.slots]; }} />
                 </label>
                 <label class="inline-field">
                   <span>Direction</span>
