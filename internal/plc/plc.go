@@ -1,0 +1,346 @@
+//go:build plc || all
+
+// Package plc implements a Starlark-based PLC task runner module.
+// It subscribes directly to scanner topics for input variables,
+// executes Starlark programs on configurable scan intervals,
+// and publishes output variables that the gateway module consumes.
+package plc
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/topics"
+	itypes "github.com/joyautomation/tentacle/internal/types"
+	"github.com/joyautomation/tentacle/types"
+)
+
+const serviceType = "plc"
+
+// Module is the PLC module implementing module.Module.
+type Module struct {
+	b     bus.Bus
+	plcID string
+	log   *slog.Logger
+
+	mu        sync.RWMutex
+	config    *itypes.PlcConfigKV
+	variables *VariableStore
+	engine    *Engine
+	tasks     map[string]*taskRunner
+	pub       *publisher
+	bridge    *scannerBridge
+
+	subs          []bus.Subscription
+	stopHeartbeat func()
+	startedAt     time.Time
+}
+
+// New creates a new PLC module instance.
+func New(plcID string) *Module {
+	if plcID == "" {
+		plcID = "plc"
+	}
+	return &Module{
+		plcID:     plcID,
+		variables: NewVariableStore(),
+	}
+}
+
+func (m *Module) ModuleID() string    { return m.plcID }
+func (m *Module) ServiceType() string { return serviceType }
+
+// Start initializes the PLC module with the given Bus.
+func (m *Module) Start(ctx context.Context, b bus.Bus) error {
+	m.b = b
+	m.startedAt = time.Now()
+	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
+
+	// Ensure required KV buckets exist.
+	for _, bucket := range []string{
+		topics.BucketPlcConfig, topics.BucketPlcPrograms,
+		topics.BucketPlcVariables,
+		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
+		topics.BucketScannerModbus, topics.BucketScannerSNMP,
+	} {
+		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
+			m.log.Warn("plc: failed to create bucket", "bucket", bucket, "error", err)
+		}
+	}
+
+	// Start heartbeat.
+	m.stopHeartbeat = heartbeat.Start(b, m.plcID, serviceType, func() map[string]interface{} {
+		return map[string]interface{}{
+			"variableCount": m.variables.Count(),
+			"hasConfig":     m.HasConfig(),
+		}
+	})
+
+	// Load initial config.
+	if data, _, err := b.KVGet(topics.BucketPlcConfig, m.plcID); err == nil {
+		var config itypes.PlcConfigKV
+		if err := json.Unmarshal(data, &config); err != nil {
+			m.log.Error("plc: failed to parse initial config", "error", err)
+		} else {
+			m.log.Info("plc: loaded initial config",
+				"variables", len(config.Variables),
+				"tasks", len(config.Tasks))
+			m.applyConfig(&config)
+		}
+	} else {
+		m.log.Info("plc: no existing config found, seeding empty config")
+		emptyConfig := &itypes.PlcConfigKV{
+			PlcID:        m.plcID,
+			Devices:      make(map[string]itypes.PlcDeviceConfigKV),
+			Variables:    make(map[string]itypes.PlcVariableConfigKV),
+			UdtTemplates: make(map[string]itypes.PlcUdtTemplateConfigKV),
+			Tasks:        make(map[string]itypes.PlcTaskConfigKV),
+			UpdatedAt:    time.Now().UnixMilli(),
+		}
+		if data, err := json.Marshal(emptyConfig); err == nil {
+			if _, err := b.KVPut(topics.BucketPlcConfig, m.plcID, data); err != nil {
+				m.log.Warn("plc: failed to seed empty config", "error", err)
+			}
+		}
+	}
+
+	// Watch for config changes.
+	configSub, err := b.KVWatch(topics.BucketPlcConfig, m.plcID, func(key string, value []byte, op bus.KVOperation) {
+		if op == bus.KVOpDelete {
+			m.log.Info("plc: config deleted")
+			m.applyConfig(nil)
+			return
+		}
+		var config itypes.PlcConfigKV
+		if err := json.Unmarshal(value, &config); err != nil {
+			m.log.Error("plc: failed to parse updated config", "error", err)
+			return
+		}
+		m.log.Info("plc: config updated, rebuilding",
+			"devices", len(config.Devices),
+			"variables", len(config.Variables),
+			"tasks", len(config.Tasks))
+		m.applyConfig(&config)
+	})
+	if err != nil {
+		m.log.Error("plc: failed to watch config KV", "error", err)
+	} else {
+		m.mu.Lock()
+		m.subs = append(m.subs, configSub)
+		m.mu.Unlock()
+	}
+
+	// Listen for shutdown via Bus.
+	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		m.log.Info("plc: received shutdown command via Bus")
+		m.Stop()
+		os.Exit(0)
+	})
+	m.mu.Lock()
+	m.subs = append(m.subs, shutdownSub)
+	m.mu.Unlock()
+
+	// Handle variables request/reply.
+	varSub, _ := b.Subscribe(topics.Variables(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		m.handleVariablesRequest(reply)
+	})
+	m.mu.Lock()
+	m.subs = append(m.subs, varSub)
+	m.mu.Unlock()
+
+	m.log.Info("plc: started")
+
+	// Block until context cancelled or signal.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case <-ctx.Done():
+	case <-sigChan:
+	}
+	return nil
+}
+
+// Stop tears down all subscriptions and cleans up.
+func (m *Module) Stop() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Stop tasks.
+	for _, t := range m.tasks {
+		t.stop()
+	}
+	m.tasks = nil
+
+	// Stop publisher.
+	if m.pub != nil {
+		m.pub.stop()
+		m.pub = nil
+	}
+
+	// Stop scanner bridge.
+	if m.bridge != nil {
+		m.bridge.unsubscribe()
+		m.bridge = nil
+	}
+
+	// Unsubscribe bus subscriptions.
+	for _, sub := range m.subs {
+		if sub != nil {
+			sub.Unsubscribe()
+		}
+	}
+	m.subs = nil
+	m.config = nil
+	m.engine = nil
+	m.variables.Clear()
+
+	if m.stopHeartbeat != nil {
+		m.stopHeartbeat()
+	}
+	return nil
+}
+
+// HasConfig returns true if a config is currently applied.
+func (m *Module) HasConfig() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config != nil
+}
+
+// applyConfig rebuilds the variable store, engine, tasks, publisher, and scanner bridge.
+func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Stop existing tasks.
+	for _, t := range m.tasks {
+		t.stop()
+	}
+	m.tasks = nil
+
+	// Stop existing publisher.
+	if m.pub != nil {
+		m.pub.stop()
+		m.pub = nil
+	}
+
+	// Stop existing scanner bridge.
+	if m.bridge != nil {
+		m.bridge.unsubscribe()
+		m.bridge = nil
+	}
+
+	m.config = config
+	m.variables.Clear()
+	m.engine = nil
+
+	if config == nil {
+		return
+	}
+
+	// Register variables.
+	now := time.Now().UnixMilli()
+	for id, vcfg := range config.Variables {
+		rv := &RuntimeVariable{
+			ID:          id,
+			Datatype:    vcfg.Datatype,
+			Direction:   vcfg.Direction,
+			Value:       vcfg.Default,
+			Quality:     "good",
+			LastUpdated: now,
+		}
+		m.variables.Add(rv)
+	}
+
+	// Create engine.
+	m.engine = NewEngine(m.variables, m.log)
+
+	// Load and compile programs from KV.
+	for _, taskCfg := range config.Tasks {
+		if !taskCfg.Enabled || taskCfg.ProgramRef == "" {
+			continue
+		}
+		if m.engine.HasProgram(taskCfg.ProgramRef) {
+			continue
+		}
+		data, _, err := m.b.KVGet(topics.BucketPlcPrograms, taskCfg.ProgramRef)
+		if err != nil {
+			m.log.Error("plc: failed to load program", "program", taskCfg.ProgramRef, "error", err)
+			continue
+		}
+		var prog itypes.PlcProgramKV
+		if err := json.Unmarshal(data, &prog); err != nil {
+			m.log.Error("plc: failed to parse program", "program", taskCfg.ProgramRef, "error", err)
+			continue
+		}
+		if err := m.engine.Compile(taskCfg.ProgramRef, prog.Source); err != nil {
+			m.log.Error("plc: failed to compile program", "program", taskCfg.ProgramRef, "error", err)
+			continue
+		}
+		m.log.Info("plc: compiled program", "program", taskCfg.ProgramRef, "language", prog.Language)
+	}
+
+	// Start scanner bridge.
+	m.bridge = newScannerBridge(m.b, m.plcID, m.variables, m.log)
+	m.bridge.subscribe(config)
+
+	// Start publisher.
+	m.pub = newPublisher(m.b, m.plcID, m.variables, m.log)
+	m.pub.start()
+
+	// Start task runners.
+	m.tasks = make(map[string]*taskRunner)
+	for taskID, taskCfg := range config.Tasks {
+		if !taskCfg.Enabled || taskCfg.ProgramRef == "" {
+			continue
+		}
+		if !m.engine.HasProgram(taskCfg.ProgramRef) {
+			m.log.Warn("plc: skipping task, program not compiled", "task", taskID, "program", taskCfg.ProgramRef)
+			continue
+		}
+		runner := newTaskRunner(taskID, taskCfg.ProgramRef, taskCfg.ScanRateMs, m.engine, m.log)
+		m.tasks[taskID] = runner
+		runner.start()
+	}
+
+	m.log.Info("plc: config applied",
+		"variables", m.variables.Count(),
+		"programs", m.engine.ProgramCount(),
+		"tasks", len(m.tasks))
+}
+
+// handleVariablesRequest responds to {plcId}.variables request/reply
+// with the current variable state for downstream consumers.
+func (m *Module) handleVariablesRequest(reply bus.ReplyFunc) {
+	if reply == nil {
+		return
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	allVars := m.variables.All()
+	result := make([]types.VariableInfo, 0, len(allVars))
+	for _, v := range allVars {
+		result = append(result, types.VariableInfo{
+			ModuleID:   m.plcID,
+			VariableID: v.ID,
+			Datatype:   v.Datatype,
+			Value:      v.Value,
+		})
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		m.log.Error("plc: failed to marshal variables response", "error", err)
+		return
+	}
+	reply(data)
+}

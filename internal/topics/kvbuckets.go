@@ -26,6 +26,10 @@ const (
 	BucketScannerModbus     = "scanner_config_modbus"
 	BucketScannerSNMP       = "scanner_config_snmp"
 
+	// PLC configuration and programs.
+	BucketPlcConfig   = "plc_config"
+	BucketPlcPrograms = "plc_programs"
+
 	// Config metadata tracks the source of each config write (gui, cli, gitops)
 	// to prevent feedback loops in bidirectional sync.
 	BucketConfigMetadata = "config_metadata"
@@ -63,6 +67,8 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketScannerOpcUA:      {History: 1},
 		BucketScannerModbus:     {History: 1},
 		BucketScannerSNMP:       {History: 1},
+		BucketPlcConfig:         {History: 5},
+		BucketPlcPrograms:       {History: 10},
 		BucketConfigMetadata:    {History: 1},
 	}
 }

@@ -93,6 +93,8 @@ func resourceKind(res any) string {
 		return r.Kind
 	case *NetworkResource:
 		return r.Kind
+	case *PlcResource:
+		return r.Kind
 	default:
 		return ""
 	}
@@ -109,6 +111,8 @@ func resourceName(res any) string {
 	case *NftablesResource:
 		return r.Metadata.Name
 	case *NetworkResource:
+		return r.Metadata.Name
+	case *PlcResource:
 		return r.Metadata.Name
 	default:
 		return ""
@@ -167,6 +171,8 @@ func specOf(res any) any {
 	case *NftablesResource:
 		return r.Spec
 	case *NetworkResource:
+		return r.Spec
+	case *PlcResource:
 		return r.Spec
 	default:
 		return nil

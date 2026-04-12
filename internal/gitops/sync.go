@@ -191,6 +191,7 @@ func writeManifestFiles(resources []any, configPath string) error {
 		manifest.KindModuleConfig: "config",
 		manifest.KindNftables:     "infrastructure",
 		manifest.KindNetwork:      "infrastructure",
+		manifest.KindPlc:          "plc",
 	}
 
 	// Ensure all directories exist.
@@ -268,6 +269,8 @@ func resourceKind(res any) string {
 		return r.Kind
 	case *manifest.NetworkResource:
 		return r.Kind
+	case *manifest.PlcResource:
+		return r.Kind
 	default:
 		return ""
 	}
@@ -284,6 +287,8 @@ func resourceName(res any) string {
 	case *manifest.NftablesResource:
 		return r.Metadata.Name
 	case *manifest.NetworkResource:
+		return r.Metadata.Name
+	case *manifest.PlcResource:
 		return r.Metadata.Name
 	default:
 		return ""
