@@ -23,15 +23,23 @@
   }
 
   let text = $state(hexDisplay(value));
+  let prevValue = value;
 
-  // Sync from parent when value changes externally
-  $effect(() => {
-    text = hexDisplay(value);
+  // Only sync from parent when the numeric value actually changes externally
+  $effect.pre(() => {
+    if (value !== prevValue) {
+      text = hexDisplay(value);
+      prevValue = value;
+    }
   });
 
   function handleBlur() {
     const parsed = parseHex(text);
-    text = hexDisplay(parsed);
+    // Only reformat if the text is empty or not a valid hex-looking string
+    if (text.trim() === '') {
+      text = hexDisplay(parsed);
+    }
+    prevValue = parsed;
     onchange(parsed);
   }
 </script>
