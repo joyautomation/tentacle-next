@@ -249,13 +249,31 @@ func (m *Manager) applyConfig(cfg *ProfinetConfig) {
 		OutputSlots:   outputSlots,
 	}
 
-	// Start the PROFINET device (DCP responder + future RPC/RT)
+	// Start the PROFINET device with all protocol layers
 	device := NewDevice(cfg, DeviceCallbacks{
 		OnIPSet: func(ip, mask, gateway net.IP) {
 			m.log.Info("profinet: controller assigned IP via DCP", "ip", ip, "mask", mask, "gateway", gateway)
 		},
 		OnNameSet: func(name string) {
 			m.log.Info("profinet: controller assigned station name via DCP", "name", name)
+		},
+		OnConnected: func() {
+			m.mu.Lock()
+			m.status.Connected = true
+			m.mu.Unlock()
+			m.log.Info("profinet: connected to controller")
+		},
+		OnDisconnected: func() {
+			m.mu.Lock()
+			m.status.Connected = false
+			m.mu.Unlock()
+			m.log.Info("profinet: disconnected from controller")
+		},
+		GetInputData: func(sub *SubslotConfig) []byte {
+			return m.GetInputBuffer(sub)
+		},
+		OnOutputData: func(sub *SubslotConfig, data []byte) {
+			m.ProcessOutputBuffer(sub, data)
 		},
 	}, m.log)
 	m.device = device

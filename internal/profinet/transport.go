@@ -129,6 +129,32 @@ func (t *Transport) SendDCPResponse(dstMAC net.HardwareAddr, dcpFrame *DCPFrame)
 	return t.SendFrame(dstMAC, payload)
 }
 
+// SendFrameWithEtherType sends a raw Ethernet frame with an arbitrary EtherType.
+// Used for LLDP (0x88CC) and other non-PROFINET frames via the same AF_PACKET socket.
+func (t *Transport) SendFrameWithEtherType(dstMAC net.HardwareAddr, etherType uint16, payload []byte) error {
+	frame := &ethernet.Frame{
+		Destination: dstMAC,
+		Source:      t.localMAC,
+		EtherType:   ethernet.EtherType(etherType),
+		Payload:     payload,
+	}
+
+	data, err := frame.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("marshal frame: %w", err)
+	}
+
+	if len(data) < 60 {
+		padded := make([]byte, 60)
+		copy(padded, data)
+		data = padded
+	}
+
+	addr := &packet.Addr{HardwareAddr: dstMAC}
+	_, err = t.conn.WriteTo(data, addr)
+	return err
+}
+
 // Close closes the underlying packet connection.
 func (t *Transport) Close() error {
 	return t.conn.Close()

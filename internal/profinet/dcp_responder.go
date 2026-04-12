@@ -78,6 +78,7 @@ func NewDCPResponder(transport *Transport, cfg DCPResponderConfig, log *slog.Log
 }
 
 // Run starts the DCP responder loop. It blocks until the context is cancelled.
+// Note: When used with the central frame dispatcher in Device, use HandleFrame instead.
 func (r *DCPResponder) Run(ctx context.Context) error {
 	r.log.Info("dcp: responder started",
 		"interface", r.transport.InterfaceName(),
@@ -113,6 +114,17 @@ func (r *DCPResponder) Run(ctx context.Context) error {
 
 		r.handleDCPFrame(ctx, dcpFrame, srcMAC)
 	}
+}
+
+// HandleFrame processes a single incoming DCP frame. Called by the device's
+// central frame dispatcher instead of the standalone Run loop.
+func (r *DCPResponder) HandleFrame(payload []byte, srcMAC net.HardwareAddr) {
+	dcpFrame, err := ParseDCPFrame(payload)
+	if err != nil {
+		r.log.Debug("dcp: parse error", "error", err)
+		return
+	}
+	r.handleDCPFrame(context.Background(), dcpFrame, srcMAC)
 }
 
 func (r *DCPResponder) handleDCPFrame(ctx context.Context, f *DCPFrame, srcMAC net.HardwareAddr) {
