@@ -32,6 +32,7 @@ build-all: build build-cli
 	go build -tags nftables -o bin/tentacle-nftables ./cmd/tentacle-nftables
 	go build -tags web,api -o bin/tentacle-web ./cmd/tentacle-web
 	go build -tags profinet -o bin/tentacle-profinet ./cmd/tentacle-profinet
+	go build -tags profinetcontroller -o bin/tentacle-profinet-controller ./cmd/tentacle-profinet-controller
 
 test:
 	go test ./...

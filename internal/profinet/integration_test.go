@@ -1,4 +1,4 @@
-//go:build integration && (profinet || profinetall)
+//go:build integration && (profinet || profinetall || profinetcontroller)
 
 // Integration tests for the PROFINET IO Device module using veth pairs.
 // These tests require root privileges to create veth pairs and open AF_PACKET sockets.

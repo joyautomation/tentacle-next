@@ -1,4 +1,4 @@
-//go:build profinet || profinetall
+//go:build profinet || profinetall || profinetcontroller
 
 package profinet
 

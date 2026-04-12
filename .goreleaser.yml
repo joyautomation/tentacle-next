@@ -227,6 +227,19 @@ builds:
       - amd64
       - arm64
 
+  - id: tentacle-profinet-controller
+    dir: cmd/tentacle-profinet-controller
+    binary: tentacle-profinet-controller
+    tags:
+      - profinetcontroller
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
 archives:
   - formats:
       - tar.gz
