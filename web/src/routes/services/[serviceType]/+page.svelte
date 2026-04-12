@@ -16,6 +16,8 @@
     mqtt: 'MQTT',
     plc: 'PLC',
     network: 'Network',
+    profinet: 'PROFINET Device',
+    profinetcontroller: 'PROFINET Controller',
   };
 
   const serviceDescriptions: Record<string, string> = {
@@ -27,6 +29,8 @@
     mqtt: 'MQTT Sparkplug B bridge for publishing PLC data',
     plc: 'PLC runtime project',
     network: 'Network interface monitoring and configuration management',
+    profinet: 'PROFINET IO Device for field-level communication',
+    profinetcontroller: 'PROFINET IO Controller for scanning devices',
   };
 
   function formatUptime(startedAt: string | number): string {
@@ -59,13 +63,23 @@
   );
 
   let togglingModuleId: string | null = $state(null);
+  let optimisticEnabled: Record<string, boolean> = $state({});
+
+  function getEnabled(instance: { moduleId: string; enabled: boolean }): boolean {
+    return instance.moduleId in optimisticEnabled
+      ? optimisticEnabled[instance.moduleId]
+      : instance.enabled;
+  }
 
   async function toggleEnabled(moduleId: string, currentEnabled: boolean) {
     togglingModuleId = moduleId;
+    const newEnabled = !currentEnabled;
+    optimisticEnabled[moduleId] = newEnabled;
     try {
-      const result = await apiPut<{ moduleId: string; enabled: boolean }>(`/services/${moduleId}/enabled`, { enabled: !currentEnabled });
+      const result = await apiPut<{ moduleId: string; enabled: boolean }>(`/services/${moduleId}/enabled`, { enabled: newEnabled });
 
       if (result.error) {
+        optimisticEnabled[moduleId] = currentEnabled;
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
         const newState = result.data?.enabled;
@@ -74,8 +88,10 @@
           type: 'success',
         });
         await invalidateAll();
+        delete optimisticEnabled[moduleId];
       }
     } catch (err) {
+      optimisticEnabled[moduleId] = currentEnabled;
       saltState.addNotification({
         message: err instanceof Error ? err.message : 'Failed to toggle service',
         type: 'error',
@@ -107,25 +123,26 @@
     <!-- Infrastructure services don't need instances/enable-disable -->
   {:else if (data.instances?.length ?? 0) > 0}
     {#each data.instances as instance}
+      {@const enabled = getEnabled(instance)}
       <div class="enable-row">
         <span class="enable-label">
           Enabled
-          {#if !instance.enabled}
+          {#if !enabled}
             <span class="disabled-badge">Disabled</span>
           {/if}
         </span>
-        <label class="toggle" title={instance.enabled ? 'Disable service' : 'Enable service'}>
+        <label class="toggle" title={enabled ? 'Disable service' : 'Enable service'}>
           <input
             type="checkbox"
-            checked={instance.enabled}
+            checked={enabled}
             disabled={togglingModuleId === instance.moduleId}
-            onchange={() => toggleEnabled(instance.moduleId, instance.enabled)}
+            onchange={() => toggleEnabled(instance.moduleId, enabled)}
           />
           <span class="toggle-slider"></span>
         </label>
       </div>
 
-      <div class="details" class:disabled={!instance.enabled}>
+      <div class="details" class:disabled={!enabled}>
         <div class="detail-row">
           <span class="label">Uptime</span>
           <span class="value">{formatUptime(instance.startedAt)}</span>
