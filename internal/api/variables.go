@@ -34,21 +34,31 @@ func (m *Module) handleListVariables(w http.ResponseWriter, r *http.Request) {
 		moduleIDs = keys
 	}
 
-	var allVars []json.RawMessage
-	for _, mid := range moduleIDs {
-		resp, err := m.bus.Request(topics.Variables(mid), nil, 3*time.Second)
-		if err != nil {
-			continue // Module doesn't respond to variables request
-		}
-		var vars []json.RawMessage
-		if err := json.Unmarshal(resp, &vars); err != nil {
-			continue
-		}
-		allVars = append(allVars, vars...)
+	type varResult struct {
+		vars []json.RawMessage
 	}
 
-	if allVars == nil {
-		allVars = []json.RawMessage{}
+	results := make([]varResult, len(moduleIDs))
+	var wg sync.WaitGroup
+	for i, mid := range moduleIDs {
+		wg.Add(1)
+		go func(idx int, moduleID string) {
+			defer wg.Done()
+			resp, err := m.bus.Request(topics.Variables(moduleID), nil, 3*time.Second)
+			if err != nil {
+				return
+			}
+			var vars []json.RawMessage
+			if json.Unmarshal(resp, &vars) == nil {
+				results[idx] = varResult{vars: vars}
+			}
+		}(i, mid)
+	}
+	wg.Wait()
+
+	allVars := make([]json.RawMessage, 0)
+	for _, r := range results {
+		allVars = append(allVars, r.vars...)
 	}
 
 	writeJSON(w, http.StatusOK, allVars)
