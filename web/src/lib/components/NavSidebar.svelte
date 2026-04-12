@@ -72,18 +72,18 @@
   type ModuleRole = 'client' | 'server' | 'data';
 
   const MODULE_ROLES: Record<string, ModuleRole> = {
-    'tentacle-ethernetip': 'client',
-    'tentacle-modbus': 'client',
-    'tentacle-opcua': 'client',
-    'tentacle-snmp': 'client',
-    'tentacle-profinetcontroller': 'client',
-    'tentacle-ethernetip-server': 'server',
-    'tentacle-modbus-server': 'server',
-    'tentacle-profinet': 'server',
-    'tentacle-mqtt': 'server',
-    'tentacle-history': 'data',
-    'tentacle-network': 'data',
-    'tentacle-nftables': 'data',
+    ethernetip: 'client',
+    modbus: 'client',
+    opcua: 'client',
+    snmp: 'client',
+    profinetcontroller: 'client',
+    'ethernetip-server': 'server',
+    'modbus-server': 'server',
+    profinet: 'server',
+    mqtt: 'server',
+    history: 'data',
+    network: 'data',
+    nftables: 'data',
     gitops: 'data',
   };
 
@@ -107,7 +107,12 @@
       .map((r) => ({ role: r, label: ROLE_LABELS[r], modules: groups[r] }));
   });
 
-  let expandedRoles = $state<Set<ModuleRole>>(new Set(ROLE_ORDER));
+  let moduleSectionOpen = $state(false);
+  let expandedRoles = $state<Set<ModuleRole>>(new Set());
+
+  function toggleModuleSection() {
+    moduleSectionOpen = !moduleSectionOpen;
+  }
 
   function toggleRole(role: ModuleRole) {
     if (expandedRoles.has(role)) {
@@ -304,36 +309,45 @@
 
   {#if groupedModules().length > 0}
     <div class="sidebar-modules">
-      <div class="sidebar-section-label">Available Modules</div>
-      {#each groupedModules() as group}
-        <button class="module-group-header" onclick={() => toggleRole(group.role)}>
-          <span class="module-group-chevron" class:expanded={expandedRoles.has(group.role)}>
-            <ChevronRight size="0.625rem" />
-          </span>
-          <span>{group.label}</span>
-        </button>
-        {#if expandedRoles.has(group.role)}
-          <ul class="module-group-list" transition:slide|local={{ duration: 150 }}>
-            {#each group.modules as mod}
-              {@const Icon = getModuleIcon(mod.moduleId)}
-              <li>
-                <a
-                  href="/modules/{mod.moduleId}"
-                  class="sidebar-item"
-                  class:active={$page.url.pathname.startsWith('/modules/' + mod.moduleId)}
-                  onclick={close}
-                >
-                  <Icon size="1.25rem" />
-                  <span>{getModuleName(mod.moduleId)}</span>
-                  <span class="available-badge">
-                    <PlusCircle size="0.875rem" />
-                  </span>
-                </a>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      {/each}
+      <button class="module-section-header" onclick={toggleModuleSection}>
+        <span class="module-group-chevron" class:expanded={moduleSectionOpen}>
+          <ChevronRight size="0.625rem" />
+        </span>
+        <span>Available Modules</span>
+      </button>
+      {#if moduleSectionOpen}
+        <div transition:slide|local={{ duration: 150 }}>
+          {#each groupedModules() as group}
+            <button class="module-group-header" onclick={() => toggleRole(group.role)}>
+              <span class="module-group-chevron" class:expanded={expandedRoles.has(group.role)}>
+                <ChevronRight size="0.625rem" />
+              </span>
+              <span>{group.label}</span>
+            </button>
+            {#if expandedRoles.has(group.role)}
+              <ul class="module-group-list" transition:slide|local={{ duration: 150 }}>
+                {#each group.modules as mod}
+                  {@const Icon = getModuleIcon(mod.moduleId)}
+                  <li>
+                    <a
+                      href="/modules/{mod.moduleId}"
+                      class="sidebar-item"
+                      class:active={$page.url.pathname.startsWith('/modules/' + mod.moduleId)}
+                      onclick={close}
+                    >
+                      <Icon size="1.25rem" />
+                      <span>{getModuleName(mod.moduleId)}</span>
+                      <span class="available-badge">
+                        <PlusCircle size="0.875rem" />
+                      </span>
+                    </a>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -513,6 +527,27 @@
   .sidebar-modules {
     border-top: 1px solid var(--theme-border);
     padding: 0.5rem 0;
+  }
+
+  .module-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem 0.25rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--theme-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    transition: color 0.15s;
+
+    &:hover {
+      color: var(--theme-text);
+    }
   }
 
   .module-group-header {
