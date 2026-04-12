@@ -213,7 +213,7 @@
   }
 
   function hexInput(value: number): string {
-    return value ? '0x' + value.toString(16).toUpperCase() : '';
+    return value != null ? '0x' + value.toString(16).toUpperCase() : '';
   }
 
   function parseHex(s: string): number {
