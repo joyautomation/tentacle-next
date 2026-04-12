@@ -62,6 +62,20 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 	},
 	{
 		Repo:        "tentacle-next",
+		ModuleID:    "profinet",
+		Description: "PROFINET IO Device",
+		Category:    "optional",
+		Runtime:     "embedded",
+	},
+	{
+		Repo:        "tentacle-next",
+		ModuleID:    "profinetcontroller",
+		Description: "PROFINET IO Controller",
+		Category:    "optional",
+		Runtime:     "embedded",
+	},
+	{
+		Repo:        "tentacle-next",
 		ModuleID:    "ethernetip-server",
 		Description: "EtherNet/IP server",
 		Category:    "optional",
