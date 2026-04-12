@@ -1,4 +1,4 @@
-//go:build all
+//go:build all || stable
 
 package main
 
@@ -13,24 +13,9 @@ import (
 
 	"github.com/joyautomation/tentacle/internal/api"
 	"github.com/joyautomation/tentacle/internal/bus"
-	"github.com/joyautomation/tentacle/internal/ethernetip"
 	"github.com/joyautomation/tentacle/internal/logger"
-	"github.com/joyautomation/tentacle/internal/ethernetipserver"
-	"github.com/joyautomation/tentacle/internal/gateway"
-	"github.com/joyautomation/tentacle/internal/gitops"
-	"github.com/joyautomation/tentacle/internal/history"
-	"github.com/joyautomation/tentacle/internal/modbus"
-	"github.com/joyautomation/tentacle/internal/modbusserver"
 	"github.com/joyautomation/tentacle/internal/module"
-	"github.com/joyautomation/tentacle/internal/mqtt"
-	"github.com/joyautomation/tentacle/internal/network"
-	"github.com/joyautomation/tentacle/internal/nftables"
-	"github.com/joyautomation/tentacle/internal/opcua"
 	"github.com/joyautomation/tentacle/internal/orchestrator"
-	"github.com/joyautomation/tentacle/internal/plc"
-	"github.com/joyautomation/tentacle/internal/profinet"
-	"github.com/joyautomation/tentacle/internal/profinetcontroller"
-	"github.com/joyautomation/tentacle/internal/snmp"
 	"github.com/joyautomation/tentacle/internal/topics"
 )
 
@@ -76,22 +61,11 @@ func runMonolith(ctx context.Context) {
 	}
 
 	// Module factories for optional modules managed by the orchestrator.
-	factories := map[string]orchestrator.ModuleFactory{
-		"gateway":           func(id string) module.Module { return gateway.New(id) },
-		"ethernetip":        func(id string) module.Module { return ethernetip.New(id) },
-		"opcua":             func(id string) module.Module { return opcua.New(id) },
-		"snmp":              func(id string) module.Module { return snmp.New(id) },
-		"modbus":            func(id string) module.Module { return modbus.New(id) },
-		"mqtt":              func(id string) module.Module { return mqtt.New(id) },
-		"ethernetip-server": func(id string) module.Module { return ethernetipserver.New(id) },
-		"modbus-server":     func(id string) module.Module { return modbusserver.New(id) },
-		"history":           func(id string) module.Module { return history.New(id) },
-		"network":           func(id string) module.Module { return network.New(id) },
-		"nftables":          func(id string) module.Module { return nftables.New(id) },
-		"gitops":             func(id string) module.Module { return gitops.New(id) },
-		"plc":                func(id string) module.Module { return plc.New(id) },
-		"profinet":           func(id string) module.Module { return profinet.New(id) },
-		"profinetcontroller": func(id string) module.Module { return profinetcontroller.New(id) },
+	// Stable factories are always included; experimental factories are added
+	// only when built with the "all" tag (dev builds).
+	factories := stableFactories()
+	for k, v := range experimentalFactories() {
+		factories[k] = v
 	}
 
 	// Core modules: always running.
@@ -154,42 +128,8 @@ func runSingle(ctx context.Context, mode, natsURL string) {
 }
 
 func moduleByName(name string) module.Module {
-	switch name {
-	case "gateway":
-		return gateway.New("gateway")
-	case "ethernetip":
-		return ethernetip.New("ethernetip")
-	case "opcua":
-		return opcua.New("opcua")
-	case "snmp":
-		return snmp.New("snmp")
-	case "modbus":
-		return modbus.New("modbus")
-	case "mqtt":
-		return mqtt.New("mqtt")
-	case "ethernetipserver":
-		return ethernetipserver.New("ethernetip-server")
-	case "modbusserver":
-		return modbusserver.New("modbus-server")
-	case "orchestrator":
-		return orchestrator.New("orchestrator")
-	case "history":
-		return history.New("history")
-	case "network":
-		return network.New("network")
-	case "nftables":
-		return nftables.New("nftables")
-	case "gitops":
-		return gitops.New("gitops")
-	case "plc":
-		return plc.New("plc")
-	case "profinet":
-		return profinet.New("profinet")
-	case "profinetcontroller":
-		return profinetcontroller.New("profinetcontroller")
-	case "api":
-		return api.New("api")
-	default:
-		return nil
+	if m := stableModuleByName(name); m != nil {
+		return m
 	}
+	return experimentalModuleByName(name)
 }

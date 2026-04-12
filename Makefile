@@ -1,4 +1,8 @@
-.PHONY: build build-cli test vet fmt clean web-build web-install
+.PHONY: build build-release build-cli test vet fmt clean web-build web-install
+
+# Stable module tags for release builds (excludes experimental modules).
+# Dev builds use "all" which includes everything.
+STABLE_TAGS = stable,api,orchestrator,gateway,ethernetip,snmp,mqtt,network,gitops
 
 # Build SvelteKit SPA into internal/web/static/
 web-install:
@@ -7,9 +11,13 @@ web-install:
 web-build: web-install
 	cd web && npm run build
 
-# Default: build monolith (builds web first)
+# Default: build monolith with all modules (dev)
 build: web-build
 	go build -tags all,web -o bin/tentacle ./cmd/tentacle
+
+# Release: build monolith with stable modules only
+build-release: web-build
+	go build -tags $(STABLE_TAGS),web -o bin/tentacle ./cmd/tentacle
 
 # Build tentactl CLI (no build tags, lightweight)
 build-cli:

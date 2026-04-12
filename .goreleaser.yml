@@ -7,7 +7,15 @@ builds:
     dir: cmd/tentacle
     binary: tentacle
     tags:
-      - all
+      - stable
+      - api
+      - orchestrator
+      - gateway
+      - ethernetip
+      - snmp
+      - mqtt
+      - network
+      - gitops
       - web
     env:
       - CGO_ENABLED=1

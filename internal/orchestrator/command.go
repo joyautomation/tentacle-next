@@ -94,6 +94,7 @@ func handleGetRegistry(requestID string) otypes.OrchestratorCommandResponse {
 			Description:    m.Description,
 			Category:       m.Category,
 			Runtime:        m.Runtime,
+			Experimental:   m.Experimental,
 			RequiredConfig: configFields,
 		}
 	}

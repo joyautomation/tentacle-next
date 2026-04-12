@@ -9,6 +9,8 @@ import (
 // moduleRegistry describes all modules the orchestrator can manage.
 // In monolith mode, modules are started as in-process goroutines.
 // In bare-metal mode, modules are managed as systemd services.
+// Experimental modules are appended via init() in registry_experimental.go
+// (only compiled with the "all" build tag).
 var moduleRegistry = []otypes.ModuleRegistryEntry{
 	{
 		Repo:        "tentacle-next",
@@ -26,22 +28,8 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 	},
 	{
 		Repo:        "tentacle-next",
-		ModuleID:    "opcua",
-		Description: "OPC UA client",
-		Category:    "optional",
-		Runtime:     "embedded",
-	},
-	{
-		Repo:        "tentacle-next",
 		ModuleID:    "snmp",
 		Description: "SNMP scanner & trap listener",
-		Category:    "optional",
-		Runtime:     "embedded",
-	},
-	{
-		Repo:        "tentacle-next",
-		ModuleID:    "modbus",
-		Description: "Modbus TCP scanner",
 		Category:    "optional",
 		Runtime:     "embedded",
 	},
@@ -62,55 +50,8 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 	},
 	{
 		Repo:        "tentacle-next",
-		ModuleID:    "profinet",
-		Description: "PROFINET IO Device",
-		Category:    "optional",
-		Runtime:     "embedded",
-	},
-	{
-		Repo:        "tentacle-next",
-		ModuleID:    "profinetcontroller",
-		Description: "PROFINET IO Controller",
-		Category:    "optional",
-		Runtime:     "embedded",
-	},
-	{
-		Repo:        "tentacle-next",
-		ModuleID:    "ethernetip-server",
-		Description: "EtherNet/IP server",
-		Category:    "optional",
-		Runtime:     "embedded",
-	},
-	{
-		Repo:        "tentacle-next",
-		ModuleID:    "modbus-server",
-		Description: "Modbus TCP server",
-		Category:    "optional",
-		Runtime:     "embedded",
-	},
-	{
-		Repo:        "tentacle-next",
-		ModuleID:    "history",
-		Description: "Edge historian (TimescaleDB)",
-		Category:    "optional",
-		Runtime:     "embedded",
-		RequiredConfig: []otypes.ConfigField{
-			{EnvVar: "HISTORY_DB_HOST", Description: "PostgreSQL host", Default: "localhost"},
-			{EnvVar: "HISTORY_DB_PORT", Description: "PostgreSQL port", Default: "5432"},
-			{EnvVar: "HISTORY_DB_NAME", Description: "Database name", Default: "tentacle"},
-		},
-	},
-	{
-		Repo:        "tentacle-next",
 		ModuleID:    "network",
 		Description: "Network interface manager",
-		Category:    "optional",
-		Runtime:     "embedded",
-	},
-	{
-		Repo:        "tentacle-next",
-		ModuleID:    "nftables",
-		Description: "Firewall manager",
 		Category:    "optional",
 		Runtime:     "embedded",
 	},

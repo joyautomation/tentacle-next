@@ -31,6 +31,7 @@ type ModuleRegistryInfo struct {
 	Description    string              `json:"description"`
 	Category       string              `json:"category"`
 	Runtime        string              `json:"runtime"`
+	Experimental   bool                `json:"experimental,omitempty"`
 	RequiredConfig []ModuleConfigField `json:"requiredConfig,omitempty"`
 }
 
@@ -77,6 +78,7 @@ type ModuleRegistryEntry struct {
 	Description    string
 	Category       string     // "core" or "optional"
 	Runtime        string     // "go", "deno", "deno-web"
+	Experimental   bool       // true = only included in dev/experimental builds
 	ExtraEnv       string     // Extra systemd Environment lines
 	AptDeps        []string   // Apt packages to install
 	BuildDeps      []BuildDep // Libraries built from source
