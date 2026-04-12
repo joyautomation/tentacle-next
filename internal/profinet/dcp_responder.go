@@ -28,7 +28,7 @@ type DCPResponder struct {
 	ipSet       bool
 
 	// Callback for IP/Name changes from the controller
-	onIPSet   func(ip, mask, gateway net.IP) error
+	onIPSet   func(ip, mask, gateway net.IP, permanent bool) error
 	onNameSet func(name string)
 }
 
@@ -42,7 +42,7 @@ type DCPResponderConfig struct {
 	Mask        net.IP
 	Gateway     net.IP
 
-	OnIPSet   func(ip, mask, gateway net.IP) error
+	OnIPSet   func(ip, mask, gateway net.IP, permanent bool) error
 	OnNameSet func(name string)
 }
 
@@ -198,7 +198,15 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 	for _, block := range req.Blocks {
 		switch {
 		case block.Option == DCPOptionIP && block.SubOption == DCPSubOptionIPSuite:
-			ip, mask, gw, err := ParseIPSuiteBlock(block.Data)
+			// SET block data: BlockQualifier(2) + IP(4) + Mask(4) + Gateway(4)
+			if len(block.Data) < 14 {
+				r.log.Warn("dcp: IP suite SET block too short", "len", len(block.Data))
+				respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x03))
+				continue
+			}
+			// BlockQualifier bit 0: 1=permanent, 0=temporary
+			permanent := block.Data[1]&0x01 != 0
+			ip, mask, gw, err := ParseIPSuiteBlock(block.Data[2:])
 			if err != nil {
 				r.log.Warn("dcp: invalid IP suite in Set", "error", err)
 				respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x03))
@@ -207,7 +215,7 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 
 			// Try to apply the IP before committing state
 			if r.onIPSet != nil {
-				if err := r.onIPSet(ip, mask, gw); err != nil {
+				if err := r.onIPSet(ip, mask, gw, permanent); err != nil {
 					r.log.Warn("dcp: failed to apply IP", "error", err)
 					respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x03))
 					continue
@@ -219,11 +227,16 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 			r.gateway = gw
 			r.ipSet = !ip.Equal(net.IPv4zero)
 
-			r.log.Info("dcp: IP set by controller", "ip", ip, "mask", mask, "gateway", gw)
+			r.log.Info("dcp: IP set by controller", "ip", ip, "mask", mask, "gateway", gw, "permanent", permanent)
 			respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x00))
 
 		case block.Option == DCPOptionDeviceProperties && block.SubOption == DCPSubOptionDevNameOfStation:
-			name := string(block.Data)
+			// SET block data: BlockQualifier(2) + NameOfStation
+			nameData := block.Data
+			if len(nameData) >= 2 {
+				nameData = nameData[2:] // skip BlockQualifier
+			}
+			name := string(nameData)
 			r.stationName = name
 
 			r.log.Info("dcp: station name set by controller", "name", name)

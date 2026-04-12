@@ -26,15 +26,13 @@ type Device struct {
 
 	callbacks DeviceCallbacks
 
-	mu          sync.Mutex
-	cancel      context.CancelFunc
-	appliedIP   net.IP // IP applied via DCP SET (nil if none)
-	appliedMask net.IP
+	mu     sync.Mutex
+	cancel context.CancelFunc
 }
 
 // DeviceCallbacks contains callbacks for protocol events and data integration.
 type DeviceCallbacks struct {
-	OnIPSet        func(ip, mask, gateway net.IP) error // Called when controller assigns IP via DCP
+	OnIPSet        func(ip, mask, gateway net.IP, permanent bool) error // Called when controller assigns IP via DCP
 	OnNameSet      func(name string)              // Called when controller assigns station name via DCP
 	OnConnected    func()                         // Called when AR enters DATA state
 	OnDisconnected func()                         // Called when AR is released
@@ -76,17 +74,13 @@ func (d *Device) Start(ctx context.Context) error {
 		func(ar *AR) { d.onCyclicStop(ar) },
 	)
 
-	// Create DCP responder — wrap OnIPSet to track applied IP and update LLDP
-	wrappedOnIPSet := func(newIP, newMask, gateway net.IP) error {
+	// Create DCP responder — wrap OnIPSet to update LLDP after IP change
+	wrappedOnIPSet := func(newIP, newMask, gateway net.IP, permanent bool) error {
 		if d.callbacks.OnIPSet != nil {
-			if err := d.callbacks.OnIPSet(newIP, newMask, gateway); err != nil {
+			if err := d.callbacks.OnIPSet(newIP, newMask, gateway, permanent); err != nil {
 				return err
 			}
 		}
-		d.mu.Lock()
-		d.appliedIP = newIP
-		d.appliedMask = newMask
-		d.mu.Unlock()
 		if d.lldp != nil {
 			d.lldp.SetIP(newIP)
 		}
@@ -153,16 +147,6 @@ func (d *Device) Stop() {
 	}
 	if d.rpc != nil {
 		d.rpc.Stop()
-	}
-	// Remove controller-assigned IP from the interface
-	if d.appliedIP != nil && d.cfg != nil {
-		if err := RemoveInterfaceIP(d.cfg.InterfaceName, d.appliedIP, d.appliedMask); err != nil {
-			d.log.Warn("profinet: failed to remove applied IP on stop", "error", err)
-		} else {
-			d.log.Info("profinet: removed controller-assigned IP", "ip", d.appliedIP)
-		}
-		d.appliedIP = nil
-		d.appliedMask = nil
 	}
 	if d.cancel != nil {
 		d.cancel()

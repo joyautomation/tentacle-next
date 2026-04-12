@@ -14,6 +14,7 @@ import (
 
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/topics"
+	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/types"
 )
 
@@ -251,14 +252,59 @@ func (m *Manager) applyConfig(cfg *ProfinetConfig) {
 
 	// Start the PROFINET device with all protocol layers
 	device := NewDevice(cfg, DeviceCallbacks{
-		OnIPSet: func(ip, mask, gateway net.IP) error {
-			m.log.Info("profinet: controller assigned IP via DCP, applying to interface",
-				"ip", ip, "mask", mask, "gateway", gateway, "interface", cfg.InterfaceName)
-			if err := ApplyInterfaceIP(cfg.InterfaceName, ip, mask, gateway); err != nil {
-				m.log.Error("profinet: failed to apply IP to interface", "error", err)
-				return err
+		OnIPSet: func(ip, mask, gateway net.IP, permanent bool) error {
+			m.log.Info("profinet: controller assigned IP via DCP",
+				"ip", ip, "mask", mask, "gateway", gateway,
+				"interface", cfg.InterfaceName, "permanent", permanent)
+
+			// Build netplan config via the network module bus
+			var ifaceCfg itypes.NetworkInterfaceConfig
+			if ip.Equal(net.IPv4zero) {
+				// All-zero IP = use DHCP
+				ifaceCfg = itypes.NetworkInterfaceConfig{
+					InterfaceName: cfg.InterfaceName,
+					DHCP4:         true,
+				}
+			} else {
+				// Static IP from controller
+				prefixLen := net.IPMask(mask.To4())
+				ones, _ := prefixLen.Size()
+				cidr := fmt.Sprintf("%s/%d", ip.String(), ones)
+				ifaceCfg = itypes.NetworkInterfaceConfig{
+					InterfaceName: cfg.InterfaceName,
+					DHCP4:         false,
+					Addresses:     []string{cidr},
+				}
+				if gateway != nil && !gateway.Equal(net.IPv4zero) {
+					ifaceCfg.Gateway4 = gateway.String()
+				}
 			}
-			m.log.Info("profinet: IP applied successfully", "interface", cfg.InterfaceName)
+
+			req := itypes.NetworkCommandRequest{
+				RequestID:  fmt.Sprintf("profinet-dcp-%d", time.Now().UnixMilli()),
+				Action:     "apply-config",
+				Interfaces: []itypes.NetworkInterfaceConfig{ifaceCfg},
+				Timestamp:  time.Now().UnixMilli(),
+			}
+			reqData, err := json.Marshal(req)
+			if err != nil {
+				return fmt.Errorf("failed to marshal network command: %w", err)
+			}
+
+			respData, err := m.b.Request(topics.NetworkCommand, reqData, 15*time.Second)
+			if err != nil {
+				return fmt.Errorf("network command failed: %w", err)
+			}
+
+			var resp itypes.NetworkCommandResponse
+			if err := json.Unmarshal(respData, &resp); err != nil {
+				return fmt.Errorf("invalid network command response: %w", err)
+			}
+			if !resp.Success {
+				return fmt.Errorf("network command rejected: %s", resp.Error)
+			}
+
+			m.log.Info("profinet: IP applied via network module", "interface", cfg.InterfaceName)
 			return nil
 		},
 		OnNameSet: func(name string) {
