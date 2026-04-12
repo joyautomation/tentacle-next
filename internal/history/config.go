@@ -19,6 +19,7 @@ func loadConfigFromEnv() itypes.HistoryConfig {
 		DBPassword:    envOrDefault("TENTACLE_DB_PASSWORD", "postgres"),
 		DBName:        envOrDefault("TENTACLE_DB_NAME", "tentacle"),
 		DBSSLMode:     "disable",
+		GroupID:       envOrDefault("MQTT_GROUP_ID", "TentacleGroup"),
 		EnableHyper:   envBoolOrDefault("TENTACLE_HISTORIAN_ENABLED", true),
 		RetentionDays: envIntOrDefault("TENTACLE_RETENTION_DAYS", 30),
 	}

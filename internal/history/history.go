@@ -26,6 +26,7 @@ const serviceType = "history"
 // History implements module.Module for the TimescaleDB historian.
 type History struct {
 	moduleID string
+	groupID  string // Sparkplug group ID for history records
 
 	log *slog.Logger
 
@@ -72,10 +73,12 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 
 	// Load configuration from environment variables.
 	cfg := loadConfigFromEnv()
+	h.groupID = cfg.GroupID
 	h.log.Info("history: loaded config",
 		"host", cfg.DBHost,
 		"port", cfg.DBPort,
 		"db", cfg.DBName,
+		"groupId", cfg.GroupID,
 		"enableHyper", cfg.EnableHyper,
 		"retentionDays", cfg.RetentionDays,
 	)
@@ -96,7 +99,7 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 
 	// Optionally enable TimescaleDB features.
 	if cfg.EnableHyper {
-		if enableHypertable(db, h.log) {
+		if enableHypertables(db, h.log) {
 			h.hyperEnabled = true
 
 			if err := enableCompressionPolicy(db, h.log); err != nil {

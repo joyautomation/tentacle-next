@@ -10,7 +10,9 @@
 		onBatchApply,
 		onBatchClear,
 		onBatchMqttEnable,
-		onBatchMqttDisable
+		onBatchMqttDisable,
+		onBatchHistoryEnable,
+		onBatchHistoryDisable
 	}: {
 		filters: FilterDef[];
 		showEnableRbe?: boolean;
@@ -18,6 +20,8 @@
 		onBatchClear: () => void;
 		onBatchMqttEnable?: () => void;
 		onBatchMqttDisable?: () => void;
+		onBatchHistoryEnable?: () => void;
+		onBatchHistoryDisable?: () => void;
 	} = $props();
 
 	let batchOpen = $state(false);
@@ -64,6 +68,16 @@
 			{/if}
 			{#if onBatchMqttDisable}
 				<button class="batch-mqtt-btn mqtt-disable" onclick={onBatchMqttDisable}>MQTT None</button>
+			{/if}
+		</div>
+	{/if}
+	{#if onBatchHistoryEnable || onBatchHistoryDisable}
+		<div class="batch-mqtt-group">
+			{#if onBatchHistoryEnable}
+				<button class="batch-mqtt-btn mqtt-enable" onclick={onBatchHistoryEnable}>History All</button>
+			{/if}
+			{#if onBatchHistoryDisable}
+				<button class="batch-mqtt-btn mqtt-disable" onclick={onBatchHistoryDisable}>History None</button>
 			{/if}
 		</div>
 	{/if}

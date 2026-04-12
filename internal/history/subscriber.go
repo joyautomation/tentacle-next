@@ -40,7 +40,8 @@ func isRawScannerSubject(subject string) bool {
 }
 
 // handleDataMessage processes a single PlcDataMessage from the bus and
-// buffers a HistoryRecord if RBE passes.
+// buffers HistoryRecords if RBE passes. UDT values are flattened into
+// individual member records using "/" as the delimiter.
 func (h *History) handleDataMessage(subject string, data []byte) {
 	// Skip raw scanner data — only store gateway/PLC values.
 	if isRawScannerSubject(subject) {
@@ -53,39 +54,112 @@ func (h *History) handleDataMessage(subject string, data []byte) {
 		return
 	}
 
-	// Skip UDT values — we store atomic values only.
-	if msg.Datatype == "udt" {
+	// Skip if history is not enabled for this variable.
+	if !msg.HistoryEnabled {
 		return
 	}
 
-	// RBE deadband check.
-	key := fmt.Sprintf("%s:%s", msg.ModuleID, msg.VariableID)
-	state := h.rbeStates.get(key)
 	nowMs := time.Now().UnixMilli()
+	nodeID := msg.ModuleID
+	deviceID := msg.DeviceID
+
+	if msg.Datatype == "udt" {
+		h.handleUdtMessage(&msg, nodeID, deviceID, nowMs)
+		return
+	}
+
+	// Atomic variable — single record.
+	key := fmt.Sprintf("%s:%s:%s:%s", h.groupID, nodeID, deviceID, msg.VariableID)
+	state := h.rbeStates.get(key)
 
 	if !rbe.ShouldPublish(state, msg.Value, nowMs, deadbandForMessage(&msg), msg.DisableRBE) {
 		return
 	}
 
-	// Build the record.
-	rec := buildRecord(msg.ModuleID, msg.VariableID, msg.Value, msg.Datatype, nowMs)
-
-	// Record the publish in RBE state.
+	rec := buildRecord(h.groupID, nodeID, deviceID, msg.VariableID, msg.Value, msg.Datatype, nowMs)
 	rbe.RecordPublish(state, msg.Value, nowMs)
 
-	// Add to batch; flush immediately if threshold reached.
 	if h.batch.add(rec) {
 		h.flushBatch()
 	}
 }
 
+// handleUdtMessage flattens a UDT value into individual member records using
+// "/" as the path delimiter (e.g., "pump1/pressure"), matching mantle's format.
+func (h *History) handleUdtMessage(msg *types.PlcDataMessage, nodeID, deviceID string, nowMs int64) {
+	assembled, ok := msg.Value.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	for memberName, memberValue := range assembled {
+		metricID := msg.VariableID + "/" + memberName
+
+		// Per-member RBE check.
+		key := fmt.Sprintf("%s:%s:%s:%s", h.groupID, nodeID, deviceID, metricID)
+		state := h.rbeStates.get(key)
+
+		// Resolve per-member deadband if available.
+		var db *types.DeadBandConfig
+		if msg.MemberDeadbands != nil {
+			if mdb, ok := msg.MemberDeadbands[memberName]; ok {
+				db = &mdb
+			}
+		}
+		if db == nil {
+			db = msg.Deadband
+		}
+
+		if !rbe.ShouldPublish(state, memberValue, nowMs, db, msg.DisableRBE) {
+			continue
+		}
+
+		// Determine member datatype from template definition.
+		datatype := ""
+		if msg.UdtTemplate != nil {
+			for _, m := range msg.UdtTemplate.Members {
+				if m.Name == memberName {
+					datatype = m.Datatype
+					break
+				}
+			}
+		}
+		if datatype == "" {
+			datatype = inferDatatype(memberValue)
+		}
+
+		rec := buildRecord(h.groupID, nodeID, deviceID, metricID, memberValue, datatype, nowMs)
+		rbe.RecordPublish(state, memberValue, nowMs)
+
+		if h.batch.add(rec) {
+			h.flushBatch()
+		}
+	}
+}
+
+// inferDatatype guesses the datatype from a value when template metadata is unavailable.
+func inferDatatype(v interface{}) string {
+	switch v.(type) {
+	case bool:
+		return "boolean"
+	case string:
+		return "string"
+	case float64, float32, int, int64, int32, json.Number:
+		return "number"
+	default:
+		return "string"
+	}
+}
+
 // buildRecord creates a HistoryRecord from a value, populating the
 // appropriate typed column.
-func buildRecord(moduleID, variableID string, value interface{}, datatype string, timestamp int64) itypes.HistoryRecord {
+func buildRecord(groupID, nodeID, deviceID, metricID string, value interface{}, datatype string, timestamp int64) itypes.HistoryRecord {
 	rec := itypes.HistoryRecord{
-		ModuleID:   moduleID,
-		VariableID: variableID,
-		Timestamp:  timestamp,
+		GroupID:   groupID,
+		NodeID:    nodeID,
+		DeviceID:  deviceID,
+		MetricID:  metricID,
+		Timestamp: timestamp,
 	}
 
 	switch datatype {
@@ -98,7 +172,6 @@ func buildRecord(moduleID, variableID string, value interface{}, datatype string
 		rec.StringValue = &s
 	case "number":
 		if f, ok := rbe.ToFloat64(value); ok {
-			// If the value is an exact integer, store in int_value as well.
 			if isExactInt(f) {
 				i := int64(f)
 				rec.IntValue = &i
@@ -106,12 +179,10 @@ func buildRecord(moduleID, variableID string, value interface{}, datatype string
 			f32 := float64(f)
 			rec.FloatValue = &f32
 		} else {
-			// Fallback: store as string.
 			s := fmt.Sprintf("%v", value)
 			rec.StringValue = &s
 		}
 	default:
-		// Try numeric first, then boolean, then fall back to string.
 		if f, ok := rbe.ToFloat64(value); ok {
 			rec.FloatValue = &f
 		} else if b, ok := toBool(value); ok {

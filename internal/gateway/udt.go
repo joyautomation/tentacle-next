@@ -164,6 +164,9 @@ func (a *UdtAssembler) publish() {
 	if len(a.memberDeadbands) > 0 {
 		msg.MemberDeadbands = a.memberDeadbands
 	}
+	if a.config.HistoryEnabled {
+		msg.HistoryEnabled = true
+	}
 
 	data, err := json.Marshal(msg)
 	if err != nil {

@@ -12,8 +12,8 @@ import (
 	"github.com/joyautomation/tentacle/internal/topics"
 )
 
-// handleQueryHistory queries historical variable data.
-// GET /api/v1/history?start=&end=&variables=&interval=&samples=&raw=
+// handleQueryHistory queries historical metric data.
+// GET /api/v1/history?start=&end=&metrics=&interval=&samples=&raw=
 func (m *Module) handleQueryHistory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -39,14 +39,14 @@ func (m *Module) handleQueryHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	variablesStr := q.Get("variables")
-	if variablesStr == "" {
-		writeError(w, http.StatusBadRequest, "variables parameter is required")
+	metricsStr := q.Get("metrics")
+	if metricsStr == "" {
+		writeError(w, http.StatusBadRequest, "metrics parameter is required")
 		return
 	}
-	var variables []itypes.HistoryVariableRef
-	if err := json.Unmarshal([]byte(variablesStr), &variables); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid variables parameter: "+err.Error())
+	var metrics []itypes.HistoryMetricRef
+	if err := json.Unmarshal([]byte(metricsStr), &metrics); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid metrics parameter: "+err.Error())
 		return
 	}
 
@@ -54,7 +54,7 @@ func (m *Module) handleQueryHistory(w http.ResponseWriter, r *http.Request) {
 		RequestID: newRequestID(),
 		Start:     start,
 		End:       end,
-		Variables: variables,
+		Metrics:   metrics,
 		Interval:  q.Get("interval"),
 		Timestamp: time.Now().UnixMilli(),
 	}
