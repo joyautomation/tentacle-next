@@ -44,7 +44,7 @@ func (m *Module) handleListVariables(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(idx int, moduleID string) {
 			defer wg.Done()
-			resp, err := m.bus.Request(topics.Variables(moduleID), nil, 3*time.Second)
+			resp, err := m.bus.Request(topics.Variables(moduleID), nil, 500*time.Millisecond)
 			if err != nil {
 				return
 			}
