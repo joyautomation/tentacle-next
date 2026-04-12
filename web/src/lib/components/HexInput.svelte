@@ -37,3 +37,17 @@
 </script>
 
 <input type="text" bind:value={text} {placeholder} onblur={handleBlur} />
+
+<style>
+  input {
+    padding: 0.5rem;
+    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    background: var(--theme-bg);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    color: var(--theme-text);
+    width: 100%;
+    box-sizing: border-box;
+  }
+</style>
