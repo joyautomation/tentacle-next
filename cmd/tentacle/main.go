@@ -28,6 +28,8 @@ import (
 	"github.com/joyautomation/tentacle/internal/opcua"
 	"github.com/joyautomation/tentacle/internal/orchestrator"
 	"github.com/joyautomation/tentacle/internal/plc"
+	"github.com/joyautomation/tentacle/internal/profinet"
+	"github.com/joyautomation/tentacle/internal/profinetcontroller"
 	"github.com/joyautomation/tentacle/internal/snmp"
 	"github.com/joyautomation/tentacle/internal/topics"
 )
@@ -86,8 +88,10 @@ func runMonolith(ctx context.Context) {
 		"history":           func(id string) module.Module { return history.New(id) },
 		"network":           func(id string) module.Module { return network.New(id) },
 		"nftables":          func(id string) module.Module { return nftables.New(id) },
-		"gitops":            func(id string) module.Module { return gitops.New(id) },
-		"plc":               func(id string) module.Module { return plc.New(id) },
+		"gitops":             func(id string) module.Module { return gitops.New(id) },
+		"plc":                func(id string) module.Module { return plc.New(id) },
+		"profinet":           func(id string) module.Module { return profinet.New(id) },
+		"profinetcontroller": func(id string) module.Module { return profinetcontroller.New(id) },
 	}
 
 	// Core modules: always running.
@@ -179,6 +183,10 @@ func moduleByName(name string) module.Module {
 		return gitops.New("gitops")
 	case "plc":
 		return plc.New("plc")
+	case "profinet":
+		return profinet.New("profinet")
+	case "profinetcontroller":
+		return profinetcontroller.New("profinetcontroller")
 	case "api":
 		return api.New("api")
 	default:

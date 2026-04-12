@@ -34,11 +34,23 @@ jobs:
         run: |
           cd web && npm install && npm run build
 
-      - name: Vet
+      - name: Vet (monolith)
         run: GOFLAGS="-tags=all" go vet ./...
 
-      - name: Test
+      - name: Vet (profinet)
+        run: GOFLAGS="-tags=profinet" go vet ./internal/profinet/... ./cmd/tentacle-profinet/...
+
+      - name: Vet (profinetcontroller)
+        run: GOFLAGS="-tags=profinetcontroller" go vet ./internal/profinetcontroller/... ./cmd/tentacle-profinet-controller/...
+
+      - name: Test (monolith)
         run: GOFLAGS="-tags=all" go test ./...
+
+      - name: Test (profinet)
+        run: go test -tags profinet ./internal/profinet/...
+
+      - name: Test (profinetcontroller)
+        run: go test -tags profinetcontroller ./internal/profinetcontroller/...
 
       - name: Build (monolith)
         run: go build -tags all,web -o /dev/null ./cmd/tentacle
@@ -59,3 +71,5 @@ jobs:
           go build -tags network -o /dev/null ./cmd/tentacle-network
           go build -tags nftables -o /dev/null ./cmd/tentacle-nftables
           go build -tags web,api -o /dev/null ./cmd/tentacle-web
+          go build -tags profinet -o /dev/null ./cmd/tentacle-profinet
+          go build -tags profinetcontroller -o /dev/null ./cmd/tentacle-profinet-controller

@@ -77,6 +77,14 @@ const (
 	HistoryEnabled = "history.enabled"
 )
 
+// PROFINET IO Device.
+const (
+	ProfinetConfigure = "profinet.configure"
+	ProfinetVariables = "profinet.variables"
+	ProfinetStatus    = "profinet.status"
+	ProfinetGsdml     = "profinet.gsdml"
+)
+
 // Network data subjects.
 func NetworkData(interfaceName string) string { return "network.data." + interfaceName }
 
