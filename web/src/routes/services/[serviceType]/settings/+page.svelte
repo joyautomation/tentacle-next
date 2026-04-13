@@ -53,9 +53,12 @@
     return groups;
   });
 
-  // Determine if a field is visible
+  // Determine if a field is visible (supports negated dependsOn with "!" prefix)
   function isFieldVisible(field: FieldDef): boolean {
     if (field.dependsOn) {
+      if (field.dependsOn.startsWith('!')) {
+        return formValues[field.dependsOn.slice(1)] !== 'true';
+      }
       return formValues[field.dependsOn] === 'true';
     }
     return true;
@@ -141,6 +144,13 @@
                         <span class="toggle-knob"></span>
                       </button>
                     </div>
+                  {:else if field.type === 'textarea'}
+                    <label class="field-label">{field.label}</label>
+                    <textarea
+                      rows="16"
+                      value={formValues[field.envVar]}
+                      oninput={(e) => { formValues[field.envVar] = (e.target as HTMLTextAreaElement).value; }}
+                    ></textarea>
                   {:else if field.toggleable}
                     <div class="toggle-row">
                       <span class="field-label">{field.toggleLabel ?? field.label}</span>
@@ -218,6 +228,7 @@
     margin-bottom: 0.25rem;
   }
 
+  textarea,
   input[type='text'],
   input[type='password'] {
     width: 100%;
@@ -234,6 +245,11 @@
     &:focus {
       border-color: var(--theme-primary);
     }
+  }
+
+  textarea {
+    resize: vertical;
+    line-height: 1.5;
   }
 
   .toggle-row {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GlobeAlt, ArrowPath } from '@joyautomation/salt/icons';
+  import { GlobeAlt, ArrowPath, ShieldCheck } from '@joyautomation/salt/icons';
   import type { Component } from 'svelte';
 
   interface AddOn {
@@ -18,6 +18,7 @@
   let { available, selected, onchange }: Props = $props();
 
   const ALL_ADDONS: AddOn[] = [
+    { id: 'caddy', name: 'Caddy', desc: 'HTTPS reverse proxy with automatic TLS', icon: ShieldCheck },
     { id: 'network', name: 'Network', desc: 'Manage network interfaces and IP addressing', icon: GlobeAlt },
     { id: 'gitops', name: 'GitOps', desc: 'Git-based configuration management and sync', icon: ArrowPath },
   ];

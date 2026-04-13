@@ -11,7 +11,7 @@ export interface FieldDef {
   envVar: string;
   default?: string;
   required?: boolean;
-  type: string; // "string" | "number" | "boolean" | "password"
+  type: string; // "string" | "number" | "boolean" | "password" | "textarea"
   label: string;
   group: string;
   groupOrder: number;
