@@ -59,7 +59,7 @@
           {#if isExperimental}
             <span class="exp-badge">Experimental</span>
           {:else if isUnavailable}
-            <span class="exp-badge">Not Available</span>
+            <span class="exp-badge">Future</span>
           {/if}
         </span>
         <span class="card-desc">{proto.desc}</span>
