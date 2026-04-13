@@ -54,14 +54,18 @@ Modules are split into **stable** and **experimental** categories using Go build
 **Experimental** — included only in dev builds (`-tags all`):
 - History, NFTables, OPC UA, Modbus, PLC, PROFINET IO Device, PROFINET IO Controller, EtherNet/IP Server, Modbus Server
 
-The release monolith (`tentacle`) includes only stable modules. To build with everything:
+Release builds include two monolith binaries:
+- **`tentacle`** — stable modules only
+- **`tentacle-experimental`** — stable + all experimental modules
+
+To build locally:
 
 ```bash
 make build          # Dev: all modules (stable + experimental)
 make build-release  # Release: stable modules only
 ```
 
-Experimental modules are marked with a badge in the web UI.
+Experimental modules are marked with a badge in the web UI. On stable builds, they appear as "Future" and are disabled.
 
 ## Installation
 
@@ -96,13 +100,24 @@ The web UI is available at `http://localhost:4000` by default.
 
 ### Install as a systemd service
 
+**From the web UI:** Run tentacle, open the dashboard, and click "Install as Service" in the banner. Click "Activate" to switch to service mode.
+
+**From the CLI:**
+
+```bash
+sudo tentacle service install
+sudo systemctl start tentacle
+```
+
+**Manually:**
+
 ```bash
 sudo cp tentacle /usr/local/bin/
-
 sudo tee /etc/systemd/system/tentacle.service > /dev/null << 'EOF'
 [Unit]
 Description=Tentacle IoT Gateway
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -125,6 +140,7 @@ Tentacle uses environment variables for configuration, with NATS KV as persisten
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_PORT` | `4000` | REST API and web UI port |
+| `TENTACLE_DATA_DIR` | `/var/lib/tentacle` or `~/.local/share/tentacle` | Data directory (auto-detected based on permissions) |
 | `NATS_URL` | embedded | External NATS server URL (optional) |
 
 Configuration can also be managed through:
@@ -135,11 +151,12 @@ Configuration can also be managed through:
 
 ## Binaries
 
-The monorepo produces 19 binaries for different deployment scenarios:
+The monorepo produces 20 binaries for different deployment scenarios:
 
 | Binary | Description |
 |--------|-------------|
 | `tentacle` | Stable modules (release monolith) |
+| `tentacle-experimental` | All modules including experimental (release monolith) |
 | `tentactl` | CLI for kubectl-like config management |
 | `tentacle-core` | Gateway + API + Web UI |
 | `tentacle-web` | API + Web UI only |
