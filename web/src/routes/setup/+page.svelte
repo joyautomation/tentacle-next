@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import type { MqttConfig } from '$lib/components/setup/MqttConfigForm.svelte';
+  import type { GitOpsConfig } from '$lib/components/setup/GitOpsConfigForm.svelte';
   import WizardStepper from '$lib/components/setup/WizardStepper.svelte';
   import ArchitectureCard from '$lib/components/setup/ArchitectureCard.svelte';
   import SparkplugDiagram from '$lib/components/setup/SparkplugDiagram.svelte';
@@ -8,22 +9,24 @@
   import ProtocolSelector from '$lib/components/setup/ProtocolSelector.svelte';
   import MqttConfigForm from '$lib/components/setup/MqttConfigForm.svelte';
   import AddOnSelector from '$lib/components/setup/AddOnSelector.svelte';
+  import GitOpsConfigForm from '$lib/components/setup/GitOpsConfigForm.svelte';
   import ReviewPanel from '$lib/components/setup/ReviewPanel.svelte';
 
   let { data }: { data: PageData } = $props();
 
   // Step IDs used by archetypes
-  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'review';
+  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'review';
 
   const STEP_LABELS: Record<StepId, string> = {
     'architecture': 'Architecture',
     'protocols': 'Protocols',
     'mqtt-config': 'MQTT Config',
     'add-ons': 'Add-ons',
+    'gitops-config': 'GitOps',
     'review': 'Review',
   };
 
-  // Each archetype defines which steps it needs (architecture + review are always first/last)
+  // Base steps per archetype (gitops-config is inserted dynamically when gitops add-on is selected)
   const ARCHETYPE_STEPS: Record<string, StepId[]> = {
     'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'add-ons', 'review'],
     'nat-gateway': ['architecture', 'add-ons', 'review'],
@@ -86,11 +89,24 @@
   let selectedProtocols = $state<Set<string>>(initProtocols());
   let selectedAddOns = $state<Set<string>>(initAddOns());
   let mqttConfig = $state<MqttConfig>(initMqttConfig());
+  let gitopsConfig = $state<GitOpsConfig>({
+    repoUrl: '',
+    branch: 'main',
+    configPath: 'config',
+    pollInterval: '60',
+    autoPush: true,
+    autoPull: true,
+  });
 
-  // Dynamic steps based on selected archetype
-  const activeSteps = $derived<StepId[]>(
-    selectedArchetype ? ARCHETYPE_STEPS[selectedArchetype] : ['architecture']
-  );
+  // Dynamic steps based on selected archetype + add-on selection
+  const activeSteps = $derived.by<StepId[]>(() => {
+    const base: StepId[] = selectedArchetype ? ARCHETYPE_STEPS[selectedArchetype] : ['architecture'];
+    if (!selectedAddOns.has('gitops')) return base;
+    // Insert gitops-config before review
+    const reviewIdx = base.indexOf('review');
+    if (reviewIdx === -1) return base;
+    return [...base.slice(0, reviewIdx), 'gitops-config' as StepId, ...base.slice(reviewIdx)];
+  });
   const stepLabels = $derived(activeSteps.map(id => STEP_LABELS[id]));
   const currentStepId = $derived<StepId>(activeSteps[currentStep] ?? 'architecture');
   const isLastStep = $derived(currentStep === activeSteps.length - 1);
@@ -104,6 +120,7 @@
                      mqttConfig.MQTT_GROUP_ID.trim() !== '' &&
                      mqttConfig.MQTT_EDGE_NODE.trim() !== '';
       case 'add-ons': return true;
+      case 'gitops-config': return gitopsConfig.repoUrl.trim() !== '';
       case 'review': return true;
       default: return false;
     }
@@ -212,12 +229,23 @@
         onchange={(s) => { selectedAddOns = s; }}
       />
 
+    {:else if currentStepId === 'gitops-config'}
+      <div class="step-intro">
+        <h2>Configure GitOps</h2>
+        <p>Set up git-based configuration management for your device.</p>
+      </div>
+      <GitOpsConfigForm
+        config={gitopsConfig}
+        onchange={(c) => { gitopsConfig = c; }}
+      />
+
     {:else if currentStepId === 'review'}
       <ReviewPanel
         archetype={selectedArchetype ?? 'sparkplug-gateway'}
         {selectedProtocols}
         {selectedAddOns}
         {mqttConfig}
+        {gitopsConfig}
       />
     {/if}
   </div>

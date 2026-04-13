@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { MqttConfig } from './MqttConfigForm.svelte';
+  import type { GitOpsConfig } from './GitOpsConfigForm.svelte';
   import { goto } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { apiPut, api } from '$lib/api/client';
@@ -15,9 +16,10 @@
     selectedProtocols: Set<string>;
     selectedAddOns: Set<string>;
     mqttConfig: MqttConfig;
+    gitopsConfig?: GitOpsConfig;
   }
 
-  let { archetype, selectedProtocols, selectedAddOns, mqttConfig }: Props = $props();
+  let { archetype, selectedProtocols, selectedAddOns, mqttConfig, gitopsConfig }: Props = $props();
 
   const ARCHETYPE_NAMES: Record<string, string> = {
     'sparkplug-gateway': 'Sparkplug Gateway',
@@ -38,6 +40,29 @@
 
   function updateStep(index: number, status: StepStatus, error?: string) {
     steps[index] = { ...steps[index], status, error };
+  }
+
+  async function saveGitOpsConfig(): Promise<boolean> {
+    if (!selectedAddOns.has('gitops') || !gitopsConfig) return true;
+    const idx = steps.length;
+    steps.push({ label: 'Writing GitOps configuration', status: 'running' });
+    const configs: [string, string][] = [
+      ['GITOPS_REPO_URL', gitopsConfig.repoUrl],
+      ['GITOPS_BRANCH', gitopsConfig.branch],
+      ['GITOPS_PATH', gitopsConfig.configPath],
+      ['GITOPS_POLL_INTERVAL_S', gitopsConfig.pollInterval],
+      ['GITOPS_AUTO_PUSH', String(gitopsConfig.autoPush)],
+      ['GITOPS_AUTO_PULL', String(gitopsConfig.autoPull)],
+    ];
+    for (const [envVar, value] of configs) {
+      const result = await apiPut(`/config/gitops/${envVar}`, { value });
+      if (result.error) {
+        updateStep(idx, 'error', `Failed to set ${envVar}: ${result.error.error}`);
+        return false;
+      }
+    }
+    updateStep(idx, 'done');
+    return true;
   }
 
   async function enableModule(moduleId: string, label: string): Promise<boolean> {
@@ -122,6 +147,9 @@
     if (!await enableModule('gateway', 'Enabling Gateway')) return false;
     if (!await enableModule('mqtt', 'Enabling MQTT bridge')) return false;
 
+    // Write GitOps config before enabling the module
+    if (!await saveGitOpsConfig()) return false;
+
     // Enable add-ons
     for (const addon of selectedAddOns) {
       if (!await enableModule(addon, `Enabling ${ADDON_NAMES[addon] ?? addon}`)) return false;
@@ -135,6 +163,9 @@
   async function applyNatGateway() {
     if (!await enableModule('network', 'Enabling Network Manager')) return false;
     if (!await enableModule('nftables', 'Enabling Firewall (nftables)')) return false;
+
+    // Write GitOps config before enabling the module
+    if (!await saveGitOpsConfig()) return false;
 
     // Enable add-ons
     for (const addon of selectedAddOns) {
@@ -166,17 +197,8 @@
     applying = false;
   }
 
-  async function goToNextStep() {
+  function goToNextStep() {
     sessionStorage.setItem('setup_dismissed', 'true');
-    if (selectedAddOns.has('gitops')) {
-      // Only redirect to GitOps setup if it still needs initial configuration
-      const statusResult = await api<Array<{ moduleId: string; reconcileState: string }>>('/orchestrator/service-statuses');
-      const gitopsStatus = statusResult.data?.find(s => s.moduleId === 'gitops');
-      if (gitopsStatus?.reconcileState === 'needs_config') {
-        goto('/modules/gitops');
-        return;
-      }
-    }
     goto('/');
   }
 </script>
@@ -235,6 +257,17 @@
               <span class="badge">{ADDON_NAMES[addon] ?? addon}</span>
             {/each}
           </span>
+        </div>
+      {/if}
+
+      {#if selectedAddOns.has('gitops') && gitopsConfig?.repoUrl}
+        <div class="summary-row">
+          <span class="summary-label">GitOps Repo</span>
+          <span class="summary-value mono">{gitopsConfig.repoUrl}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">GitOps Branch</span>
+          <span class="summary-value mono">{gitopsConfig.branch}</span>
         </div>
       {/if}
     </section>
