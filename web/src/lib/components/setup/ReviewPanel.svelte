@@ -77,7 +77,7 @@
       const statuses = statusResult.data ?? [];
       const allActive = [...moduleIds].every(modId => {
         const s = statuses.find(st => st.moduleId === modId);
-        return s && s.systemdState === 'active' && s.reconcileState === 'ok';
+        return s && s.systemdState === 'active' && (s.reconcileState === 'ok' || s.reconcileState === 'needs_config');
       });
 
       if (allActive) {
@@ -166,13 +166,18 @@
     applying = false;
   }
 
-  function goToNextStep() {
+  async function goToNextStep() {
     sessionStorage.setItem('setup_dismissed', 'true');
     if (selectedAddOns.has('gitops')) {
-      goto('/modules/gitops');
-    } else {
-      goto('/');
+      // Only redirect to GitOps setup if it still needs initial configuration
+      const statusResult = await api<Array<{ moduleId: string; reconcileState: string }>>('/orchestrator/service-statuses');
+      const gitopsStatus = statusResult.data?.find(s => s.moduleId === 'gitops');
+      if (gitopsStatus?.reconcileState === 'needs_config') {
+        goto('/modules/gitops');
+        return;
+      }
     }
+    goto('/');
   }
 </script>
 
@@ -274,7 +279,7 @@
 
     {#if done}
       <button class="apply-btn" onclick={goToNextStep}>
-        {selectedAddOns.has('gitops') ? 'Configure GitOps' : 'Go to Topology'}
+        Continue
       </button>
     {/if}
 
