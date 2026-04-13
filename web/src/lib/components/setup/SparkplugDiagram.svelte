@@ -36,6 +36,7 @@
       { id: 'opcua', label: 'OPC UA', abbr: 'OPC', color: 'var(--color-teal-500, #14b8a6)' },
       { id: 'modbus', label: 'Modbus', abbr: 'MOD', color: 'var(--color-teal-500, #14b8a6)' },
       { id: 'snmp', label: 'SNMP', abbr: 'SNMP', color: 'var(--color-teal-500, #14b8a6)' },
+      { id: 'profinetcontroller', label: 'PROFINET', abbr: 'PN', color: 'var(--color-teal-500, #14b8a6)' },
     ];
 
     const nodes: DiagramNode[] = [];
@@ -67,13 +68,14 @@
       });
     });
 
-    // Gateway (layer 2)
+    // Gateway (layer 2) — centered vertically among protocol rows
+    const midRow = (protocols.length - 1) / 2;
     nodes.push({
       id: 'gateway',
       label: 'Gateway',
       abbr: 'GW',
       layer: 2,
-      row: 1.5,
+      row: midRow,
       color: 'var(--color-purple-500, #a855f7)',
     });
 
@@ -83,7 +85,7 @@
       label: 'MQTT Bridge',
       abbr: 'MQTT',
       layer: 3,
-      row: 1.5,
+      row: midRow,
       color: 'var(--color-teal-500, #14b8a6)',
     });
 
@@ -93,7 +95,7 @@
       label: 'MQTT Broker',
       abbr: 'BRK',
       layer: 4,
-      row: 1.5,
+      row: midRow,
       color: 'var(--color-sky-500, #0ea5e9)',
     });
 
@@ -147,7 +149,7 @@
     const padX = compact ? 40 : 60;
     const padY = compact ? 30 : 40;
     const layerCount = 5;
-    const maxRows = 4;
+    const maxRows = 5;
     const layerSpacing = (width - padX * 2) / (layerCount - 1);
     const rowSpacing = (height - padY * 2) / (maxRows - 1);
 

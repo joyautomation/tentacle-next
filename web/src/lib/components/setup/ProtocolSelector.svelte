@@ -3,11 +3,14 @@
 
   interface Props {
     selected: Set<string>;
+    /** Modules in registry but flagged experimental — selectable with badge */
     experimental?: Set<string>;
+    /** Modules not in registry at all (stable build) — disabled */
+    unavailable?: Set<string>;
     onchange: (selected: Set<string>) => void;
   }
 
-  let { selected, experimental = new Set(), onchange }: Props = $props();
+  let { selected, experimental = new Set(), unavailable = new Set(), onchange }: Props = $props();
 
   const protocols = [
     { id: 'ethernetip', name: 'EtherNet/IP', desc: 'Allen-Bradley, Rockwell PLCs', icon: CpuChip },
@@ -18,7 +21,7 @@
   ];
 
   function toggle(id: string) {
-    if (experimental.has(id)) return;
+    if (unavailable.has(id)) return;
     const next = new Set(selected);
     if (next.has(id)) {
       next.delete(id);
@@ -32,12 +35,13 @@
 <div class="protocol-grid">
   {#each protocols as proto}
     {@const isExperimental = experimental.has(proto.id)}
+    {@const isUnavailable = unavailable.has(proto.id)}
     <button
       class="protocol-card"
       class:selected={selected.has(proto.id)}
-      class:experimental={isExperimental}
+      class:unavailable={isUnavailable}
       onclick={() => toggle(proto.id)}
-      disabled={isExperimental}
+      disabled={isUnavailable}
     >
       <div class="card-check">
         {#if selected.has(proto.id)}
@@ -54,6 +58,8 @@
           {proto.name}
           {#if isExperimental}
             <span class="exp-badge">Experimental</span>
+          {:else if isUnavailable}
+            <span class="exp-badge">Not Available</span>
           {/if}
         </span>
         <span class="card-desc">{proto.desc}</span>
@@ -91,7 +97,7 @@
       box-shadow: 0 0 0 1px var(--theme-primary);
     }
 
-    &.experimental {
+    &.unavailable {
       opacity: 0.5;
       cursor: not-allowed;
       border-style: dashed;

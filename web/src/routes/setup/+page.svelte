@@ -14,12 +14,12 @@
 
   let { data }: { data: PageData } = $props();
 
-  // Unavailable modules: experimental OR not present in this build
+  // Modules present in the registry but flagged experimental (dev build) — selectable with badge
   const allModuleIds = $derived(new Set((data.modules ?? []).map(m => m.moduleId)));
-  const experimentalIds = $derived(new Set((data.modules ?? []).filter(m => m.experimental).map(m => m.moduleId)));
+  const experimentalModules = $derived(new Set((data.modules ?? []).filter(m => m.experimental).map(m => m.moduleId)));
+  // Modules NOT in the registry at all (stable build excluded them) — disabled
   const unavailableModules = $derived.by(() => {
-    const result = new Set(experimentalIds);
-    // Protocols not in the module registry at all (not compiled into this build)
+    const result = new Set<string>();
     for (const id of SCANNER_MODULE_IDS) {
       if (!allModuleIds.has(id)) result.add(id);
     }
@@ -237,7 +237,8 @@
       </div>
       <ProtocolSelector
         selected={selectedProtocols}
-        experimental={unavailableModules}
+        experimental={experimentalModules}
+        unavailable={unavailableModules}
         onchange={(s) => { selectedProtocols = s; }}
       />
       <div class="diagram-preview">
