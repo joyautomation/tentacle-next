@@ -328,19 +328,37 @@ func (m *ARManager) HandleRead(blocks []PNIOBlock, objectUUID [16]byte) ([]byte,
 		// Build response header from request fields
 		resHeader := m.buildReadResHeader(b.Data)
 
+		var recordData []byte
+
 		switch {
 		case index == 0xAFF0: // I&M 0
-			im0 := m.buildIM0()
-			// Set RecordDataLength in response header to actual data length
-			binary.BigEndian.PutUint32(resHeader[30:34], uint32(len(im0)))
-			respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, resHeader)...)
-			respBuf = append(respBuf, im0...)
+			recordData = m.buildIM0()
+
+		case index == 0xF000: // RealIdentificationData for one API
+			recordData = m.buildRealIdentificationData()
+
+		case index == 0xF840: // I&M0FilterData
+			recordData = m.buildIM0FilterData()
+
+		case index == 0xF841: // PDRealData
+			// Minimal empty response — no port/LLDP data yet
+			recordData = nil
+
+		case index == 0xF821: // APIData
+			recordData = m.buildAPIData()
+
+		case index == 0xF820: // ARData — empty when no AR active is correct
+			recordData = nil
 
 		default:
 			m.log.Debug("ar: read index not implemented, returning empty", "index", fmt.Sprintf("0x%04X", index))
-			// Return success with RecordDataLength = 0 (no record data)
-			binary.BigEndian.PutUint32(resHeader[30:34], 0)
-			respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, resHeader)...)
+			recordData = nil
+		}
+
+		binary.BigEndian.PutUint32(resHeader[30:34], uint32(len(recordData)))
+		respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, resHeader)...)
+		if len(recordData) > 0 {
+			respBuf = append(respBuf, recordData...)
 		}
 	}
 
@@ -497,6 +515,145 @@ func (m *ARManager) buildIM0() []byte {
 	copy(im0.OrderID[:], []byte(m.cfg.DeviceName))
 	copy(im0.IMSerialNumber[:], []byte("0001"))
 	return MarshalIM0Block(im0)
+}
+
+// buildRealIdentificationData builds index 0xF000 response.
+// RealIdentificationData lists all plugged modules and submodules.
+// Format: NumberOfAPIs(2) then per API: API(4) + NumberOfSlots(2) then per slot:
+// SlotNumber(2) + ModuleIdentNumber(4) + NumberOfSubslots(2) then per subslot:
+// SubslotNumber(2) + SubmoduleIdentNumber(4)
+func (m *ARManager) buildRealIdentificationData() []byte {
+	var buf []byte
+
+	// DAP module ident number (must match GSDML)
+	const dapModuleIdent uint32 = 0x00010000
+	const dapSubmoduleIdent uint32 = 0x00000001
+	const interfaceSubmoduleIdent uint32 = 0x00008000
+	const portSubmoduleIdent uint32 = 0x00008001
+
+	// Count total slots: slot 0 (DAP) + user slots
+	totalSlots := 1 + len(m.cfg.Slots)
+
+	// API 0
+	apiData := make([]byte, 6)
+	binary.BigEndian.PutUint32(apiData[0:4], 0) // API = 0
+	binary.BigEndian.PutUint16(apiData[4:6], uint16(totalSlots))
+
+	// Slot 0: DAP with 3 subslots (DAP identity, Interface, Port 1)
+	slot0 := make([]byte, 8)
+	binary.BigEndian.PutUint16(slot0[0:2], 0) // SlotNumber = 0
+	binary.BigEndian.PutUint32(slot0[2:6], dapModuleIdent)
+	binary.BigEndian.PutUint16(slot0[6:8], 3) // 3 subslots
+
+	// DAP subslot 1 (identity)
+	sub0_1 := make([]byte, 6)
+	binary.BigEndian.PutUint16(sub0_1[0:2], 1)
+	binary.BigEndian.PutUint32(sub0_1[2:6], dapSubmoduleIdent)
+
+	// DAP subslot 0x8000 (Interface)
+	sub0_if := make([]byte, 6)
+	binary.BigEndian.PutUint16(sub0_if[0:2], 0x8000)
+	binary.BigEndian.PutUint32(sub0_if[2:6], interfaceSubmoduleIdent)
+
+	// DAP subslot 0x8001 (Port 1)
+	sub0_p1 := make([]byte, 6)
+	binary.BigEndian.PutUint16(sub0_p1[0:2], 0x8001)
+	binary.BigEndian.PutUint32(sub0_p1[2:6], portSubmoduleIdent)
+
+	apiData = append(apiData, slot0...)
+	apiData = append(apiData, sub0_1...)
+	apiData = append(apiData, sub0_if...)
+	apiData = append(apiData, sub0_p1...)
+
+	// User slots
+	for _, slot := range m.cfg.Slots {
+		slotBuf := make([]byte, 8)
+		binary.BigEndian.PutUint16(slotBuf[0:2], slot.SlotNumber)
+		binary.BigEndian.PutUint32(slotBuf[2:6], slot.ModuleIdentNo)
+		binary.BigEndian.PutUint16(slotBuf[6:8], uint16(len(slot.Subslots)))
+		apiData = append(apiData, slotBuf...)
+
+		for _, sub := range slot.Subslots {
+			subBuf := make([]byte, 6)
+			binary.BigEndian.PutUint16(subBuf[0:2], sub.SubslotNumber)
+			binary.BigEndian.PutUint32(subBuf[2:6], sub.SubmoduleIdentNo)
+			apiData = append(apiData, subBuf...)
+		}
+	}
+
+	// Wrap: NumberOfAPIs(2) + API data
+	header := make([]byte, 2)
+	binary.BigEndian.PutUint16(header[0:2], 1) // 1 API
+	buf = append(buf, MarshalPNIOBlock(BlockTypeRealIdentData, 1, 0, append(header, apiData...))...)
+	return buf
+}
+
+// buildIM0FilterData builds index 0xF840 response.
+// Returns three concatenated blocks: I&M0FilterDataSubmodule (0x0030),
+// I&M0FilterDataModule (0x0031), I&M0FilterDataDevice (0x0032).
+// Each block lists: NumberOfAPIs(2) + per API: API(4) + NumberOfSlots(2) +
+// per slot: SlotNumber(2) + NumberOfSubslots(2) + per subslot: SubslotNumber(2)
+func (m *ARManager) buildIM0FilterData() []byte {
+	// Helper to build one filter block's API payload listing slot 0, subslot 1
+	buildFilterPayload := func() []byte {
+		var p []byte
+		// NumberOfAPIs
+		p = binary.BigEndian.AppendUint16(p, 1)
+		// API 0
+		p = binary.BigEndian.AppendUint32(p, 0)
+		// NumberOfSlots = 1 (just DAP)
+		p = binary.BigEndian.AppendUint16(p, 1)
+		// Slot 0, NumberOfSubslots = 1
+		p = binary.BigEndian.AppendUint16(p, 0)
+		p = binary.BigEndian.AppendUint16(p, 1)
+		// Subslot 1
+		p = binary.BigEndian.AppendUint16(p, 1)
+		return p
+	}
+
+	var buf []byte
+	// Submodule level: DAP subslot 1 supports I&M0
+	buf = append(buf, MarshalPNIOBlock(BlockTypeIM0FilterDataSubmodule, 1, 0, buildFilterPayload())...)
+	// Module level: DAP slot 0
+	buf = append(buf, MarshalPNIOBlock(BlockTypeIM0FilterDataModule, 1, 0, buildFilterPayload())...)
+	// Device level: same
+	buf = append(buf, MarshalPNIOBlock(BlockTypeIM0FilterDataDevice, 1, 0, buildFilterPayload())...)
+	return buf
+}
+
+// buildAPIData builds index 0xF821 response.
+// Format: NumberOfAPIs(2) then per API: API(4) + NumberOfSlots(2) then per slot:
+// SlotNumber(2) + NumberOfSubslots(2) then per subslot: SubslotNumber(2)
+func (m *ARManager) buildAPIData() []byte {
+	totalSlots := 1 + len(m.cfg.Slots) // DAP + user slots
+
+	var apiData []byte
+	// API 0
+	apiData = binary.BigEndian.AppendUint32(apiData, 0)
+	apiData = binary.BigEndian.AppendUint16(apiData, uint16(totalSlots))
+
+	// Slot 0 (DAP): subslots 1, 0x8000, 0x8001
+	apiData = binary.BigEndian.AppendUint16(apiData, 0)    // SlotNumber
+	apiData = binary.BigEndian.AppendUint16(apiData, 3)    // NumberOfSubslots
+	apiData = binary.BigEndian.AppendUint16(apiData, 1)    // subslot 1
+	apiData = binary.BigEndian.AppendUint16(apiData, 0x8000) // Interface
+	apiData = binary.BigEndian.AppendUint16(apiData, 0x8001) // Port 1
+
+	// User slots
+	for _, slot := range m.cfg.Slots {
+		apiData = binary.BigEndian.AppendUint16(apiData, slot.SlotNumber)
+		apiData = binary.BigEndian.AppendUint16(apiData, uint16(len(slot.Subslots)))
+		for _, sub := range slot.Subslots {
+			apiData = binary.BigEndian.AppendUint16(apiData, sub.SubslotNumber)
+		}
+	}
+
+	// Wrap: NumberOfAPIs(2) + apiData
+	var payload []byte
+	payload = binary.BigEndian.AppendUint16(payload, 1) // 1 API
+	payload = append(payload, apiData...)
+
+	return MarshalPNIOBlock(BlockTypeAPIData, 1, 0, payload)
 }
 
 // ActiveARCount returns the number of active ARs.

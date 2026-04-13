@@ -35,6 +35,11 @@ const (
 	BlockTypeARRPCBlockReq           uint16 = 0x0114 // IODControl with PrmEnd
 	BlockTypeIOXBlockReq             uint16 = 0x0001 // AlarmNotification high
 	BlockTypeIOXBlockReqLow          uint16 = 0x0002 // AlarmNotification low
+	BlockTypeRealIdentData           uint16 = 0x0013 // RealIdentificationData (index 0xF000)
+	BlockTypeAPIData                 uint16 = 0x001A // APIData (index 0xF821)
+	BlockTypeIM0FilterDataSubmodule  uint16 = 0x0030 // I&M0FilterDataSubmodule (index 0xF840)
+	BlockTypeIM0FilterDataModule     uint16 = 0x0031 // I&M0FilterDataModule (index 0xF840)
+	BlockTypeIM0FilterDataDevice     uint16 = 0x0032 // I&M0FilterDataDevice (index 0xF840)
 )
 
 // AR types.
