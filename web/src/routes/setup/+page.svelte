@@ -63,6 +63,36 @@
     return config;
   }
 
+  const GITOPS_FIELD_MAP: Record<string, keyof GitOpsConfig> = {
+    GITOPS_REPO_URL: 'repoUrl',
+    GITOPS_BRANCH: 'branch',
+    GITOPS_PATH: 'configPath',
+    GITOPS_POLL_INTERVAL_S: 'pollInterval',
+    GITOPS_AUTO_PUSH: 'autoPush',
+    GITOPS_AUTO_PULL: 'autoPull',
+  };
+
+  function initGitOpsConfig(): GitOpsConfig {
+    const config: GitOpsConfig = {
+      repoUrl: '',
+      branch: 'main',
+      configPath: 'config',
+      pollInterval: '60',
+      autoPush: true,
+      autoPull: true,
+    };
+    for (const entry of data.gitopsConfig ?? []) {
+      const field = GITOPS_FIELD_MAP[entry.envVar];
+      if (!field) continue;
+      if (field === 'autoPush' || field === 'autoPull') {
+        config[field] = entry.value === 'true';
+      } else {
+        config[field] = entry.value;
+      }
+    }
+    return config;
+  }
+
   const ADDON_MODULE_IDS = new Set(['network', 'gitops']);
 
   function initProtocols(): Set<string> {
@@ -89,14 +119,7 @@
   let selectedProtocols = $state<Set<string>>(initProtocols());
   let selectedAddOns = $state<Set<string>>(initAddOns());
   let mqttConfig = $state<MqttConfig>(initMqttConfig());
-  let gitopsConfig = $state<GitOpsConfig>({
-    repoUrl: '',
-    branch: 'main',
-    configPath: 'config',
-    pollInterval: '60',
-    autoPush: true,
-    autoPull: true,
-  });
+  let gitopsConfig = $state<GitOpsConfig>(initGitOpsConfig());
 
   // Dynamic steps based on selected archetype + add-on selection
   const activeSteps = $derived.by<StepId[]>(() => {

@@ -20,15 +20,17 @@ interface ConfigEntry {
 }
 
 export const load: PageLoad = async () => {
-  const [desiredResult, statusResult, mqttConfigResult] = await Promise.all([
+  const [desiredResult, statusResult, mqttConfigResult, gitopsConfigResult] = await Promise.all([
     api<DesiredService[]>('/orchestrator/desired-services'),
     api<ServiceStatus[]>('/orchestrator/service-statuses'),
     api<ConfigEntry[]>('/config/mqtt'),
+    api<ConfigEntry[]>('/config/gitops'),
   ]);
 
   return {
     desiredServices: desiredResult.data ?? [],
     serviceStatuses: statusResult.data ?? [],
     mqttConfig: mqttConfigResult.data ?? [],
+    gitopsConfig: gitopsConfigResult.data ?? [],
   };
 };
