@@ -329,6 +329,7 @@ func (m *ARManager) HandleRead(blocks []PNIOBlock, objectUUID [16]byte) ([]byte,
 		resHeader := m.buildReadResHeader(b.Data)
 
 		var recordData []byte
+		supported := true
 
 		switch {
 		case index == 0xAFF0: // I&M 0
@@ -351,8 +352,15 @@ func (m *ARManager) HandleRead(blocks []PNIOBlock, objectUUID [16]byte) ([]byte,
 			recordData = nil
 
 		default:
-			m.log.Debug("ar: read index not implemented, returning empty", "index", fmt.Sprintf("0x%04X", index))
-			recordData = nil
+			m.log.Debug("ar: unsupported read index", "index", fmt.Sprintf("0x%04X", index))
+			supported = false
+		}
+
+		if !supported {
+			// Return PNIO error for unsupported indices: Application/Read error, invalid index
+			binary.BigEndian.PutUint32(resHeader[30:34], 0)
+			respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, resHeader)...)
+			return respBuf, PNIOStatus{0xDE, 0x80, 0xA9, 0x00}
 		}
 
 		binary.BigEndian.PutUint32(resHeader[30:34], uint32(len(recordData)))
