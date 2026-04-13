@@ -4,13 +4,17 @@ A distributed industrial IoT gateway platform written in Go. Tentacle connects t
 
 ## Features
 
-- **Multi-protocol connectivity** — EtherNet/IP (CIP), Modbus TCP, OPC/UA, SNMP, MQTT/Sparkplug B
+- **Multi-protocol connectivity** — EtherNet/IP (CIP), Modbus TCP, OPC/UA, SNMP, PROFINET, MQTT/Sparkplug B
 - **Flexible deployment** — Run everything as a single binary or distribute protocol modules across machines
 - **Real-time streaming** — REST API with Server-Sent Events for live variable updates, logs, and status
 - **Embedded web UI** — SvelteKit SPA built into the binary — no separate web server needed
 - **Report by exception** — Deadband filtering reduces noise from high-frequency tag scans
 - **Historical storage** — Optional PostgreSQL time-series backend
 - **Service orchestration** — Manage and monitor protocol modules as supervised services
+- **GitOps config sync** — Bidirectional sync between system config and a git repository
+- **PLC engine** — Soft PLC with Starlark task runner and IEC 61131-3 support
+- **CLI management** — `tentactl` CLI for kubectl-like config management (apply, diff, export)
+- **Setup wizard** — Guided onboarding UI for initial configuration
 - **NATS backbone** — All modules communicate over embedded NATS with JetStream KV for configuration
 
 ## Architecture
@@ -31,12 +35,33 @@ Tentacle is built as a Go monorepo with pluggable modules controlled by build ta
 │  ├── EtherNet/IP    ├── Modbus             │     │
 │  ├── OPC/UA         ├── SNMP               │     │
 │  ├── MQTT/Sparkplug ├── Gateway            │     │
-│  ├── History        ├── Network            │     │
-│  └── nftables       └── ...                │     │
+│  ├── PROFINET       ├── Network            │     │
+│  ├── History        ├── GitOps             │     │
+│  ├── PLC            ├── nftables           │     │
+│  └── ...                                   │     │
 │                                            │     │
 │  └─────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────┘
 ```
+
+## Stable vs Experimental Modules
+
+Modules are split into **stable** and **experimental** categories using Go build tags.
+
+**Stable** — included in release builds:
+- Gateway, EtherNet/IP scanner, SNMP, MQTT/Sparkplug B, Network, GitOps
+
+**Experimental** — included only in dev builds (`-tags all`):
+- History, NFTables, OPC UA, Modbus, PLC, PROFINET IO Device, PROFINET IO Controller, EtherNet/IP Server, Modbus Server
+
+The release monolith (`tentacle`) includes only stable modules. To build with everything:
+
+```bash
+make build          # Dev: all modules (stable + experimental)
+make build-release  # Release: stable modules only
+```
+
+Experimental modules are marked with a badge in the web UI.
 
 ## Installation
 
@@ -45,8 +70,8 @@ Tentacle is built as a Go monorepo with pluggable modules controlled by build ta
 Download the latest binary from [GitHub Releases](https://github.com/joyautomation/tentacle-next/releases):
 
 ```bash
-# Replace VERSION with the desired release (e.g. 0.0.2)
-VERSION=0.0.2
+# Replace VERSION with the desired release (e.g. 0.0.3)
+VERSION=0.0.3
 
 # For amd64
 curl -LO "https://github.com/joyautomation/tentacle-next/releases/download/v${VERSION}/tentacle_${VERSION}_linux_amd64.tar.gz"
@@ -102,29 +127,37 @@ Tentacle uses environment variables for configuration, with NATS KV as persisten
 | `API_PORT` | `4000` | REST API and web UI port |
 | `NATS_URL` | embedded | External NATS server URL (optional) |
 
-Configuration can also be managed through the web UI or REST API at `/api/v1/config`.
+Configuration can also be managed through:
+- **Web UI** — Setup wizard and per-module settings pages
+- **REST API** — `/api/v1/config` and `/api/v1/apply`
+- **CLI** — `tentactl apply -f config.yaml`, `tentactl export`, `tentactl diff`
+- **GitOps** — Bidirectional sync with a git repository
 
 ## Binaries
 
-The monorepo produces 15 binaries for different deployment scenarios:
+The monorepo produces 19 binaries for different deployment scenarios:
 
 | Binary | Description |
 |--------|-------------|
-| `tentacle` | All modules (monolithic) |
+| `tentacle` | Stable modules (release monolith) |
+| `tentactl` | CLI for kubectl-like config management |
 | `tentacle-core` | Gateway + API + Web UI |
 | `tentacle-web` | API + Web UI only |
 | `tentacle-gateway` | Gateway routing module |
 | `tentacle-ethernetip` | EtherNet/IP (CIP) scanner |
-| `tentacle-ethernetip-server` | EtherNet/IP server |
-| `tentacle-modbus` | Modbus TCP client |
-| `tentacle-modbus-server` | Modbus TCP server |
-| `tentacle-opcua` | OPC/UA client |
+| `tentacle-ethernetip-server` | EtherNet/IP server (experimental) |
+| `tentacle-modbus` | Modbus TCP client (experimental) |
+| `tentacle-modbus-server` | Modbus TCP server (experimental) |
+| `tentacle-opcua` | OPC/UA client (experimental) |
 | `tentacle-snmp` | SNMP client |
 | `tentacle-sparkplug` | MQTT/Sparkplug B bridge |
 | `tentacle-orchestrator` | Service lifecycle manager |
-| `tentacle-history` | PostgreSQL time-series storage |
+| `tentacle-history` | PostgreSQL time-series storage (experimental) |
 | `tentacle-network` | Network interface management |
-| `tentacle-nftables` | Firewall rules management |
+| `tentacle-nftables` | Firewall rules management (experimental) |
+| `tentacle-profinet` | PROFINET IO Device (experimental) |
+| `tentacle-profinet-controller` | PROFINET IO Controller (experimental) |
+| `tentacle-plc` | Soft PLC engine (experimental) |
 
 For most deployments, just use `tentacle` (the monolith). Individual binaries are for distributed setups where protocol modules run on separate machines connected via NATS.
 
@@ -139,8 +172,14 @@ For most deployments, just use `tentacle` (the monolith). Individual binaries ar
 ### Build
 
 ```bash
-# Build the monolith (includes web UI)
+# Build the monolith with all modules (dev)
 make build
+
+# Build the monolith with stable modules only (release)
+make build-release
+
+# Build the tentactl CLI
+make build-cli
 
 # Build all standalone binaries
 make build-all
@@ -168,6 +207,8 @@ Key endpoints:
 - `PUT /gateways/{id}/variables` — Configure variables to scan
 - `POST /browse/{protocol}` — Discover devices and tags
 - `GET /services/{type}/logs/stream` — Stream service logs (SSE)
+- `POST /apply` — Apply YAML config (kubectl-style)
+- `GET /export` — Export full system config as YAML
 
 ## License
 
