@@ -105,19 +105,9 @@
       depth: 0
     });
 
-    // Web UI — always present (we're rendering it)
-    // Links to the API service if present, otherwise directly to the hub
+    // Identify key services for topology wiring
     const apiService = services.find(s => s.serviceType === 'api');
-    const webParent = apiService ? `api-${apiService.moduleId}` : 'nats';
-    nodes.push({
-      id: 'web',
-      name: 'Web UI',
-      type: 'web',
-      subtitle: 'This App',
-      connected: true,
-      enabled: true,
-      depth: apiService ? 2 : 1
-    });
+    const caddyService = services.find(s => s.serviceType === 'caddy');
 
     // Additional discovered services from heartbeats
     const knownStaticTypes = new Set<string>();
@@ -135,6 +125,11 @@
         const mqttDisconnected = service.serviceType === 'mqtt' &&
           serviceEnabled &&
           service.metadata?.connected === false;
+
+        // Caddy sits between API and Web UI — depth 2, linked to API not Bus
+        const isCaddy = service.serviceType === 'caddy';
+        const depth = isCaddy && apiService ? 2 : 1;
+
         nodes.push({
           id: nodeId,
           name,
@@ -142,9 +137,15 @@
           subtitle: !serviceEnabled ? 'Disabled' : mqttDisconnected ? 'Broker disconnected' : `Up ${formatUptime(service.startedAt)}`,
           connected: !mqttDisconnected,
           enabled: serviceEnabled,
-          depth: 1
+          depth,
         });
-        links.push({ source: 'nats', target: nodeId });
+
+        if (isCaddy && apiService) {
+          // Caddy links to API (reverse proxy relationship)
+          links.push({ source: `api-${apiService.moduleId}`, target: nodeId });
+        } else {
+          links.push({ source: 'nats', target: nodeId });
+        }
 
         // Add device nodes downstream of EtherNet/IP
         if (service.serviceType === 'ethernetip' && service.metadata?.devices) {
@@ -195,16 +196,23 @@
         }
       });
 
-    // Link Web UI to API (or hub if no API service found)
+    // Web UI — always present (we're rendering it)
+    // Chain: Bus → API → Caddy → Web UI (when caddy is running)
+    const caddyNode = caddyService ? nodes.find(n => n.type === 'caddy') : null;
+    const webParent = caddyNode ? caddyNode.id
+      : apiService ? `api-${apiService.moduleId}`
+      : 'nats';
+    const webDepth = caddyNode ? 3 : apiService ? 2 : 1;
+    nodes.push({
+      id: 'web',
+      name: 'Web UI',
+      type: 'web',
+      subtitle: 'This App',
+      connected: true,
+      enabled: true,
+      depth: webDepth
+    });
     links.push({ source: webParent, target: 'web' });
-
-    // Link Caddy → API to represent the reverse proxy relationship
-    if (apiService) {
-      const caddyNode = nodes.find(n => n.type === 'caddy');
-      if (caddyNode) {
-        links.push({ source: caddyNode.id, target: `api-${apiService.moduleId}` });
-      }
-    }
 
     // Mark data-flow links as active and set flow direction
     // EtherNet/IP: data flows from device → EIP → NATS (inbound to NATS)
