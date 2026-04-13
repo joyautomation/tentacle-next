@@ -30,23 +30,12 @@ export const load: PageLoad = async ({ params }) => {
       (s) => s.serviceType === serviceType
     );
 
-    // Pre-fetch store-forward status for MQTT service page
-    let storeForwardStatus = null;
-    if (serviceType === 'mqtt') {
-      try {
-        const sfResult = await api<unknown>('/mqtt/store-forward');
-        storeForwardStatus = sfResult.data ?? null;
-      } catch {
-        /* ignore */
-      }
-    }
-
     return {
       serviceType,
       instances,
       graphqlConnected: true,
       error: null,
-      storeForwardStatus,
+      storeForwardStatus: null,
     };
   } catch (e) {
     return {

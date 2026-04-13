@@ -34,7 +34,24 @@ interface MqttMetricsResponse {
 
 export const load: PageLoad = async () => {
   try {
-    const result = await api<MqttMetricsResponse>('/mqtt/metrics');
+    // Race against a 3s timeout so navigation doesn't block for the full
+    // 10s bus timeout when the MQTT module is unresponsive.
+    // The SSE stream will populate data once the module comes back.
+    const timeout = new Promise<null>(r => setTimeout(() => r(null), 3000));
+    const result = await Promise.race([
+      api<MqttMetricsResponse>('/mqtt/metrics'),
+      timeout,
+    ]);
+
+    if (result === null) {
+      return {
+        metrics: [],
+        templates: [],
+        deviceId: '',
+        error: 'MQTT module is not responding. Check that the broker is reachable and the service is running.',
+        moduleUnavailable: true,
+      };
+    }
 
     if (result.error) {
       return {
