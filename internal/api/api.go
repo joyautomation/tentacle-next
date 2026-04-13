@@ -253,6 +253,8 @@ func (m *Module) routes() http.Handler {
 		r.Get("/history/enabled", m.handleGetHistoryEnabled)
 
 		// GitOps setup
+		r.Get("/gitops/git-check", m.handleGitCheck)
+		r.Post("/gitops/git-install", m.handleGitInstall)
 		r.Get("/gitops/ssh-key", m.handleGetSSHKey)
 		r.Post("/gitops/ssh-key/generate", m.handleGenerateSSHKey)
 		r.Post("/gitops/test-connection", m.handleTestGitConnection)

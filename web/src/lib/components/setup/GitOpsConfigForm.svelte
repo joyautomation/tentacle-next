@@ -20,6 +20,11 @@
 
   let { config, onchange }: Props = $props();
 
+  // Git availability
+  let gitInstalled = $state<boolean | null>(null); // null = loading
+  let installing = $state(false);
+  let installError = $state('');
+
   // SSH key state
   let sshKey = $state({ exists: false, publicKey: '', path: '' });
   let generatingKey = $state(false);
@@ -29,10 +34,28 @@
   let testing = $state(false);
   let testResult: { success: boolean; error?: string } | null = $state(null);
 
-  // Load SSH key on mount
+  // Check git + load SSH key on mount
   $effect(() => {
+    checkGit();
     loadSSHKey();
   });
+
+  async function checkGit() {
+    const result = await api<{ installed: boolean }>('/gitops/git-check');
+    gitInstalled = result.data?.installed ?? false;
+  }
+
+  async function installGit() {
+    installing = true;
+    installError = '';
+    const result = await apiPost<{ success: boolean; error?: string }>('/gitops/git-install');
+    installing = false;
+    if (result.data?.success) {
+      gitInstalled = true;
+    } else {
+      installError = result.data?.error ?? result.error?.error ?? 'Installation failed';
+    }
+  }
 
   async function loadSSHKey() {
     const result = await api<{ exists: boolean; publicKey: string; path: string }>('/gitops/ssh-key');
@@ -89,6 +112,26 @@
 </script>
 
 <div class="gitops-form">
+  {#if gitInstalled === false}
+    <div class="git-missing" transition:slide={{ duration: 200 }}>
+      <div class="git-missing-content">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20">
+          <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+        </svg>
+        <div>
+          <strong>Git is not installed</strong>
+          <p>GitOps requires git to sync configuration with your repository.</p>
+        </div>
+      </div>
+      <button class="btn primary" onclick={installGit} disabled={installing}>
+        {installing ? 'Installing...' : 'Install Git'}
+      </button>
+      {#if installError}
+        <p class="install-error">{installError}</p>
+      {/if}
+    </div>
+  {/if}
+
   <!-- SSH Key Section -->
   <section class="form-section">
     <h3>SSH Key</h3>
@@ -214,6 +257,45 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+  }
+
+  .git-missing {
+    padding: 1rem;
+    background: color-mix(in srgb, var(--badge-amber-border, #f59e0b) 10%, var(--theme-surface));
+    border: 1px solid var(--badge-amber-border, #f59e0b);
+    border-radius: var(--rounded-md);
+  }
+
+  .git-missing-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    color: var(--badge-amber-text, #f59e0b);
+
+    strong {
+      display: block;
+      font-size: 0.875rem;
+      color: var(--theme-text);
+      margin-bottom: 0.125rem;
+    }
+
+    p {
+      font-size: 0.8125rem;
+      color: var(--theme-text-muted);
+      margin: 0;
+    }
+
+    svg {
+      flex-shrink: 0;
+      margin-top: 0.125rem;
+    }
+  }
+
+  .install-error {
+    font-size: 0.75rem;
+    color: var(--color-red-400, #f87171);
+    margin: 0.5rem 0 0;
   }
 
   .form-section {

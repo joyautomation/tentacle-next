@@ -18,6 +18,59 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// handleGitCheck checks whether git is installed on the system.
+// GET /api/v1/gitops/git-check
+func (m *Module) handleGitCheck(w http.ResponseWriter, _ *http.Request) {
+	_, err := exec.LookPath("git")
+	writeJSON(w, http.StatusOK, map[string]bool{"installed": err == nil})
+}
+
+// handleGitInstall attempts to install git via the system package manager.
+// POST /api/v1/gitops/git-install
+func (m *Module) handleGitInstall(w http.ResponseWriter, _ *http.Request) {
+	// Already installed?
+	if _, err := exec.LookPath("git"); err == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "git is already installed"})
+		return
+	}
+
+	// Try common package managers in order.
+	type pm struct {
+		check string
+		args  []string
+	}
+	managers := []pm{
+		{"apt-get", []string{"apt-get", "install", "-y", "git"}},
+		{"dnf", []string{"dnf", "install", "-y", "git"}},
+		{"yum", []string{"yum", "install", "-y", "git"}},
+		{"apk", []string{"apk", "add", "git"}},
+		{"pacman", []string{"pacman", "-S", "--noconfirm", "git"}},
+	}
+
+	for _, p := range managers {
+		if _, err := exec.LookPath(p.check); err != nil {
+			continue
+		}
+		cmd := exec.Command(p.args[0], p.args[1:]...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("%s failed: %s", p.check, strings.TrimSpace(stderr.String())),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": false,
+		"error":   "no supported package manager found (tried apt-get, dnf, yum, apk, pacman)",
+	})
+}
+
 // handleGetSSHKey returns the public SSH key at the configured path.
 // GET /api/v1/gitops/ssh-key
 func (m *Module) handleGetSSHKey(w http.ResponseWriter, r *http.Request) {
