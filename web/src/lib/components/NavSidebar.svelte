@@ -308,11 +308,15 @@
           >
             <Icon size="1.25rem" />
             <span>{getServiceName(service.serviceType)}</span>
-            {#if experimentalModuleIds.has(service.moduleId)}
-              <span class="experimental-badge">exp</span>
-            {/if}
-            {#if !service.enabled}
-              <span class="disabled-badge">off</span>
+            {#if experimentalModuleIds.has(service.moduleId) || !service.enabled}
+              <span class="sidebar-item-badges">
+                {#if experimentalModuleIds.has(service.moduleId)}
+                  <span class="experimental-badge">exp</span>
+                {/if}
+                {#if !service.enabled}
+                  <span class="disabled-badge">off</span>
+                {/if}
+              </span>
             {/if}
           </a>
         </li>
@@ -344,11 +348,13 @@
                   >
                     <Icon size="1.25rem" />
                     <span>{getModuleName(mod.moduleId)}</span>
-                    {#if mod.experimental}
-                      <span class="experimental-badge">exp</span>
-                    {/if}
-                    <span class="available-badge">
-                      <PlusCircle size="0.875rem" />
+                    <span class="sidebar-item-badges">
+                      {#if mod.experimental}
+                        <span class="experimental-badge">exp</span>
+                      {/if}
+                      <span class="available-badge">
+                        <PlusCircle size="0.875rem" />
+                      </span>
                     </span>
                   </a>
                 </li>
@@ -375,11 +381,13 @@
                     >
                       <Icon size="1.25rem" />
                       <span>{getModuleName(mod.moduleId)}</span>
-                      {#if mod.experimental}
-                        <span class="experimental-badge">exp</span>
-                      {/if}
-                      <span class="available-badge">
-                        <PlusCircle size="0.875rem" />
+                      <span class="sidebar-item-badges">
+                        {#if mod.experimental}
+                          <span class="experimental-badge">exp</span>
+                        {/if}
+                        <span class="available-badge">
+                          <PlusCircle size="0.875rem" />
+                        </span>
                       </span>
                     </a>
                   </li>
@@ -660,8 +668,15 @@
     }
   }
 
-  .disabled-badge {
+  .sidebar-item-badges {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    flex-shrink: 0;
+  }
+
+  .disabled-badge {
     font-size: 0.625rem;
     font-weight: 600;
     padding: 0.125rem 0.375rem;
@@ -674,7 +689,6 @@
   }
 
   .experimental-badge {
-    margin-left: auto;
     font-size: 0.5625rem;
     font-weight: 600;
     padding: 0.0625rem 0.3125rem;
@@ -688,7 +702,6 @@
   }
 
   .available-badge {
-    margin-left: auto;
     display: flex;
     align-items: center;
     color: var(--theme-text-muted);
