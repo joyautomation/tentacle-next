@@ -126,9 +126,9 @@
           serviceEnabled &&
           service.metadata?.connected === false;
 
-        // Caddy sits between API and Web UI — depth 2, linked to API not Bus
+        // Caddy sits outside UI — depth 3, linked to UI node (not Bus)
         const isCaddy = service.serviceType === 'caddy';
-        const depth = isCaddy && apiService ? 2 : 1;
+        const depth = isCaddy ? 3 : 1;
 
         nodes.push({
           id: nodeId,
@@ -140,9 +140,9 @@
           depth,
         });
 
-        if (isCaddy && apiService) {
-          // Caddy links to API (reverse proxy relationship)
-          links.push({ source: `api-${apiService.moduleId}`, target: nodeId });
+        if (isCaddy) {
+          // Caddy links to UI (it's the outermost layer)
+          // Link is added after the UI node is created below
         } else {
           links.push({ source: 'nats', target: nodeId });
         }
@@ -196,23 +196,25 @@
         }
       });
 
-    // Web UI — always present (we're rendering it)
-    // Chain: Bus → API → Caddy → Web UI (when caddy is running)
-    const caddyNode = caddyService ? nodes.find(n => n.type === 'caddy') : null;
-    const webParent = caddyNode ? caddyNode.id
-      : apiService ? `api-${apiService.moduleId}`
-      : 'nats';
-    const webDepth = caddyNode ? 3 : apiService ? 2 : 1;
+    // UI node — always present (we're rendering it)
+    // Chain: Bus → API → UI → Caddy (when caddy is running)
+    const webParent = apiService ? `api-${apiService.moduleId}` : 'nats';
     nodes.push({
       id: 'web',
-      name: 'Web UI',
+      name: 'UI',
       type: 'web',
       subtitle: 'This App',
       connected: true,
       enabled: true,
-      depth: webDepth
+      depth: apiService ? 2 : 1
     });
     links.push({ source: webParent, target: 'web' });
+
+    // Caddy links to UI (outermost layer in the proxy chain)
+    const caddyNode = caddyService ? nodes.find(n => n.type === 'caddy') : null;
+    if (caddyNode) {
+      links.push({ source: 'web', target: caddyNode.id });
+    }
 
     // Mark data-flow links as active and set flow direction
     // EtherNet/IP: data flows from device → EIP → NATS (inbound to NATS)
@@ -520,7 +522,7 @@
           case 'nats': return 'NATS';
           case 'bus': return 'BUS';
           case 'api': return 'API';
-          case 'web': return 'WEB';
+          case 'web': return 'UI';
           case 'caddy': return 'CDY';
           case 'ethernetip': return 'EIP';
           case 'ethernetip-server': return 'EIPS';
