@@ -23,8 +23,7 @@ var configSchema = []config.FieldDef{
 	{EnvVar: "MQTT_PASSWORD", Label: "Password", Type: "password", Group: "Connection", GroupOrder: 0, SortOrder: 5},
 	{EnvVar: "MQTT_KEEPALIVE", Label: "Keep Alive (seconds)", Type: "number", Group: "Connection", GroupOrder: 0, SortOrder: 6, Default: "30"},
 	// Sparkplug B group
-	{EnvVar: "MQTT_DEVICE_ID", Label: "Device ID", Type: "string", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 0, Toggleable: true, ToggleLabel: "Override Device ID"},
-	{EnvVar: "MQTT_USE_TEMPLATES", Label: "Use Templates", Type: "boolean", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 1, Default: "true"},
+	{EnvVar: "MQTT_USE_TEMPLATES", Label: "Use Templates", Type: "boolean", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 0, Default: "true"},
 	// Store & Forward group
 	{EnvVar: "MQTT_PRIMARY_HOST_ID", Label: "Primary Host ID", Type: "string", Group: "Store & Forward", GroupOrder: 2, SortOrder: 0},
 	{EnvVar: "MQTT_SF_MAX_MB", Label: "Max Buffer (MB)", Type: "number", Group: "Store & Forward", GroupOrder: 2, SortOrder: 1, Default: "50"},
@@ -49,7 +48,6 @@ func saveConfig(b bus.Bus, cfg *itypes.MqttBridgeConfig) {
 	put("MQTT_CLIENT_ID", cfg.ClientID)
 	put("MQTT_GROUP_ID", cfg.GroupID)
 	put("MQTT_EDGE_NODE", cfg.EdgeNode)
-	put("MQTT_DEVICE_ID", cfg.DeviceID)
 	put("MQTT_PER_SOURCE_DEVICE", strconv.FormatBool(cfg.PerSourceDevice))
 	put("MQTT_USERNAME", cfg.Username)
 	put("MQTT_PASSWORD", cfg.Password)
@@ -109,7 +107,7 @@ func loadConfig(b bus.Bus) itypes.MqttBridgeConfig {
 		ClientID:         get("MQTT_CLIENT_ID", "tentacle-mqtt"),
 		GroupID:          get("MQTT_GROUP_ID", "TentacleGroup"),
 		EdgeNode:         get("MQTT_EDGE_NODE", "EdgeNode1"),
-		DeviceID:         get("MQTT_DEVICE_ID", ""),
+		DeviceID:         "", // Always use source device IDs
 		PerSourceDevice:  getBool("MQTT_PER_SOURCE_DEVICE", false),
 		Username:         get("MQTT_USERNAME", ""),
 		Password:         get("MQTT_PASSWORD", ""),

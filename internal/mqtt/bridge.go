@@ -265,11 +265,8 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 	}
 
 	// Convert to Sparkplug metric and publish
-	// Device ID resolution: explicit config → source device from message → module ID fallback
-	deviceID := br.config.DeviceID
-	if deviceID == "" && msg.DeviceID != "" {
-		deviceID = msg.DeviceID
-	}
+	// Device ID: use source device from message, fall back to module ID
+	deviceID := msg.DeviceID
 	if deviceID == "" {
 		deviceID = br.moduleID
 	}
@@ -630,15 +627,10 @@ func (br *Bridge) buildDeviceMetrics() {
 
 	nowMs := time.Now().UnixMilli()
 
-	// Group metrics by resolved device ID.
-	// When DeviceID is configured, all metrics go under that single device.
-	// Otherwise, metrics are grouped by their source device ID.
+	// Group metrics by source device ID.
 	byDevice := make(map[string][]sparkplug.Metric)
 	for _, pv := range br.variables {
-		devID := br.config.DeviceID
-		if devID == "" && pv.DeviceID != "" {
-			devID = pv.DeviceID
-		}
+		devID := pv.DeviceID
 		if devID == "" {
 			devID = br.moduleID
 		}
@@ -748,9 +740,6 @@ func (br *Bridge) subscribeToSFStatus() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (br *Bridge) sparkplugDeviceID() string {
-	if br.config.DeviceID != "" {
-		return br.config.DeviceID
-	}
 	return br.moduleID
 }
 
