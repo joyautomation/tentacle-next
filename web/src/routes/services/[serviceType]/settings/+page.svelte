@@ -8,6 +8,12 @@
   import { slide } from 'svelte/transition';
   import GitOpsSettings from '$lib/components/GitOpsSettings.svelte';
 
+  // Svelte action: auto-resize textarea to fit content on mount
+  function autoResize(node: HTMLTextAreaElement) {
+    node.style.height = 'auto';
+    node.style.height = node.scrollHeight + 'px';
+  }
+
   let { data }: { data: PageData } = $props();
 
   const serviceType = $derived($page.params.serviceType ?? '');
@@ -169,9 +175,10 @@
                   {:else if field.type === 'textarea'}
                     <label class="field-label">{field.label}</label>
                     <textarea
-                      rows="16"
+                      class="auto-resize"
                       value={formValues[field.envVar]}
-                      oninput={(e) => { formValues[field.envVar] = (e.target as HTMLTextAreaElement).value; }}
+                      oninput={(e) => { const ta = e.target as HTMLTextAreaElement; formValues[field.envVar] = ta.value; ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }}
+                      use:autoResize
                     ></textarea>
                   {:else if field.toggleable}
                     <div class="toggle-row">
@@ -270,9 +277,11 @@
     }
   }
 
-  textarea {
+  textarea.auto-resize {
     resize: vertical;
     line-height: 1.5;
+    min-height: 4rem;
+    overflow: hidden;
   }
 
   .toggle-row {
