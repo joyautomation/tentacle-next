@@ -20,6 +20,12 @@ import (
 )
 
 func main() {
+	// Handle subcommands before flag parsing.
+	if len(os.Args) >= 2 && os.Args[1] == "service" {
+		runServiceCommand(os.Args[2:])
+		return
+	}
+
 	mode := flag.String("mode", "", "Run a single module with NATS bus (distributed mode)")
 	natsURL := flag.String("nats", "nats://localhost:4222", "NATS server URL (for --mode)")
 	flag.Parse()

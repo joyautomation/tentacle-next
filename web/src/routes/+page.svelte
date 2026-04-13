@@ -1,5 +1,6 @@
 <script lang="ts">
   import SystemTopology from '$lib/components/SystemTopology.svelte';
+  import ServiceBanner from '$lib/components/ServiceBanner.svelte';
   import { onMount } from 'svelte';
   import { api } from '$lib/api/client';
 
@@ -64,6 +65,9 @@
 </script>
 
 <div class="page">
+  {#if apiConnected}
+    <ServiceBanner />
+  {/if}
   {#if hasPolled && !apiConnected}
     <div class="disconnected-banner">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
