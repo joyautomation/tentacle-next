@@ -64,6 +64,27 @@
     return true;
   }
 
+  // Check if any field in a group is visible
+  function isGroupVisible(group: FieldGroup): boolean {
+    return group.fields.some(isFieldVisible);
+  }
+
+  // When a textarea field's dependsOn becomes true and the value is empty,
+  // seed it from related simple-mode fields (e.g. generate a Caddyfile).
+  function seedTextareaDefaults() {
+    for (const field of schema) {
+      if (field.type === 'textarea' && isFieldVisible(field) && !formValues[field.envVar]) {
+        // Build a default from sibling fields that are now hidden
+        const hiddenFields = schema.filter(f => f.type !== 'boolean' && f.type !== 'textarea' && !isFieldVisible(f));
+        if (hiddenFields.length > 0 && field.envVar === 'CADDY_CADDYFILE') {
+          const domain = formValues['CADDY_DOMAIN'] || ':80';
+          const port = formValues['CADDY_UPSTREAM_PORT'] || '4000';
+          formValues[field.envVar] = `${domain} {\n\treverse_proxy localhost:${port}\n}\n`;
+        }
+      }
+    }
+  }
+
   // Track toggleable field enabled state separately — value may be empty while toggle is on
   let toggleStates: Record<string, boolean> = $state({});
 
@@ -127,7 +148,8 @@
     {#if fieldGroups.length > 0}
       <form onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
         {#each fieldGroups as group}
-          <section class="form-group">
+          {#if isGroupVisible(group)}
+          <section class="form-group" transition:slide={{ duration: 200 }}>
             <h2>{group.name}</h2>
             {#each group.fields as field}
               {#if isFieldVisible(field)}
@@ -139,7 +161,7 @@
                         type="button"
                         class="toggle-switch"
                         class:on={formValues[field.envVar] === 'true'}
-                        onclick={() => { formValues[field.envVar] = formValues[field.envVar] === 'true' ? 'false' : 'true'; }}
+                        onclick={() => { formValues[field.envVar] = formValues[field.envVar] === 'true' ? 'false' : 'true'; seedTextareaDefaults(); }}
                       >
                         <span class="toggle-knob"></span>
                       </button>
@@ -185,6 +207,7 @@
               {/if}
             {/each}
           </section>
+          {/if}
         {/each}
 
         <button type="submit" class="save-btn" disabled={saving}>
