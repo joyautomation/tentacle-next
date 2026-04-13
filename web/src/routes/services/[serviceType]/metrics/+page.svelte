@@ -206,7 +206,16 @@
 </script>
 
 <div class="metrics-page">
-  {#if data.error}
+  {#if data.moduleUnavailable}
+    <div class="warning-box">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <p>MQTT module is not responding. Check that the broker is reachable and the service is running.</p>
+    </div>
+  {:else if data.error}
     <div class="error-box">
       <p>{data.error}</p>
     </div>
@@ -586,6 +595,29 @@
   .template-ref {
     font-size: 0.6875rem;
     color: var(--badge-purple-text);
+  }
+
+  .warning-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    border-radius: var(--rounded-lg);
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    margin-bottom: 1.5rem;
+
+    svg {
+      flex-shrink: 0;
+      margin-top: 0.0625rem;
+      color: var(--color-amber-500, #f59e0b);
+    }
+
+    p {
+      margin: 0;
+      font-size: 0.875rem;
+      color: var(--theme-text-muted);
+    }
   }
 
   .error-box {

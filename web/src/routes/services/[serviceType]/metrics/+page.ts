@@ -42,6 +42,7 @@ export const load: PageLoad = async () => {
         templates: [],
         deviceId: '',
         error: result.error.error,
+        moduleUnavailable: result.error.status === 502,
       };
     }
 
@@ -50,6 +51,7 @@ export const load: PageLoad = async () => {
       templates: result.data?.templates ?? [],
       deviceId: result.data?.deviceId ?? '',
       error: null,
+      moduleUnavailable: false,
     };
   } catch (e) {
     return {
@@ -57,6 +59,7 @@ export const load: PageLoad = async () => {
       templates: [],
       deviceId: '',
       error: e instanceof Error ? e.message : 'Failed to fetch metrics',
+      moduleUnavailable: false,
     };
   }
 };

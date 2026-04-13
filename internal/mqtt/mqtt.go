@@ -75,9 +75,14 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 	// Start heartbeat
 	m.stopHeartbeat = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
+		connected := false
+		if m.bridge != nil && m.bridge.node != nil {
+			connected = m.bridge.node.State() == StateBorn
+		}
 		meta := map[string]interface{}{
 			"brokerUrl": cfg.BrokerURL,
 			"clientId":  cfg.ClientID,
+			"connected": connected,
 		}
 		if m.bridge != nil && m.bridge.sf != nil {
 			meta["storeForward"] = m.bridge.sf.State() != SFOnline

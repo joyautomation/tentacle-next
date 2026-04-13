@@ -58,6 +58,13 @@
   const infraServices = new Set(['nats', 'web']);
   const isInfra = $derived(infraServices.has(data.serviceType));
   const isRunning = $derived(isInfra ? data.graphqlConnected : (data.instances?.length ?? 0) > 0);
+
+  // MQTT broker connection status from heartbeat metadata
+  const mqttBrokerDisconnected = $derived(
+    data.serviceType === 'mqtt' &&
+    isRunning &&
+    data.instances?.some(i => i.metadata?.connected === false)
+  );
   const description = $derived(
     serviceDescriptions[data.serviceType] ?? 'Tentacle service'
   );
@@ -112,6 +119,17 @@
       {isRunning ? 'Running' : 'Stopped'}
     </span>
   </div>
+
+  {#if mqttBrokerDisconnected}
+    <div class="info-box warning">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <p>MQTT broker is not connected. Check that the broker at <strong>{data.instances?.find(i => i.metadata?.brokerUrl)?.metadata?.brokerUrl ?? 'unknown'}</strong> is reachable.</p>
+    </div>
+  {/if}
 
   {#if data.error}
     <div class="info-box error">
@@ -334,6 +352,15 @@
       align-items: center;
       justify-content: space-between;
       p { color: var(--color-red-500, #ef4444); }
+    }
+    &.warning {
+      background: rgba(245, 158, 11, 0.08);
+      border-color: rgba(245, 158, 11, 0.25);
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      svg { flex-shrink: 0; margin-top: 0.0625rem; color: var(--color-amber-500, #f59e0b); }
+      p { color: var(--theme-text-muted); }
     }
   }
 </style>

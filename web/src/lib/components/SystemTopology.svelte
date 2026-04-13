@@ -130,12 +130,16 @@
         const name = getServiceName(service.serviceType);
 
         const serviceEnabled = service.enabled !== false;
+        // MQTT: show broker disconnection warning
+        const mqttDisconnected = service.serviceType === 'mqtt' &&
+          serviceEnabled &&
+          service.metadata?.connected === false;
         nodes.push({
           id: nodeId,
           name,
           type: service.serviceType as NodeType,
-          subtitle: !serviceEnabled ? 'Disabled' : `Up ${formatUptime(service.startedAt)}`,
-          connected: true,
+          subtitle: !serviceEnabled ? 'Disabled' : mqttDisconnected ? 'Broker disconnected' : `Up ${formatUptime(service.startedAt)}`,
+          connected: !mqttDisconnected,
           enabled: serviceEnabled,
           depth: 1
         });

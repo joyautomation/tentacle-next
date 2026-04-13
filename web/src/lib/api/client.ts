@@ -17,7 +17,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<ApiResul
     });
     if (!response.ok) {
       const text = await response.text().catch(() => response.statusText);
-      return { error: { error: text, status: response.status } };
+      let errorMessage = text;
+      try {
+        const json = JSON.parse(text);
+        if (json.error) errorMessage = json.error;
+      } catch { /* use raw text */ }
+      return { error: { error: errorMessage, status: response.status } };
     }
     const data = await response.json();
     return { data };

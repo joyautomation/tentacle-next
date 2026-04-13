@@ -166,9 +166,13 @@
     applying = false;
   }
 
-  function goToTopology() {
+  function goToNextStep() {
     sessionStorage.setItem('setup_dismissed', 'true');
-    goto('/');
+    if (selectedAddOns.has('gitops')) {
+      goto('/modules/gitops');
+    } else {
+      goto('/');
+    }
   }
 </script>
 
@@ -269,8 +273,8 @@
     </section>
 
     {#if done}
-      <button class="apply-btn" onclick={goToTopology}>
-        Go to Topology
+      <button class="apply-btn" onclick={goToNextStep}>
+        {selectedAddOns.has('gitops') ? 'Configure GitOps' : 'Go to Topology'}
       </button>
     {/if}
 
