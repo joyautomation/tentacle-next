@@ -45,52 +45,55 @@
   let desiredServices = $state<DesiredService[]>([]);
   let apiConnected = $state(false);
 
+  async function fetchServices() {
+    try {
+      const result = await api<Service[]>('/services');
+      if (result.data) {
+        services = result.data;
+        isMonolith.set(
+          result.data.some(
+            (s) => s.serviceType === 'orchestrator' && (s.metadata as any)?.mode === 'monolith'
+          )
+        );
+      }
+    } catch {
+      // API unreachable
+    }
+  }
+
+  async function fetchModules() {
+    try {
+      const [modulesResult, desiredResult] = await Promise.all([
+        api<ModuleRegistryInfo[]>('/orchestrator/modules'),
+        api<DesiredService[]>('/orchestrator/desired-services'),
+      ]);
+      if (modulesResult.data) availableModules = modulesResult.data;
+      if (desiredResult.data) desiredServices = desiredResult.data;
+    } catch {
+      // Orchestrator queries not available yet
+    }
+  }
+
   onMount(() => {
     // Initialize theme from cookie (no server-side cookie access in SPA mode)
     themeState.initialize();
 
-    // Fetch initial data from REST API
-    async function fetchData() {
-      // Core queries: mode and services
+    // Initial fetch
+    async function init() {
       try {
-        const [modeResult, servicesResult] = await Promise.all([
-          api<{ mode: string }>('/mode'),
-          api<Service[]>('/services'),
-        ]);
-
+        const modeResult = await api<{ mode: string }>('/mode');
         if (modeResult.data) {
           mode = modeResult.data.mode;
           apiConnected = true;
-        }
-        if (servicesResult.data) {
-          services = servicesResult.data;
-          isMonolith.set(
-            servicesResult.data.some(
-              (s) => s.serviceType === 'orchestrator' && (s.metadata as any)?.mode === 'monolith'
-            )
-          );
         }
       } catch {
         // API unreachable — mode stays 'unknown'
       }
 
-      // Module management queries — separate so they don't break the core layout
-      if (apiConnected) {
-        try {
-          const [modulesResult, desiredResult] = await Promise.all([
-            api<ModuleRegistryInfo[]>('/orchestrator/modules'),
-            api<DesiredService[]>('/orchestrator/desired-services'),
-          ]);
+      await fetchServices();
 
-          if (modulesResult.data) {
-            availableModules = modulesResult.data;
-          }
-          if (desiredResult.data) {
-            desiredServices = desiredResult.data;
-          }
-        } catch {
-          // Orchestrator queries not available yet — graceful degradation
-        }
+      if (apiConnected) {
+        await fetchModules();
 
         // First-boot redirect: if no services are configured,
         // redirect to the setup wizard (once per session)
@@ -103,7 +106,15 @@
       }
     }
 
-    fetchData();
+    init();
+
+    // Poll for service/module changes so the sidebar stays current
+    const poll = setInterval(() => {
+      fetchServices();
+      if (apiConnected) fetchModules();
+    }, 5000);
+
+    return () => clearInterval(poll);
   });
 
   onNavigate((navigation) => {
