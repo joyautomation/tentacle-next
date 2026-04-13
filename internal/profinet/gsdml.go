@@ -10,7 +10,7 @@ import (
 )
 
 // GenerateGSDML produces a GSDML XML descriptor from a ProfinetConfig.
-// The generated file can be imported into TIA Portal to define the IO Device.
+// The generated file can be imported into TIA Portal or PRONETA to define the IO Device.
 func GenerateGSDML(cfg *ProfinetConfig) ([]byte, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -30,7 +30,7 @@ func GenerateGSDML(cfg *ProfinetConfig) ([]byte, error) {
 func GSDMLFilename(cfg *ProfinetConfig) string {
 	name := sanitizeGSDMLName(cfg.DeviceName)
 	ts := time.Now().Format("20060102")
-	return fmt.Sprintf("GSDML-V2.4-JoyAutomation-%s-%s.xml", name, ts)
+	return fmt.Sprintf("GSDML-V2.35-JoyAutomation-%s-%s.xml", name, ts)
 }
 
 func sanitizeGSDMLName(s string) string {
@@ -43,15 +43,16 @@ func sanitizeGSDMLName(s string) string {
 	return b.String()
 }
 
-// GSDML XML types — structured to produce valid GSDML V2.4 output.
+// GSDML XML types — structured to produce valid GSDML V2.35 output.
+// Modeled after known-good p-net GSDML files that PRONETA accepts.
 
 type gsdmlISO15745Profile struct {
-	XMLName xml.Name `xml:"ISO15745Profile"`
-	Xmlns   string   `xml:"xmlns,attr"`
-	XSI     string   `xml:"xmlns:xsi,attr"`
-
-	ProfileHeader gsdmlProfileHeader `xml:"ProfileHeader"`
-	ProfileBody   gsdmlProfileBody   `xml:"ProfileBody"`
+	XMLName         xml.Name           `xml:"ISO15745Profile"`
+	Xmlns           string             `xml:"xmlns,attr"`
+	XSI             string             `xml:"xmlns:xsi,attr"`
+	SchemaLocation  string             `xml:"xsi:schemaLocation,attr"`
+	ProfileHeader   gsdmlProfileHeader `xml:"ProfileHeader"`
+	ProfileBody     gsdmlProfileBody   `xml:"ProfileBody"`
 }
 
 type gsdmlProfileHeader struct {
@@ -61,22 +62,21 @@ type gsdmlProfileHeader struct {
 	ProfileSource         string `xml:"ProfileSource"`
 	ProfileClassID        string `xml:"ProfileClassID"`
 	ISO15745Reference     struct {
-		ISO15745Part    int    `xml:"ISO15745Part"`
-		ISO15745Edition int    `xml:"ISO15745Edition"`
+		ISO15745Part      int    `xml:"ISO15745Part"`
+		ISO15745Edition   int    `xml:"ISO15745Edition"`
 		ProfileTechnology string `xml:"ProfileTechnology"`
 	} `xml:"ISO15745Reference"`
 }
 
 type gsdmlProfileBody struct {
-	XMLName       xml.Name           `xml:"ProfileBody"`
-	DeviceIdentity gsdmlDeviceIdentity `xml:"DeviceIdentity"`
-	DeviceFunction gsdmlDeviceFunction `xml:"DeviceFunction"`
+	DeviceIdentity     gsdmlDeviceIdentity     `xml:"DeviceIdentity"`
+	DeviceFunction     gsdmlDeviceFunction     `xml:"DeviceFunction"`
 	ApplicationProcess gsdmlApplicationProcess `xml:"ApplicationProcess"`
 }
 
 type gsdmlDeviceIdentity struct {
-	VendorID   string `xml:"VendorID,attr"`
-	DeviceID   string `xml:"DeviceID,attr"`
+	VendorID   string        `xml:"VendorID,attr"`
+	DeviceID   string        `xml:"DeviceID,attr"`
 	InfoText   *gsdmlTextRef `xml:"InfoText,omitempty"`
 	VendorName *gsdmlValue   `xml:"VendorName,omitempty"`
 }
@@ -90,15 +90,18 @@ type gsdmlValue struct {
 }
 
 type gsdmlDeviceFunction struct {
-	MainFamily   string `xml:"MainFamily,attr"`
-	MainSubFamily string `xml:"MainSubFamily,attr,omitempty"`
+	Family gsdmlFamily `xml:"Family"`
+}
+
+type gsdmlFamily struct {
+	MainFamily    string `xml:"MainFamily,attr"`
+	ProductFamily string `xml:"ProductFamily,attr,omitempty"`
 }
 
 type gsdmlApplicationProcess struct {
-	DeviceAccessPointList gsdmlDAPList    `xml:"DeviceAccessPointList"`
-	ModuleList            gsdmlModuleList `xml:"ModuleList"`
-	SubmoduleList         gsdmlSubmoduleList `xml:"SubmoduleList"`
-	ValueList             gsdmlValueList  `xml:"ValueList"`
+	DeviceAccessPointList gsdmlDAPList          `xml:"DeviceAccessPointList"`
+	ModuleList            gsdmlModuleList       `xml:"ModuleList"`
+	ExternalTextList      gsdmlExternalTextList `xml:"ExternalTextList"`
 }
 
 type gsdmlDAPList struct {
@@ -106,22 +109,35 @@ type gsdmlDAPList struct {
 }
 
 type gsdmlDAPItem struct {
-	ID                 string `xml:"ID,attr"`
-	ModuleIdentNumber  string `xml:"ModuleIdentNumber,attr"`
-	MinDeviceInterval  string `xml:"MinDeviceInterval,attr"`
-	PhysicalSlots      string `xml:"PhysicalSlots,attr"`
-	DNS_CompatibleName string `xml:"DNS_CompatibleName,attr"`
-	FixedInSlots       string `xml:"FixedInSlots,attr"`
+	ID                     string `xml:"ID,attr"`
+	PNIO_Version           string `xml:"PNIO_Version,attr"`
+	PhysicalSlots          string `xml:"PhysicalSlots,attr"`
+	ModuleIdentNumber      string `xml:"ModuleIdentNumber,attr"`
+	MinDeviceInterval      string `xml:"MinDeviceInterval,attr"`
+	DNS_CompatibleName     string `xml:"DNS_CompatibleName,attr"`
+	FixedInSlots           string `xml:"FixedInSlots,attr"`
+	ObjectUUID_LocalIndex  string `xml:"ObjectUUID_LocalIndex,attr"`
+	DeviceAccessSupported  string `xml:"DeviceAccessSupported,attr"`
+	NumberOfDeviceAccessAR string `xml:"NumberOfDeviceAccessAR,attr"`
+	MultipleWriteSupported string `xml:"MultipleWriteSupported,attr"`
 
-	ModuleInfo    *gsdmlModuleInfo      `xml:"ModuleInfo,omitempty"`
-	UseableModules *gsdmlUseableModules `xml:"UseableModules,omitempty"`
+	ModuleInfo                 *gsdmlModuleInfo          `xml:"ModuleInfo,omitempty"`
+	IOConfigData               *gsdmlIOConfigData        `xml:"IOConfigData,omitempty"`
+	UseableModules             *gsdmlUseableModules      `xml:"UseableModules,omitempty"`
+	VirtualSubmoduleList       *gsdmlVirtualSubmoduleList `xml:"VirtualSubmoduleList,omitempty"`
 	SystemDefinedSubmoduleList *gsdmlSystemSubmoduleList `xml:"SystemDefinedSubmoduleList,omitempty"`
 }
 
+type gsdmlIOConfigData struct {
+	MaxInputLength  string `xml:"MaxInputLength,attr"`
+	MaxOutputLength string `xml:"MaxOutputLength,attr"`
+}
+
 type gsdmlModuleInfo struct {
-	Name     *gsdmlTextRef `xml:"Name,omitempty"`
-	InfoText *gsdmlTextRef `xml:"InfoText,omitempty"`
-	OrderNumber *gsdmlValue `xml:"OrderNumber,omitempty"`
+	Name        *gsdmlTextRef `xml:"Name,omitempty"`
+	InfoText    *gsdmlTextRef `xml:"InfoText,omitempty"`
+	VendorName  *gsdmlValue   `xml:"VendorName,omitempty"`
+	OrderNumber *gsdmlValue   `xml:"OrderNumber,omitempty"`
 }
 
 type gsdmlUseableModules struct {
@@ -130,7 +146,8 @@ type gsdmlUseableModules struct {
 
 type gsdmlModuleItemRef struct {
 	ModuleItemTarget string `xml:"ModuleItemTarget,attr"`
-	AllowedInSlots   string `xml:"AllowedInSlots,attr"`
+	AllowedInSlots   string `xml:"AllowedInSlots,attr,omitempty"`
+	FixedInSlots     string `xml:"FixedInSlots,attr,omitempty"`
 }
 
 type gsdmlSystemSubmoduleList struct {
@@ -139,21 +156,42 @@ type gsdmlSystemSubmoduleList struct {
 }
 
 type gsdmlInterfaceSubmodule struct {
-	ID                      string `xml:"ID,attr"`
-	SubmoduleIdentNumber    string `xml:"SubmoduleIdentNumber,attr"`
-	SubslotNumber           string `xml:"SubslotNumber,attr"`
-	TextId                  string `xml:"TextId,attr"`
-	SupportedRT_Classes     string `xml:"SupportedRT_Classes,attr"`
-	NetworkInterface        string `xml:"NetworkInterface,attr"`
+	ID                   string                    `xml:"ID,attr"`
+	SubmoduleIdentNumber string                    `xml:"SubmoduleIdentNumber,attr"`
+	SubslotNumber        string                    `xml:"SubslotNumber,attr"`
+	TextId               string                    `xml:"TextId,attr"`
+	SupportedRT_Classes  string                    `xml:"SupportedRT_Classes,attr"`
+	SupportedProtocols   string                    `xml:"SupportedProtocols,attr,omitempty"`
+	NetworkInterface     string                    `xml:"NetworkInterface,attr,omitempty"`
+	ApplicationRelations *gsdmlApplicationRelations `xml:"ApplicationRelations,omitempty"`
+}
+
+type gsdmlApplicationRelations struct {
+	StartupMode      string              `xml:"StartupMode,attr"`
+	TimingProperties gsdmlTimingProperties `xml:"TimingProperties"`
+}
+
+type gsdmlTimingProperties struct {
+	SendClock      string `xml:"SendClock,attr"`
+	ReductionRatio string `xml:"ReductionRatio,attr"`
 }
 
 type gsdmlPortSubmodule struct {
-	ID                   string `xml:"ID,attr"`
-	SubmoduleIdentNumber string `xml:"SubmoduleIdentNumber,attr"`
-	SubslotNumber        string `xml:"SubslotNumber,attr"`
-	TextId               string `xml:"TextId,attr"`
-	MaxPortRxDelay       string `xml:"MaxPortRxDelay,attr"`
-	MaxPortTxDelay       string `xml:"MaxPortTxDelay,attr"`
+	ID                   string           `xml:"ID,attr"`
+	SubmoduleIdentNumber string           `xml:"SubmoduleIdentNumber,attr"`
+	SubslotNumber        string           `xml:"SubslotNumber,attr"`
+	TextId               string           `xml:"TextId,attr"`
+	MaxPortRxDelay       string           `xml:"MaxPortRxDelay,attr"`
+	MaxPortTxDelay       string           `xml:"MaxPortTxDelay,attr"`
+	MAUTypeList          *gsdmlMAUTypeList `xml:"MAUTypeList,omitempty"`
+}
+
+type gsdmlMAUTypeList struct {
+	MAUTypeItem []gsdmlMAUTypeItem `xml:"MAUTypeItem"`
+}
+
+type gsdmlMAUTypeItem struct {
+	Value string `xml:"Value,attr"`
 }
 
 type gsdmlModuleList struct {
@@ -161,9 +199,9 @@ type gsdmlModuleList struct {
 }
 
 type gsdmlModuleItem struct {
-	ID                string `xml:"ID,attr"`
-	ModuleIdentNumber string `xml:"ModuleIdentNumber,attr"`
-	ModuleInfo        *gsdmlModuleInfo `xml:"ModuleInfo,omitempty"`
+	ID                   string                     `xml:"ID,attr"`
+	ModuleIdentNumber    string                     `xml:"ModuleIdentNumber,attr"`
+	ModuleInfo           *gsdmlModuleInfo           `xml:"ModuleInfo,omitempty"`
 	VirtualSubmoduleList *gsdmlVirtualSubmoduleList `xml:"VirtualSubmoduleList,omitempty"`
 }
 
@@ -172,12 +210,12 @@ type gsdmlVirtualSubmoduleList struct {
 }
 
 type gsdmlVirtualSubmoduleItem struct {
-	ID                   string `xml:"ID,attr"`
-	SubmoduleIdentNumber string `xml:"SubmoduleIdentNumber,attr"`
-	FixedInSubslots      string `xml:"FixedInSubslots,attr,omitempty"`
-	MayIssueProcessAlarm string `xml:"MayIssueProcessAlarm,attr,omitempty"`
-	ModuleInfo           *gsdmlModuleInfo `xml:"ModuleInfo,omitempty"`
+	ID                   string           `xml:"ID,attr"`
+	SubmoduleIdentNumber string           `xml:"SubmoduleIdentNumber,attr"`
+	FixedInSubslots      string           `xml:"FixedInSubslots,attr,omitempty"`
+	MayIssueProcessAlarm string           `xml:"MayIssueProcessAlarm,attr,omitempty"`
 	IOData               *gsdmlIOData     `xml:"IOData,omitempty"`
+	ModuleInfo           *gsdmlModuleInfo `xml:"ModuleInfo,omitempty"`
 }
 
 type gsdmlIOData struct {
@@ -190,32 +228,36 @@ type gsdmlIODataDir struct {
 }
 
 type gsdmlDataItem struct {
-	DataType   string `xml:"DataType,attr"`
-	Length     string `xml:"Length,attr"`
-	TextId     string `xml:"TextId,attr"`
+	DataType string `xml:"DataType,attr"`
+	Length   string `xml:"Length,attr,omitempty"`
+	TextId   string `xml:"TextId,attr"`
 }
 
-type gsdmlSubmoduleList struct {
-	// Empty — all submodules are defined inline within VirtualSubmoduleList
+// ExternalTextList (GSDML standard text format)
+type gsdmlExternalTextList struct {
+	PrimaryLanguage gsdmlPrimaryLanguage `xml:"PrimaryLanguage"`
 }
 
-type gsdmlValueList struct {
-	Value []gsdmlValueEntry `xml:"Value"`
+type gsdmlPrimaryLanguage struct {
+	Text []gsdmlTextEntry `xml:"Text"`
 }
 
-type gsdmlValueEntry struct {
-	ID   string `xml:"ID,attr"`
-	Text string `xml:",chardata"`
+type gsdmlTextEntry struct {
+	TextId string `xml:"TextId,attr"`
+	Value  string `xml:"Value,attr"`
 }
 
 func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
-	values := []gsdmlValueEntry{
-		{ID: "IDT_INFO_Device", Text: cfg.DeviceName},
-		{ID: "IDT_NAME_DAP", Text: "DAP"},
-		{ID: "IDT_INFO_DAP", Text: "Device Access Point"},
-		{ID: "IDT_NAME_Interface", Text: "Interface"},
-		{ID: "IDT_NAME_Port1", Text: "Port 1"},
+	var texts []gsdmlTextEntry
+	addText := func(id, value string) {
+		texts = append(texts, gsdmlTextEntry{TextId: id, Value: value})
 	}
+
+	addText("IDT_INFO_Device", cfg.DeviceName)
+	addText("IDT_NAME_DAP", "DAP")
+	addText("IDT_INFO_DAP", "Device Access Point")
+	addText("IDT_NAME_Interface", "Interface")
+	addText("IDT_NAME_Port1", "Port 1")
 
 	// Compute slot range for PhysicalSlots and module refs
 	maxSlot := 0
@@ -228,9 +270,6 @@ func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
 		maxSlot = 1
 	}
 
-	// Build slot range string "1..N"
-	slotRange := fmt.Sprintf("1..%d", maxSlot)
-
 	// Build module items and refs
 	var moduleItems []gsdmlModuleItem
 	var moduleRefs []gsdmlModuleItemRef
@@ -242,31 +281,30 @@ func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
 
 		moduleID := fmt.Sprintf("IDM_Mod%d", slot.SlotNumber)
 		moduleNameID := fmt.Sprintf("IDT_NAME_Mod%d", slot.SlotNumber)
-		values = append(values, gsdmlValueEntry{
-			ID:   moduleNameID,
-			Text: fmt.Sprintf("Module Slot %d", slot.SlotNumber),
-		})
+		moduleInfoID := fmt.Sprintf("IDT_INFO_Mod%d", slot.SlotNumber)
+		addText(moduleNameID, fmt.Sprintf("Module Slot %d", slot.SlotNumber))
+		addText(moduleInfoID, fmt.Sprintf("Module Slot %d", slot.SlotNumber))
 
 		var virtualSubs []gsdmlVirtualSubmoduleItem
 		for _, sub := range slot.Subslots {
 			subID := fmt.Sprintf("IDS_Mod%d_Sub%d", slot.SlotNumber, sub.SubslotNumber)
 			subNameID := fmt.Sprintf("IDT_NAME_Mod%d_Sub%d", slot.SlotNumber, sub.SubslotNumber)
-			values = append(values, gsdmlValueEntry{
-				ID:   subNameID,
-				Text: fmt.Sprintf("Slot %d Subslot %d", slot.SlotNumber, sub.SubslotNumber),
-			})
+			subInfoID := fmt.Sprintf("IDT_INFO_Mod%d_Sub%d", slot.SlotNumber, sub.SubslotNumber)
+			addText(subNameID, fmt.Sprintf("Slot %d Subslot %d", slot.SlotNumber, sub.SubslotNumber))
+			addText(subInfoID, fmt.Sprintf("Slot %d Subslot %d", slot.SlotNumber, sub.SubslotNumber))
 
-			ioData := buildIOData(slot.SlotNumber, sub)
+			ioData := buildIOData(slot.SlotNumber, sub, addText)
 
 			virtualSubs = append(virtualSubs, gsdmlVirtualSubmoduleItem{
 				ID:                   subID,
 				SubmoduleIdentNumber: fmt.Sprintf("0x%08X", sub.SubmoduleIdentNo),
 				FixedInSubslots:      fmt.Sprintf("%d", sub.SubslotNumber),
 				MayIssueProcessAlarm: "true",
+				IOData:               ioData,
 				ModuleInfo: &gsdmlModuleInfo{
-					Name: &gsdmlTextRef{TextId: subNameID},
+					Name:     &gsdmlTextRef{TextId: subNameID},
+					InfoText: &gsdmlTextRef{TextId: subInfoID},
 				},
-				IOData: ioData,
 			})
 		}
 
@@ -274,7 +312,8 @@ func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
 			ID:                moduleID,
 			ModuleIdentNumber: fmt.Sprintf("0x%08X", slot.ModuleIdentNo),
 			ModuleInfo: &gsdmlModuleInfo{
-				Name: &gsdmlTextRef{TextId: moduleNameID},
+				Name:     &gsdmlTextRef{TextId: moduleNameID},
+				InfoText: &gsdmlTextRef{TextId: moduleInfoID},
 			},
 			VirtualSubmoduleList: &gsdmlVirtualSubmoduleList{
 				VirtualSubmoduleItem: virtualSubs,
@@ -293,15 +332,15 @@ func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
 		minInterval = 32 // minimum 1ms
 	}
 
-	doc := gsdmlISO15745Profile{
-		Xmlns: "http://www.profibus.com/GSDML/2003/11/DeviceProfile",
-		XSI:   "http://www.w3.org/2001/XMLSchema-instance",
-
+	profile := gsdmlISO15745Profile{
+		Xmlns:          "http://www.profibus.com/GSDML/2003/11/DeviceProfile",
+		XSI:            "http://www.w3.org/2001/XMLSchema-instance",
+		SchemaLocation: "http://www.profibus.com/GSDML/2003/11/DeviceProfile gsdml-v2.35.xsd",
 		ProfileHeader: gsdmlProfileHeader{
 			ProfileIdentification: "PROFINET Device Profile",
 			ProfileRevision:       "1.00",
-			ProfileName:           cfg.DeviceName,
-			ProfileSource:         "JoyAutomation",
+			ProfileName:           "Device Profile for PROFINET Devices",
+			ProfileSource:         "PROFIBUS Nutzerorganisation e. V. (PNO)",
 			ProfileClassID:        "Device",
 			ISO15745Reference: struct {
 				ISO15745Part      int    `xml:"ISO15745Part"`
@@ -322,45 +361,84 @@ func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
 				VendorName: &gsdmlValue{Value: "JoyAutomation"},
 			},
 			DeviceFunction: gsdmlDeviceFunction{
-				MainFamily: "I/O",
+				Family: gsdmlFamily{
+					MainFamily:    "I/O",
+					ProductFamily: "Gateway",
+				},
 			},
 			ApplicationProcess: gsdmlApplicationProcess{
 				DeviceAccessPointList: gsdmlDAPList{
 					DeviceAccessPointItem: []gsdmlDAPItem{
 						{
-							ID:                 "IDD_DAP",
-							ModuleIdentNumber:  "0x00000001",
-							MinDeviceInterval:  fmt.Sprintf("%d", minInterval),
-							PhysicalSlots:      fmt.Sprintf("0..%d", maxSlot),
-							DNS_CompatibleName: cfg.StationName,
-							FixedInSlots:       "0",
+							ID:                     "IDD_1",
+							PNIO_Version:           "V2.4",
+							PhysicalSlots:          fmt.Sprintf("0..%d", maxSlot),
+							ModuleIdentNumber:      "0x00010000",
+							MinDeviceInterval:      fmt.Sprintf("%d", minInterval),
+							DNS_CompatibleName:     cfg.StationName,
+							FixedInSlots:           "0",
+							ObjectUUID_LocalIndex:  "1",
+							DeviceAccessSupported:  "true",
+							NumberOfDeviceAccessAR: "1",
+							MultipleWriteSupported: "true",
 							ModuleInfo: &gsdmlModuleInfo{
-								Name:     &gsdmlTextRef{TextId: "IDT_NAME_DAP"},
-								InfoText: &gsdmlTextRef{TextId: "IDT_INFO_DAP"},
+								Name:       &gsdmlTextRef{TextId: "IDT_NAME_DAP"},
+								InfoText:   &gsdmlTextRef{TextId: "IDT_INFO_DAP"},
+								VendorName: &gsdmlValue{Value: "JoyAutomation"},
 								OrderNumber: &gsdmlValue{Value: "TENTACLE-PN"},
+							},
+							IOConfigData: &gsdmlIOConfigData{
+								MaxInputLength:  "244",
+								MaxOutputLength: "244",
 							},
 							UseableModules: &gsdmlUseableModules{
 								ModuleItemRef: moduleRefs,
 							},
+							VirtualSubmoduleList: &gsdmlVirtualSubmoduleList{
+								VirtualSubmoduleItem: []gsdmlVirtualSubmoduleItem{
+									{
+										ID:                   "IDS_DAP",
+										SubmoduleIdentNumber: "0x00000001",
+										MayIssueProcessAlarm: "false",
+										IOData:               nil,
+										ModuleInfo: &gsdmlModuleInfo{
+											Name:     &gsdmlTextRef{TextId: "IDT_NAME_DAP"},
+											InfoText: &gsdmlTextRef{TextId: "IDT_INFO_DAP"},
+										},
+									},
+								},
+							},
 							SystemDefinedSubmoduleList: &gsdmlSystemSubmoduleList{
 								InterfaceSubmoduleItem: []gsdmlInterfaceSubmodule{
 									{
-										ID:                   "IDS_Interface",
-										SubmoduleIdentNumber: "0x00000001",
+										ID:                   "IDS_I",
+										SubmoduleIdentNumber: "0x00008000",
 										SubslotNumber:        "32768",
 										TextId:               "IDT_NAME_Interface",
 										SupportedRT_Classes:  "RT_CLASS_1",
-										NetworkInterface:     "0",
+										SupportedProtocols:   "LLDP",
+										ApplicationRelations: &gsdmlApplicationRelations{
+											StartupMode: "Advanced",
+											TimingProperties: gsdmlTimingProperties{
+												SendClock:      "32",
+												ReductionRatio: "1 2 4 8 16 32 64 128 256 512",
+											},
+										},
 									},
 								},
 								PortSubmoduleItem: []gsdmlPortSubmodule{
 									{
-										ID:                   "IDS_Port1",
-										SubmoduleIdentNumber: "0x00000002",
+										ID:                   "IDS_P1",
+										SubmoduleIdentNumber: "0x00008001",
 										SubslotNumber:        "32769",
 										TextId:               "IDT_NAME_Port1",
 										MaxPortRxDelay:       "350",
-										MaxPortTxDelay:       "350",
+										MaxPortTxDelay:       "160",
+										MAUTypeList: &gsdmlMAUTypeList{
+											MAUTypeItem: []gsdmlMAUTypeItem{
+												{Value: "16"},
+											},
+										},
 									},
 								},
 							},
@@ -370,44 +448,50 @@ func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
 				ModuleList: gsdmlModuleList{
 					ModuleItem: moduleItems,
 				},
-				ValueList: gsdmlValueList{
-					Value: values,
+				ExternalTextList: gsdmlExternalTextList{
+					PrimaryLanguage: gsdmlPrimaryLanguage{
+						Text: texts,
+					},
 				},
 			},
 		},
 	}
 
 	// If no user modules, ensure empty slices
-	if len(slotRange) > 0 && len(moduleItems) == 0 {
-		doc.ProfileBody.ApplicationProcess.DeviceAccessPointList.DeviceAccessPointItem[0].PhysicalSlots = "0"
-		doc.ProfileBody.ApplicationProcess.DeviceAccessPointList.DeviceAccessPointItem[0].UseableModules = nil
+	if len(moduleItems) == 0 {
+		profile.ProfileBody.ApplicationProcess.DeviceAccessPointList.DeviceAccessPointItem[0].PhysicalSlots = "0"
+		profile.ProfileBody.ApplicationProcess.DeviceAccessPointList.DeviceAccessPointItem[0].UseableModules = nil
 	}
 
-	return doc
+	return profile
 }
 
-func buildIOData(slotNum uint16, sub SubslotConfig) *gsdmlIOData {
+func buildIOData(slotNum uint16, sub SubslotConfig, addText func(string, string)) *gsdmlIOData {
 	ioData := &gsdmlIOData{}
 
 	if sub.InputSize > 0 && (sub.Direction == DirectionInput || sub.Direction == DirectionInputOutput) {
+		textId := fmt.Sprintf("IDT_IO_Slot%d_Sub%d_In", slotNum, sub.SubslotNumber)
+		addText(textId, fmt.Sprintf("Input data slot %d subslot %d", slotNum, sub.SubslotNumber))
 		ioData.Input = &gsdmlIODataDir{
 			DataItem: []gsdmlDataItem{
 				{
 					DataType: "OctetString",
 					Length:   fmt.Sprintf("%d", sub.InputSize),
-					TextId:   fmt.Sprintf("IDT_IO_Slot%d_Sub%d_In", slotNum, sub.SubslotNumber),
+					TextId:   textId,
 				},
 			},
 		}
 	}
 
 	if sub.OutputSize > 0 && (sub.Direction == DirectionOutput || sub.Direction == DirectionInputOutput) {
+		textId := fmt.Sprintf("IDT_IO_Slot%d_Sub%d_Out", slotNum, sub.SubslotNumber)
+		addText(textId, fmt.Sprintf("Output data slot %d subslot %d", slotNum, sub.SubslotNumber))
 		ioData.Output = &gsdmlIODataDir{
 			DataItem: []gsdmlDataItem{
 				{
 					DataType: "OctetString",
 					Length:   fmt.Sprintf("%d", sub.OutputSize),
-					TextId:   fmt.Sprintf("IDT_IO_Slot%d_Sub%d_Out", slotNum, sub.SubslotNumber),
+					TextId:   textId,
 				},
 			},
 		}

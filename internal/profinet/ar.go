@@ -296,28 +296,70 @@ func (m *ARManager) HandleWrite(blocks []PNIOBlock, objectUUID [16]byte) ([]byte
 	return respBuf, PNIOStatusOK
 }
 
-// HandleRead processes a Read RPC request.
+// HandleRead processes a Read or ReadImplicit RPC request.
+// IODReadReqHeader block data layout (after 6-byte block header):
+//
+//	[0:2]   SeqNumber
+//	[2:18]  ARUUID (16)
+//	[18:22] API (4)
+//	[22:24] SlotNumber (2)
+//	[24:26] SubslotNumber (2)
+//	[26:28] Padding (2)
+//	[28:30] Index (2)
+//	[30:34] RecordDataLength (4)
 func (m *ARManager) HandleRead(blocks []PNIOBlock, objectUUID [16]byte) ([]byte, PNIOStatus) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	var respBuf []byte
 	for _, b := range blocks {
-		if b.Type == BlockTypeIODReadReqHeader && len(b.Data) >= 24 {
-			index := binary.BigEndian.Uint16(b.Data[8:10])
+		if b.Type != BlockTypeIODReadReqHeader || len(b.Data) < 34 {
+			continue
+		}
 
-			switch {
-			case index == 0xAFF0: // I&M 0
-				im0 := m.buildIM0()
-				respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, b.Data)...)
-				respBuf = append(respBuf, im0...)
-			default:
-				respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, b.Data)...)
-			}
+		api := binary.BigEndian.Uint32(b.Data[18:22])
+		slot := binary.BigEndian.Uint16(b.Data[22:24])
+		subslot := binary.BigEndian.Uint16(b.Data[24:26])
+		index := binary.BigEndian.Uint16(b.Data[28:30])
+
+		m.log.Info("ar: read request", "index", fmt.Sprintf("0x%04X", index),
+			"api", api, "slot", slot, "subslot", subslot)
+
+		// Build response header from request fields
+		resHeader := m.buildReadResHeader(b.Data)
+
+		switch {
+		case index == 0xAFF0: // I&M 0
+			im0 := m.buildIM0()
+			// Set RecordDataLength in response header to actual data length
+			binary.BigEndian.PutUint32(resHeader[30:34], uint32(len(im0)))
+			respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, resHeader)...)
+			respBuf = append(respBuf, im0...)
+
+		default:
+			m.log.Debug("ar: read index not implemented, returning empty", "index", fmt.Sprintf("0x%04X", index))
+			// Return success with RecordDataLength = 0 (no record data)
+			binary.BigEndian.PutUint32(resHeader[30:34], 0)
+			respBuf = append(respBuf, MarshalPNIOBlock(BlockTypeIODReadResHeader, 1, 0, resHeader)...)
 		}
 	}
 
 	return respBuf, PNIOStatusOK
+}
+
+// buildReadResHeader creates a 58-byte IODReadResHeader data payload from a request.
+// Response layout: SeqNumber(2) + ARUUID(16) + API(4) + Slot(2) + Subslot(2) +
+// Padding(2) + Index(2) + RecordDataLength(4) + AdditionalValue1(2) +
+// AdditionalValue2(2) + Padding(20) = 58 bytes
+func (m *ARManager) buildReadResHeader(reqData []byte) []byte {
+	res := make([]byte, 58)
+	// Copy common fields: SeqNumber through Index (30 bytes)
+	copy(res[0:30], reqData[0:30])
+	// RecordDataLength at [30:34] — caller sets this
+	// AdditionalValue1 at [34:36] = 0
+	// AdditionalValue2 at [36:38] = 0
+	// Padding at [38:58] = 0
+	return res
 }
 
 // HandleControl processes a Control RPC request (PrmEnd, ApplicationReady, etc).

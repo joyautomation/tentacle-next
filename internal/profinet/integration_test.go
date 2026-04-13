@@ -475,7 +475,7 @@ func TestIntegrationFullCycle(t *testing.T) {
 	cfg.Slots = []SlotConfig{
 		{
 			SlotNumber:    1,
-			ModuleIdentNo: 0x00000001,
+			ModuleIdentNo: 0x00000100,
 			Subslots: []SubslotConfig{
 				{
 					SubslotNumber:    1,

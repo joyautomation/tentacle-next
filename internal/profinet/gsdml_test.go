@@ -73,6 +73,50 @@ func TestGenerateGSDML_ValidXML(t *testing.T) {
 	}
 }
 
+func TestGenerateGSDML_RootStructure(t *testing.T) {
+	cfg := testConfig()
+	data, err := GenerateGSDML(cfg)
+	if err != nil {
+		t.Fatalf("GenerateGSDML() error: %v", err)
+	}
+
+	s := string(data)
+
+	// Root element must be ISO15745Profile (not Container — PRONETA rejects Container as GSDX)
+	if !strings.Contains(s, "<ISO15745Profile ") {
+		t.Error("missing ISO15745Profile root element")
+	}
+	if strings.Contains(s, "ISO15745ProfileContainer") {
+		t.Error("should not use ISO15745ProfileContainer (PRONETA rejects as GSDX)")
+	}
+
+	// Must have PROFINET namespace and schema location
+	if !strings.Contains(s, `xmlns="http://www.profibus.com/GSDML/2003/11/DeviceProfile"`) {
+		t.Error("missing PROFINET namespace")
+	}
+	if !strings.Contains(s, `xsi:schemaLocation=`) {
+		t.Error("missing xsi:schemaLocation")
+	}
+
+	// DeviceFunction must use Family child element
+	if !strings.Contains(s, `<Family MainFamily="I/O"`) {
+		t.Error("missing Family element in DeviceFunction")
+	}
+
+	// Must use ExternalTextList, not ValueList
+	if strings.Contains(s, "<ValueList>") {
+		t.Error("should not contain ValueList (use ExternalTextList)")
+	}
+	if !strings.Contains(s, "<ExternalTextList>") {
+		t.Error("missing ExternalTextList")
+	}
+
+	// DAP must have PNIO_Version
+	if !strings.Contains(s, `PNIO_Version="V2.4"`) {
+		t.Error("missing PNIO_Version on DAP")
+	}
+}
+
 func TestGenerateGSDML_DeviceIdentity(t *testing.T) {
 	cfg := testConfig()
 	data, err := GenerateGSDML(cfg)
@@ -100,7 +144,7 @@ func TestGenerateGSDML_DAP(t *testing.T) {
 	}
 
 	s := string(data)
-	if !strings.Contains(s, `ID="IDD_DAP"`) {
+	if !strings.Contains(s, `ID="IDD_1"`) {
 		t.Error("missing DAP item")
 	}
 	if !strings.Contains(s, fmt.Sprintf(`DNS_CompatibleName="%s"`, cfg.StationName)) {
@@ -108,6 +152,9 @@ func TestGenerateGSDML_DAP(t *testing.T) {
 	}
 	if !strings.Contains(s, `SupportedRT_Classes="RT_CLASS_1"`) {
 		t.Error("missing RT class")
+	}
+	if !strings.Contains(s, `<ApplicationRelations`) {
+		t.Error("missing ApplicationRelations in InterfaceSubmodule")
 	}
 }
 
@@ -182,7 +229,7 @@ func TestGenerateGSDML_NoUserModules(t *testing.T) {
 func TestGSDMLFilename(t *testing.T) {
 	cfg := &ProfinetConfig{DeviceName: "My Bridge 2000"}
 	name := GSDMLFilename(cfg)
-	if !strings.HasPrefix(name, "GSDML-V2.4-JoyAutomation-MyBridge2000-") {
+	if !strings.HasPrefix(name, "GSDML-V2.35-JoyAutomation-MyBridge2000-") {
 		t.Errorf("unexpected filename: %s", name)
 	}
 	if !strings.HasSuffix(name, ".xml") {
@@ -230,5 +277,23 @@ func TestGenerateGSDML_InputOutputDirection(t *testing.T) {
 	}
 	if !strings.Contains(s, "<Output>") {
 		t.Error("missing Output section for inputOutput subslot")
+	}
+}
+
+func TestGenerateGSDML_ExternalTextList(t *testing.T) {
+	cfg := testConfig()
+	data, err := GenerateGSDML(cfg)
+	if err != nil {
+		t.Fatalf("GenerateGSDML() error: %v", err)
+	}
+
+	s := string(data)
+
+	// IO data text IDs should be in the text list
+	if !strings.Contains(s, `TextId="IDT_IO_Slot1_Sub1_In"`) {
+		t.Error("missing IO text ID for input data")
+	}
+	if !strings.Contains(s, `TextId="IDT_IO_Slot2_Sub1_Out"`) {
+		t.Error("missing IO text ID for output data")
 	}
 }

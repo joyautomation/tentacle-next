@@ -84,6 +84,9 @@ func (d *Device) Start(ctx context.Context) error {
 		if d.lldp != nil {
 			d.lldp.SetIP(newIP)
 		}
+		if d.rpc != nil {
+			d.rpc.SetIP(newIP)
+		}
 		return nil
 	}
 	d.dcp = NewDCPResponder(transport, DCPResponderConfig{
@@ -99,7 +102,7 @@ func (d *Device) Start(ctx context.Context) error {
 	}, d.log)
 
 	// Create RPC server (UDP port 34964)
-	d.rpc = NewRPCServer(d.cfg, d.arMgr, transport.LocalMAC(), d.log)
+	d.rpc = NewRPCServer(d.cfg, d.arMgr, transport.LocalMAC(), ip, d.log)
 
 	// Create LLDP sender
 	d.lldp = NewLLDPSender(transport, d.cfg, transport.LocalMAC(), ip, d.log)

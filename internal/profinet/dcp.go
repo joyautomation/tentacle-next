@@ -248,6 +248,18 @@ func dcpBlockDeviceOptions(options []DCPBlock) DCPBlock {
 	return DCPBlock{Option: DCPOptionDeviceProperties, SubOption: DCPSubOptionDevOptions, Data: data}
 }
 
+// dcpBlockDHCPClientID creates a DHCP Client Identifier block (Option 61 / SubOption 0x3D).
+// Including this in the Identify response signals to tools like PRONETA that the device supports DHCP.
+func dcpBlockDHCPClientID(mac net.HardwareAddr) DCPBlock {
+	// All DCP response blocks include BlockInfo(2) prefix, then payload.
+	// DHCP option 61 payload: type(1) = 0x01 (Ethernet) + MAC(6)
+	data := make([]byte, 2+1+len(mac))
+	binary.BigEndian.PutUint16(data[0:2], 0x0000) // BlockInfo: reserved
+	data[2] = 0x01                                 // hardware type: Ethernet
+	copy(data[3:], mac)
+	return DCPBlock{Option: DCPOptionDHCP, SubOption: 0x3D, Data: data}
+}
+
 // dcpBlockControlResponse creates a Control response block (for Set responses).
 func dcpBlockControlResponse(option, subOption, errorCode uint8) DCPBlock {
 	data := []byte{option, subOption, errorCode}

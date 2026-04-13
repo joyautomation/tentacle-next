@@ -4,6 +4,7 @@ package profinet
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -165,13 +166,23 @@ func (r *DCPResponder) handleIdentify(req *DCPFrame, srcMAC net.HardwareAddr) {
 	}
 
 	// Build response blocks
+	nameBlock := dcpBlockNameOfStation(r.stationName)
+	vendorBlock := dcpBlockVendor(r.vendorName)
+	devIDBlock := dcpBlockDeviceID(r.vendorID, r.deviceID)
+	roleBlock := dcpBlockDeviceRole(DeviceRoleIODevice)
+	instanceBlock := dcpBlockDeviceInstance(0x00, 0x01)
+	ipBlock := dcpBlockIPSuite(r.ip, r.mask, r.gateway, ipBlockInfo)
+	dhcpBlock := dcpBlockDHCPClientID(r.transport.LocalMAC())
+
 	blocks := []DCPBlock{
-		dcpBlockNameOfStation(r.stationName),
-		dcpBlockVendor(r.vendorName),
-		dcpBlockDeviceID(r.vendorID, r.deviceID),
-		dcpBlockDeviceRole(DeviceRoleIODevice),
-		dcpBlockDeviceInstance(0x00, 0x01),
-		dcpBlockIPSuite(r.ip, r.mask, r.gateway, ipBlockInfo),
+		nameBlock,
+		vendorBlock,
+		devIDBlock,
+		roleBlock,
+		instanceBlock,
+		ipBlock,
+		dhcpBlock,
+		dcpBlockDeviceOptions([]DCPBlock{nameBlock, vendorBlock, devIDBlock, roleBlock, instanceBlock, ipBlock, dhcpBlock}),
 	}
 
 	resp := &DCPFrame{
@@ -194,8 +205,18 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 	r.log.Debug("dcp: received Set request", "from", srcMAC, "xid", req.Xid, "blocks", len(req.Blocks))
 
 	var respBlocks []DCPBlock
+	// Collect async callbacks to fire AFTER sending the DCP response.
+	// DCP has strict timing — the response must be sent immediately.
+	type deferredIPSet struct {
+		ip, mask, gw net.IP
+		permanent    bool
+	}
+	var deferred *deferredIPSet
 
 	for _, block := range req.Blocks {
+		r.log.Debug("dcp: processing Set block", "option", fmt.Sprintf("0x%02X", block.Option),
+			"subOption", fmt.Sprintf("0x%02X", block.SubOption), "dataLen", len(block.Data))
+
 		switch {
 		case block.Option == DCPOptionIP && block.SubOption == DCPSubOptionIPSuite:
 			// SET block data: BlockQualifier(2) + IP(4) + Mask(4) + Gateway(4)
@@ -213,15 +234,7 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 				continue
 			}
 
-			// Try to apply the IP before committing state
-			if r.onIPSet != nil {
-				if err := r.onIPSet(ip, mask, gw, permanent); err != nil {
-					r.log.Warn("dcp: failed to apply IP", "error", err)
-					respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x03))
-					continue
-				}
-			}
-
+			// Update state immediately so subsequent DCP Identify reports the new IP
 			r.ip = ip
 			r.mask = mask
 			r.gateway = gw
@@ -229,6 +242,9 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 
 			r.log.Info("dcp: IP set by controller", "ip", ip, "mask", mask, "gateway", gw, "permanent", permanent)
 			respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x00))
+
+			// Defer the actual network apply until after the response is sent
+			deferred = &deferredIPSet{ip: ip, mask: mask, gw: gw, permanent: permanent}
 
 		case block.Option == DCPOptionDeviceProperties && block.SubOption == DCPSubOptionDevNameOfStation:
 			// SET block data: BlockQualifier(2) + NameOfStation
@@ -246,12 +262,30 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 
 			respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x00))
 
+		case block.Option == DCPOptionDHCP:
+			// DHCP option from controller (e.g., PRONETA "Obtain IP from DHCP server")
+			r.log.Info("dcp: DHCP requested by controller", "subOption", fmt.Sprintf("0x%02X", block.SubOption))
+
+			r.ip = net.IPv4zero.To4()
+			r.mask = net.IPv4zero.To4()
+			r.gateway = net.IPv4zero.To4()
+			r.ipSet = false
+			respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x00))
+
+			// Defer DHCP activation until after the response is sent
+			deferred = &deferredIPSet{
+				ip: net.IPv4zero.To4(), mask: net.IPv4zero.To4(), gw: net.IPv4zero.To4(), permanent: true,
+			}
+
 		default:
 			// Unsupported option — respond with error
+			r.log.Warn("dcp: unsupported Set option", "option", fmt.Sprintf("0x%02X", block.Option),
+				"subOption", fmt.Sprintf("0x%02X", block.SubOption))
 			respBlocks = append(respBlocks, dcpBlockControlResponse(block.Option, block.SubOption, 0x02))
 		}
 	}
 
+	// Send response immediately — DCP timing is critical
 	resp := &DCPFrame{
 		FrameID:     FrameIDDCPGetSet,
 		ServiceID:   DCPServiceSet,
@@ -262,6 +296,16 @@ func (r *DCPResponder) handleSet(req *DCPFrame, srcMAC net.HardwareAddr) {
 
 	if err := r.transport.SendDCPResponse(srcMAC, resp); err != nil {
 		r.log.Warn("dcp: failed to send Set response", "error", err)
+	}
+
+	// Fire the network apply callback asynchronously
+	if deferred != nil && r.onIPSet != nil {
+		d := deferred
+		go func() {
+			if err := r.onIPSet(d.ip, d.mask, d.gw, d.permanent); err != nil {
+				r.log.Warn("dcp: async IP apply failed", "error", err)
+			}
+		}()
 	}
 }
 

@@ -27,14 +27,14 @@ const (
 	RPCPTypeFack     uint8 = 0x09
 )
 
-// DCE/RPC flags1 bits.
+// DCE/RPC flags1 bits (bit 0 is reserved for implementation).
 const (
-	RPCFlagLastFrag   uint8 = 0x01
-	RPCFlagFrag       uint8 = 0x02
-	RPCFlagNoFack     uint8 = 0x04
-	RPCFlagMaybe      uint8 = 0x08
-	RPCFlagIdempotent uint8 = 0x10
-	RPCFlagBroadcast  uint8 = 0x20
+	RPCFlagLastFrag   uint8 = 0x02
+	RPCFlagFrag       uint8 = 0x04
+	RPCFlagNoFack     uint8 = 0x08
+	RPCFlagMaybe      uint8 = 0x10
+	RPCFlagIdempotent uint8 = 0x20
+	RPCFlagBroadcast  uint8 = 0x40
 )
 
 // PNIO RPC operation numbers.
@@ -65,6 +65,15 @@ var (
 		0x11, 0xC9,
 		0x91, 0xA4,
 		0x08, 0x00, 0x2B, 0x14, 0xA0, 0xFA,
+	}
+
+	// NDR Transfer Syntax UUID: 8A885D04-1CEB-11C9-9FE8-08002B104860
+	UUIDNDRTransferSyntax = [16]byte{
+		0x8A, 0x88, 0x5D, 0x04,
+		0x1C, 0xEB,
+		0x11, 0xC9,
+		0x9F, 0xE8,
+		0x08, 0x00, 0x2B, 0x10, 0x48, 0x60,
 	}
 )
 
@@ -273,6 +282,7 @@ type RPCServer struct {
 	arMgr    *ARManager
 	cfg      *ProfinetConfig
 	localMAC net.HardwareAddr
+	localIP  net.IP
 	log      *slog.Logger
 	bootTime uint32
 
@@ -280,15 +290,23 @@ type RPCServer struct {
 }
 
 // NewRPCServer creates a new PNIO RPC server.
-func NewRPCServer(cfg *ProfinetConfig, arMgr *ARManager, localMAC net.HardwareAddr, log *slog.Logger) *RPCServer {
+func NewRPCServer(cfg *ProfinetConfig, arMgr *ARManager, localMAC net.HardwareAddr, localIP net.IP, log *slog.Logger) *RPCServer {
 	return &RPCServer{
 		addr:     fmt.Sprintf(":%d", PNIOCMPort),
 		arMgr:    arMgr,
 		cfg:      cfg,
 		localMAC: localMAC,
+		localIP:  localIP,
 		log:      log,
 		bootTime: uint32(time.Now().Unix()),
 	}
+}
+
+// SetIP updates the local IP address (thread-safe).
+func (s *RPCServer) SetIP(ip net.IP) {
+	s.mu.Lock()
+	s.localIP = ip.To4()
+	s.mu.Unlock()
 }
 
 // Run starts the UDP server. Blocks until context is cancelled.
@@ -355,7 +373,7 @@ func (s *RPCServer) handlePacket(data []byte, from *net.UDPAddr) {
 	if header.InterfaceUUID == UUIDPNIOInterface {
 		s.handlePNIORequest(header, body, from)
 	} else if header.InterfaceUUID == UUIDEndpointMapper {
-		s.log.Debug("rpc: EPM request (ignored)", "from", from, "opnum", header.OpNum)
+		s.handleEPM(header, body, from)
 	} else {
 		s.log.Debug("rpc: unknown interface", "uuid", fmt.Sprintf("%x", header.InterfaceUUID))
 	}
@@ -375,6 +393,8 @@ func (s *RPCServer) handlePNIORequest(header *RPCHeader, body []byte, from *net.
 		s.handleWrite(header, body, from, le)
 	case RPCOpControl:
 		s.handleControl(header, body, from, le)
+	case RPCOpReadImplicit:
+		s.handleRead(header, body, from, le)
 	default:
 		s.log.Warn("rpc: unknown opnum", "opnum", header.OpNum)
 	}
@@ -431,6 +451,308 @@ func (s *RPCServer) handleWrite(header *RPCHeader, body []byte, from *net.UDPAdd
 	s.sendResponse(header, from, status, respBlocks, le)
 }
 
+// PROFINET IO Object Instance UUID base: DEA00000-6C97-11D1-8271-00xx-xxxx-xxxx
+// The node bytes encode: interface_index(2) + DeviceID(2) + VendorID(2)
+var UUIDPNIOObjectBase = [16]byte{
+	0xDE, 0xA0, 0x00, 0x00,
+	0x6C, 0x97,
+	0x11, 0xD1,
+	0x82, 0x71,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+}
+
+// handleEPM responds to DCE/RPC Endpoint Mapper lookup requests.
+// PROFINET EPM is stateful with 2 entries returned across multiple requests:
+//  1. EPMv4 interface tower (sequence 0)
+//  2. PNIO interface tower (sequence 1)
+//  3. NOT_REGISTERED (sequence >= 2)
+// Reference: p-net pf_cmrpc_epm.c, PN-AL-protocol Section 4.10.3
+func (s *RPCServer) handleEPM(header *RPCHeader, body []byte, from *net.UDPAddr) {
+	le := header.IsLittleEndian()
+	s.log.Info("rpc: EPM lookup request", "from", from, "opnum", header.OpNum, "seq", header.SequenceNum)
+
+	// We only handle ept_lookup (opnum 2)
+	if header.OpNum != 2 {
+		s.log.Debug("rpc: EPM opnum not supported", "opnum", header.OpNum)
+		return
+	}
+
+	s.mu.Lock()
+	localIP := s.localIP
+	s.mu.Unlock()
+	if localIP == nil {
+		localIP = net.IPv4zero.To4()
+	}
+
+	// Determine state from the entry_handle in the request body.
+	// NDR layout (flat, per p-net pf_get_epm_lookup_request):
+	//   [0:4]   inquiry_type
+	//   [4:8]   object referent ID
+	//   [8:24]  object UUID (16)
+	//   [24:28] interface referent ID
+	//   [28:44] interface UUID (16)
+	//   [44:46] interface ver major
+	//   [46:48] interface ver minor
+	//   [48:52] version_option
+	//   [52:72] entry_handle (4 byte seq + 16 byte UUID)
+	//   [72:76] max_entries
+	handleZero := true
+	if len(body) >= 72 {
+		for _, b := range body[52:72] {
+			if b != 0 {
+				handleZero = false
+				break
+			}
+		}
+		s.log.Debug("rpc: EPM handle", "bytes", fmt.Sprintf("%x", body[52:72]), "zero", handleZero)
+	}
+
+	var respBody []byte
+	if handleZero {
+		// First request: return PNIO tower entry with a non-zero handle.
+		// return_code=0 tells the client "more entries may exist".
+		// The non-zero handle ensures the follow-up request won't restart from scratch.
+		s.log.Debug("rpc: EPM returning PNIO entry with non-zero handle")
+		tower := s.buildTower(UUIDPNIOInterface, 1, localIP, PNIOCMPort)
+		objectUUID := s.pnioObjectUUID()
+		handle := s.generateEPMHandle()
+		respBody = s.buildEPMLookupResponse(objectUUID, tower, handle, le)
+	} else {
+		// Follow-up request (non-zero handle): no more entries
+		s.log.Debug("rpc: EPM no more entries")
+		respBody = s.buildEPMNoEntryResponse(le)
+	}
+
+	s.sendEPMResponse(header, respBody, from)
+}
+
+func (s *RPCServer) sendEPMResponse(header *RPCHeader, respBody []byte, to *net.UDPAddr) {
+	resp := &RPCHeader{
+		RPCVersion:       RPCVersionCL,
+		PacketType:       RPCPTypeResponse,
+		Flags1:           RPCFlagLastFrag | RPCFlagNoFack | RPCFlagIdempotent,
+		Flags2:           0,
+		DataRep:          header.DataRep,
+		SerialHigh:       header.SerialHigh,
+		ObjectUUID:       header.ObjectUUID,
+		InterfaceUUID:    header.InterfaceUUID,
+		ActivityUUID:     header.ActivityUUID,
+		ServerBootTime:   s.bootTime,
+		InterfaceVersion: header.InterfaceVersion,
+		SequenceNum:      header.SequenceNum,
+		OpNum:            header.OpNum,
+		InterfaceHint:    0xFFFF,
+		ActivityHint:     0xFFFF,
+		FragmentLen:      uint16(len(respBody)),
+		FragmentNum:      0,
+		AuthProto:        0,
+		SerialLow:        header.SerialLow,
+	}
+
+	pkt := append(resp.Marshal(), respBody...)
+
+	s.mu.Lock()
+	conn := s.conn
+	s.mu.Unlock()
+
+	if conn != nil {
+		if _, err := conn.WriteToUDP(pkt, to); err != nil {
+			s.log.Warn("rpc: EPM send failed", "error", err)
+		}
+	}
+}
+
+// generateEPMHandle creates a non-zero EPM context handle from timestamp + MAC.
+func (s *RPCServer) generateEPMHandle() [20]byte {
+	var h [20]byte
+	// entry_handle (4 bytes) = 0
+	// handle UUID (16 bytes) based on timestamp and MAC
+	ts := uint32(time.Now().UnixMicro())
+	binary.LittleEndian.PutUint32(h[4:8], ts&0x0000FFFF)             // time_low
+	binary.LittleEndian.PutUint16(h[8:10], uint16(ts>>16)&0x00FF)    // time_mid
+	binary.LittleEndian.PutUint16(h[10:12], uint16(ts>>24)|0x1000)   // time_hi_and_version
+	h[12] = 0x80                                                      // clock_hi_and_reserved
+	h[13] = 0x0C                                                      // clock_low
+	if len(s.localMAC) >= 6 {
+		copy(h[14:20], s.localMAC[:6]) // node = MAC address
+	}
+	return h
+}
+
+// pnioObjectUUID builds the PNIO IO Object Instance UUID with encoded device identity.
+// Format: DEA00000-6C97-11D1-8271-00:01:DeviceID_hi:DeviceID_lo:VendorID_hi:VendorID_lo
+func (s *RPCServer) pnioObjectUUID() [16]byte {
+	uuid := UUIDPNIOObjectBase
+	uuid[10] = 0x00                          // interface index high
+	uuid[11] = 0x01                          // interface index low
+	uuid[12] = byte(s.cfg.DeviceID >> 8)     // DeviceID high
+	uuid[13] = byte(s.cfg.DeviceID & 0xFF)   // DeviceID low
+	uuid[14] = byte(s.cfg.VendorID >> 8)     // VendorID high
+	uuid[15] = byte(s.cfg.VendorID & 0xFF)   // VendorID low
+	return uuid
+}
+
+// buildTower creates a DCE/RPC tower for a given interface UUID.
+func (s *RPCServer) buildTower(ifUUID [16]byte, versionMajor uint16, ip net.IP, port uint16) []byte {
+	var t []byte
+
+	// Number of floors
+	t = append(t, 0x05, 0x00) // 5 floors, LE
+
+	// Floor 1: Interface UUID
+	t = append(t, 0x13, 0x00) // LHS length = 19
+	t = append(t, 0x0D)       // protocol: UUID
+	t = append(t, uuidToWire(ifUUID, true)...)
+	t = append(t, byte(versionMajor), byte(versionMajor>>8)) // version major (LE)
+	t = append(t, 0x02, 0x00) // RHS length = 2
+	t = append(t, 0x00, 0x00) // version minor = 0
+
+	// Floor 2: Transfer syntax (NDR)
+	t = append(t, 0x13, 0x00) // LHS length = 19
+	t = append(t, 0x0D)       // protocol: UUID
+	t = append(t, uuidToWire(UUIDNDRTransferSyntax, true)...)
+	t = append(t, 0x02, 0x00) // NDR version major = 2
+	t = append(t, 0x02, 0x00) // RHS length = 2
+	t = append(t, 0x00, 0x00) // NDR version minor = 0
+
+	// Floor 3: RPC connectionless (ncadg)
+	t = append(t, 0x01, 0x00) // LHS length = 1
+	t = append(t, 0x0A)       // protocol: connectionless RPC
+	t = append(t, 0x02, 0x00) // RHS length = 2
+	t = append(t, 0x00, 0x00) // minor version = 0
+
+	// Floor 4: UDP transport
+	t = append(t, 0x01, 0x00) // LHS length = 1
+	t = append(t, 0x08)       // protocol: UDP
+	t = append(t, 0x02, 0x00) // RHS length = 2
+	t = append(t, byte(port>>8), byte(port&0xFF)) // port in network byte order
+
+	// Floor 5: IP address
+	t = append(t, 0x01, 0x00) // LHS length = 1
+	t = append(t, 0x09)       // protocol: IP
+	t = append(t, 0x04, 0x00) // RHS length = 4
+	ip4 := ip.To4()
+	if ip4 == nil {
+		ip4 = net.IPv4zero.To4()
+	}
+	t = append(t, ip4...)
+
+	return t
+}
+
+// buildEPMLookupResponse creates the NDR body for an ept_lookup response with one entry.
+// Wire layout matches p-net pf_put_lookup_response_data() exactly.
+func (s *RPCServer) buildEPMLookupResponse(objectUUID [16]byte, tower []byte, handle [20]byte, le bool) []byte {
+	buf32 := epmBuf32(le)
+
+	var resp []byte
+
+	// Context handle (20 bytes): rpc_entry_handle(4) + handle_uuid(16)
+	resp = append(resp, handle[:]...)
+
+	// num_entry = 1
+	resp = append(resp, buf32(1)...)
+
+	// NDR conformant/varying array header for entries
+	resp = append(resp, buf32(1)...) // max_count = 1
+	resp = append(resp, buf32(0)...) // offset = 0
+	resp = append(resp, buf32(1)...) // actual_count = 1
+
+	// Entry[0]: object UUID (16 bytes, wire format)
+	resp = append(resp, uuidToWire(objectUUID, le)...)
+
+	// Entry[0]: tower pointer (referent ID = 3, per p-net PF_RPC_TOWER_REFERENTID)
+	resp = append(resp, buf32(3)...)
+
+	// Entry[0]: annotation — NDR varying string [string] char[64]
+	// Varying encoding: offset(4) + actual_count(4) + data (no max_count since size is fixed)
+	ann := s.buildAnnotation()
+	// actual_count = length up to and including null terminator
+	annLen := uint32(len(ann))
+	for i, b := range ann {
+		if b == 0 {
+			annLen = uint32(i + 1)
+			break
+		}
+	}
+	resp = append(resp, buf32(0)...)      // offset = 0
+	resp = append(resp, buf32(annLen)...) // actual_count
+	resp = append(resp, ann[:annLen]...)
+	// Pad annotation to 4-byte boundary
+	if pad := int(annLen) % 4; pad != 0 {
+		resp = append(resp, make([]byte, 4-pad)...)
+	}
+
+	// Tower pointee (deferred pointer data for twr_t conformant struct):
+	// max_count(4) + tower_length(4) + tower_data
+	towerLen := uint32(len(tower))
+	resp = append(resp, buf32(towerLen)...) // conformant max_count
+	resp = append(resp, buf32(towerLen)...) // tower_length field
+	resp = append(resp, tower...)
+
+	// Pad tower to 4-byte boundary
+	if pad := len(tower) % 4; pad != 0 {
+		resp = append(resp, make([]byte, 4-pad)...)
+	}
+
+	// return_code = 0 (success)
+	resp = append(resp, buf32(0)...)
+
+	return resp
+}
+
+// buildEPMNoEntryResponse creates the NDR body for a "no more entries" EPM response.
+func (s *RPCServer) buildEPMNoEntryResponse(le bool) []byte {
+	buf32 := epmBuf32(le)
+
+	var resp []byte
+
+	// Zero handle (20 bytes) — done
+	resp = append(resp, make([]byte, 20)...)
+
+	// num_entry = 0
+	resp = append(resp, buf32(0)...)
+
+	// NDR conformant/varying array header (empty)
+	resp = append(resp, buf32(0)...) // max_count = 0
+	resp = append(resp, buf32(0)...) // offset = 0
+	resp = append(resp, buf32(0)...) // actual_count = 0
+
+	// return_code = EPM_NOT_REGISTERED (0x16c9a0d6)
+	resp = append(resp, buf32(0x16c9a0d6)...)
+
+	return resp
+}
+
+// buildAnnotation returns a 64-byte annotation string for EPM entries.
+// Format matches p-net: "%-25s %-20s %5u %c%3u%3u%3u"
+func (s *RPCServer) buildAnnotation() []byte {
+	name := s.cfg.DeviceName
+	if len(name) > 25 {
+		name = name[:25]
+	}
+	ann := fmt.Sprintf("%-25s %-20s %5d V  0  0  1", name, "", 1)
+	buf := make([]byte, 64)
+	copy(buf, []byte(ann))
+	return buf
+}
+
+// epmBuf32 returns a helper function that encodes uint32 in the given byte order.
+func epmBuf32(le bool) func(uint32) []byte {
+	if le {
+		return func(v uint32) []byte {
+			b := make([]byte, 4)
+			binary.LittleEndian.PutUint32(b, v)
+			return b
+		}
+	}
+	return func(v uint32) []byte {
+		b := make([]byte, 4)
+		binary.BigEndian.PutUint32(b, v)
+		return b
+	}
+}
+
 func (s *RPCServer) handleControl(header *RPCHeader, body []byte, from *net.UDPAddr, le bool) {
 	_, blocks, err := ParsePNIORequestBody(body, le)
 	if err != nil {
@@ -447,10 +769,16 @@ func (s *RPCServer) handleControl(header *RPCHeader, body []byte, from *net.UDPA
 func (s *RPCServer) sendResponse(reqHeader *RPCHeader, to *net.UDPAddr, status PNIOStatus, responseBlocks []byte, le bool) {
 	body := MarshalPNIOResponseBody(status, responseBlocks, le)
 
+	// Mirror the Idempotent flag from the request — DCE/RPC requires it.
+	flags := RPCFlagLastFrag | RPCFlagNoFack
+	if reqHeader.Flags1&RPCFlagIdempotent != 0 {
+		flags |= RPCFlagIdempotent
+	}
+
 	resp := &RPCHeader{
 		RPCVersion:       RPCVersionCL,
 		PacketType:       RPCPTypeResponse,
-		Flags1:           RPCFlagLastFrag | RPCFlagNoFack,
+		Flags1:           flags,
 		Flags2:           0,
 		DataRep:          reqHeader.DataRep,
 		SerialHigh:       reqHeader.SerialHigh,
