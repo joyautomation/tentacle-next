@@ -20,11 +20,12 @@
 
   // Don't show if already a service or if systemd unavailable
   const visible = $derived(
-    status != null &&
-    status.systemdAvailable &&
-    status.mode !== 'systemd' &&
-    !status.unitActive &&
-    phase !== 'activating'
+    phase === 'activating' || (
+      status != null &&
+      status.systemdAvailable &&
+      status.mode !== 'systemd' &&
+      !status.unitActive
+    )
   );
 
   onMount(() => {
