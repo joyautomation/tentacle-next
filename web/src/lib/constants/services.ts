@@ -1,6 +1,7 @@
 /** Unified display names for service types (keyed by serviceType from heartbeats) */
 export const SERVICE_NAMES: Record<string, string> = {
   api: 'API',
+  caddy: 'Caddy',
   ethernetip: 'EtherNet/IP',
   'ethernetip-server': 'EtherNet/IP Server',
   gateway: 'Gateway',

@@ -46,8 +46,8 @@
 
   // Add-on modules that are NOT already core to each archetype
   const ARCHETYPE_ADDONS: Record<string, Set<string>> = {
-    'sparkplug-gateway': new Set(['network', 'gitops']),
-    'nat-gateway': new Set(['gitops']),
+    'sparkplug-gateway': new Set(['caddy', 'network', 'gitops']),
+    'nat-gateway': new Set(['caddy', 'gitops']),
   };
 
   // Pre-populate from existing config

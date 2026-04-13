@@ -73,6 +73,7 @@
   type ModuleRole = 'client' | 'server' | 'data';
 
   const MODULE_ROLES: Record<string, ModuleRole> = {
+    caddy: 'data',
     ethernetip: 'client',
     modbus: 'client',
     opcua: 'client',
@@ -136,6 +137,7 @@
 
   const serviceIcons: Record<string, typeof Squares2x2> = {
     api: ServerStack,
+    caddy: ShieldCheck,
     plc: CpuChip,
     ethernetip: CpuChip,
     mqtt: Signal,

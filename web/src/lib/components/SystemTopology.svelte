@@ -21,7 +21,7 @@
 
   let { services, apiConnected, monolith = false }: Props = $props();
 
-  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
+  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
 
   type NodeDatum = {
     id: string;
@@ -68,6 +68,7 @@
       case 'bus': return 50;
       case 'api':
       case 'web': return 40;
+      case 'caddy':
       case 'ethernetip':
       case 'ethernetip-server':
       case 'gateway':
@@ -196,6 +197,14 @@
 
     // Link Web UI to API (or hub if no API service found)
     links.push({ source: webParent, target: 'web' });
+
+    // Link Caddy → API to represent the reverse proxy relationship
+    if (apiService) {
+      const caddyNode = nodes.find(n => n.type === 'caddy');
+      if (caddyNode) {
+        links.push({ source: caddyNode.id, target: `api-${apiService.moduleId}` });
+      }
+    }
 
     // Mark data-flow links as active and set flow direction
     // EtherNet/IP: data flows from device → EIP → NATS (inbound to NATS)
@@ -504,6 +513,7 @@
           case 'bus': return 'BUS';
           case 'api': return 'API';
           case 'web': return 'WEB';
+          case 'caddy': return 'CDY';
           case 'ethernetip': return 'EIP';
           case 'ethernetip-server': return 'EIPS';
           case 'gateway': return 'GW';
