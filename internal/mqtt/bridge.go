@@ -62,6 +62,9 @@ func NewBridge(b bus.Bus, moduleID string, config itypes.MqttBridgeConfig, log *
 }
 
 // Start connects to MQTT and begins bridging data.
+// Bus subscriptions for metrics, store-forward status, and data are set up
+// regardless of broker connectivity so the module stays responsive and
+// buffers data when the broker is unreachable.
 func (br *Bridge) Start() error {
 	br.node = NewSparkplugNode(br.config, br.log)
 
@@ -79,31 +82,63 @@ func (br *Bridge) Start() error {
 		br.node.OnHostState(br.handleHostState)
 	}
 
-	// Connect to MQTT broker
-	if err := br.node.Connect(); err != nil {
-		return fmt.Errorf("mqtt connect: %w", err)
-	}
-
-	// Load initial variables and publish DBIRTH BEFORE subscribing to data.
-	// This prevents a race where DDATA is sent before DBIRTH — Ignition
-	// ignores DDATA for unknown metrics, and RBE marks them as published,
-	// so slowly-changing values never get republished after DBIRTH.
-	br.loadInitialVariables()
-
-	// Subscribe to all data from all scanner modules
+	// Set up bus subscriptions BEFORE connecting so the module responds to
+	// status queries and buffers incoming data even when the broker is down.
+	br.subscribeToMetricsRequest()
+	br.subscribeToSFStatus()
 	br.subscribeToData()
 
 	// Start drain goroutine
 	br.drainStop = make(chan struct{})
 	go br.drainLoop()
 
-	// Subscribe to metrics request
-	br.subscribeToMetricsRequest()
+	// Connect to MQTT broker
+	if err := br.node.Connect(); err != nil {
+		br.log.Warn("mqtt: broker unreachable, starting in offline/buffering mode", "error", err)
+		br.sf.SetOffline()
+		go br.reconnectLoop()
+		return nil
+	}
 
-	// Subscribe to store-forward status request
-	br.subscribeToSFStatus()
+	// Load initial variables and publish DBIRTH BEFORE data starts flowing.
+	// This prevents a race where DDATA is sent before DBIRTH — Ignition
+	// ignores DDATA for unknown metrics, and RBE marks them as published,
+	// so slowly-changing values never get republished after DBIRTH.
+	br.loadInitialVariables()
 
 	return nil
+}
+
+// reconnectLoop retries the broker connection periodically after initial
+// connection failure. Once connected it loads variables and transitions
+// store-forward out of offline mode.
+func (br *Bridge) reconnectLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-br.drainStop:
+			return
+		case <-ticker.C:
+			if br.node.State() != StateDisconnected {
+				return // already connected (e.g. via paho auto-reconnect)
+			}
+			br.log.Info("mqtt: attempting to reconnect to broker")
+			if err := br.node.Connect(); err != nil {
+				br.log.Warn("mqtt: reconnect failed", "error", err)
+				continue
+			}
+			br.loadInitialVariables()
+			// Store-forward will transition to online/draining when
+			// the primary host STATE message arrives, or if no primary
+			// host is configured, set online now so data flows.
+			if br.config.PrimaryHostID == "" {
+				br.sf.SetOnline()
+			}
+			return
+		}
+	}
 }
 
 // Stop disconnects from MQTT and cleans up.
@@ -240,8 +275,8 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 	}
 	metric := br.valueToMetric(pv, msg.Value, nowMs)
 
-	if br.sf.State() == SFOffline {
-		// Buffer the data
+	// Buffer data when broker is unreachable or store-forward is offline
+	if br.sf.State() == SFOffline || br.node.State() != StateBorn {
 		payload := &sparkplug.Payload{
 			Timestamp: uint64(nowMs),
 			Metrics:   []sparkplug.Metric{metric},

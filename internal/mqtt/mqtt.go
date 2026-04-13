@@ -116,11 +116,12 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 	}()
 
-	// Create and start the bridge
+	// Create and start the bridge. Start() sets up bus subscriptions and
+	// data handling regardless of broker connectivity — it only returns
+	// an error for non-recoverable failures.
 	m.bridge = NewBridge(b, m.moduleID, cfg, m.log)
 	if err := m.bridge.Start(); err != nil {
 		m.log.Error("mqtt: failed to start bridge", "error", err)
-		// Don't return error — continue running so heartbeat/config updates work
 	} else {
 		m.log.Info("mqtt: bridge started",
 			"broker", cfg.BrokerURL,
