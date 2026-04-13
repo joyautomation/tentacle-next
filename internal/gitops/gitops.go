@@ -8,11 +8,11 @@ package gitops
 import (
 	"context"
 	"log/slog"
-	"os"
 	"path/filepath"
 
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/config"
+	"github.com/joyautomation/tentacle/internal/paths"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
 	"github.com/joyautomation/tentacle/internal/topics"
 )
@@ -85,11 +85,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	})
 
 	// Set up local clone directory.
-	dataDir := os.Getenv("TENTACLE_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "/var/lib/tentacle"
-	}
-	cloneDir := filepath.Join(dataDir, "gitops", "repo")
+	cloneDir := filepath.Join(paths.DataDir(), "gitops", "repo")
 
 	m.repo = &gitRepo{
 		dir:        cloneDir,

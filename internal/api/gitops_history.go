@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/joyautomation/tentacle/internal/manifest"
+	"github.com/joyautomation/tentacle/internal/paths"
 )
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -88,11 +89,7 @@ func (m *Module) execGitops(args ...string) (string, error) {
 }
 
 func (m *Module) getGitopsRepoDir() string {
-	dataDir := os.Getenv("TENTACLE_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "/var/lib/tentacle"
-	}
-	return filepath.Join(dataDir, "gitops", "repo")
+	return filepath.Join(paths.DataDir(), "gitops", "repo")
 }
 
 func (m *Module) getGitopsConfigPath() string {

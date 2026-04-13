@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/joyautomation/tentacle/internal/paths"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -156,5 +157,5 @@ func (m *Module) getGitopsSSHKeyPath() string {
 	if data, _, err := m.bus.KVGet("tentacle_config", "gitops.GITOPS_SSH_KEY_PATH"); err == nil && len(data) > 0 {
 		return string(data)
 	}
-	return "/var/lib/tentacle/.ssh/id_ed25519"
+	return paths.SSHKeyPath()
 }
