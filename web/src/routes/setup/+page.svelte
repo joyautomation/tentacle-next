@@ -14,6 +14,18 @@
 
   let { data }: { data: PageData } = $props();
 
+  // Unavailable modules: experimental OR not present in this build
+  const allModuleIds = $derived(new Set((data.modules ?? []).map(m => m.moduleId)));
+  const experimentalIds = $derived(new Set((data.modules ?? []).filter(m => m.experimental).map(m => m.moduleId)));
+  const unavailableModules = $derived.by(() => {
+    const result = new Set(experimentalIds);
+    // Protocols not in the module registry at all (not compiled into this build)
+    for (const id of SCANNER_MODULE_IDS) {
+      if (!allModuleIds.has(id)) result.add(id);
+    }
+    return result;
+  });
+
   // Step IDs used by archetypes
   type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'review';
 
@@ -39,7 +51,7 @@
   };
 
   // Pre-populate from existing config
-  const SCANNER_MODULE_IDS = new Set(['ethernetip', 'opcua', 'modbus', 'snmp']);
+  const SCANNER_MODULE_IDS = new Set(['ethernetip', 'opcua', 'modbus', 'snmp', 'profinetcontroller']);
   const MQTT_FIELDS: (keyof MqttConfig)[] = [
     'MQTT_BROKER_URL', 'MQTT_CLIENT_ID', 'MQTT_GROUP_ID',
     'MQTT_EDGE_NODE', 'MQTT_USERNAME', 'MQTT_PASSWORD',
@@ -225,6 +237,7 @@
       </div>
       <ProtocolSelector
         selected={selectedProtocols}
+        experimental={unavailableModules}
         onchange={(s) => { selectedProtocols = s; }}
       />
       <div class="diagram-preview">

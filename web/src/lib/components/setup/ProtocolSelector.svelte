@@ -3,10 +3,11 @@
 
   interface Props {
     selected: Set<string>;
+    experimental?: Set<string>;
     onchange: (selected: Set<string>) => void;
   }
 
-  let { selected, onchange }: Props = $props();
+  let { selected, experimental = new Set(), onchange }: Props = $props();
 
   const protocols = [
     { id: 'ethernetip', name: 'EtherNet/IP', desc: 'Allen-Bradley, Rockwell PLCs', icon: CpuChip },
@@ -17,6 +18,7 @@
   ];
 
   function toggle(id: string) {
+    if (experimental.has(id)) return;
     const next = new Set(selected);
     if (next.has(id)) {
       next.delete(id);
@@ -29,10 +31,13 @@
 
 <div class="protocol-grid">
   {#each protocols as proto}
+    {@const isExperimental = experimental.has(proto.id)}
     <button
       class="protocol-card"
       class:selected={selected.has(proto.id)}
+      class:experimental={isExperimental}
       onclick={() => toggle(proto.id)}
+      disabled={isExperimental}
     >
       <div class="card-check">
         {#if selected.has(proto.id)}
@@ -45,7 +50,12 @@
         <proto.icon size="1.5rem" />
       </div>
       <div class="card-text">
-        <span class="card-name">{proto.name}</span>
+        <span class="card-name">
+          {proto.name}
+          {#if isExperimental}
+            <span class="exp-badge">Experimental</span>
+          {/if}
+        </span>
         <span class="card-desc">{proto.desc}</span>
       </div>
     </button>
@@ -80,6 +90,28 @@
       border-color: var(--theme-primary);
       box-shadow: 0 0 0 1px var(--theme-primary);
     }
+
+    &.experimental {
+      opacity: 0.5;
+      cursor: not-allowed;
+      border-style: dashed;
+
+      &:hover {
+        border-color: var(--theme-border);
+      }
+    }
+  }
+
+  .exp-badge {
+    font-size: 0.625rem;
+    font-weight: 600;
+    padding: 0.0625rem 0.375rem;
+    border-radius: var(--rounded-full);
+    background: var(--badge-amber-bg);
+    color: var(--badge-amber-text);
+    border: 1px solid var(--badge-amber-border);
+    vertical-align: middle;
+    margin-left: 0.375rem;
   }
 
   .card-check {
