@@ -37,6 +37,7 @@
   let applying = $state(false);
   let steps = $state<ApplyStep[]>([]);
   let done = $state(false);
+  let hasError = $state(false);
 
   function updateStep(index: number, status: StepStatus, error?: string) {
     steps[index] = { ...steps[index], status, error };
@@ -178,6 +179,7 @@
   async function applyConfiguration() {
     applying = true;
     done = false;
+    hasError = false;
     steps = [];
 
     let success = false;
@@ -193,6 +195,8 @@
     if (success) {
       done = true;
       saltState.addNotification({ message: 'Setup complete! All services are running.', type: 'success' });
+    } else {
+      hasError = true;
     }
     applying = false;
   }
@@ -204,7 +208,7 @@
 </script>
 
 <div class="review-panel">
-  {#if !applying && !done}
+  {#if !applying && !done && !hasError}
     <section class="summary">
       <h2>Review Configuration</h2>
 
@@ -277,9 +281,9 @@
     </button>
   {/if}
 
-  {#if applying || done}
+  {#if applying || done || hasError}
     <section class="progress">
-      <h2>{done ? 'Setup Complete' : 'Applying Configuration...'}</h2>
+      <h2>{done ? 'Setup Complete' : hasError ? 'Setup Failed' : 'Applying Configuration...'}</h2>
 
       <ul class="step-list">
         {#each steps as step}
@@ -316,7 +320,7 @@
       </button>
     {/if}
 
-    {#if !applying && !done}
+    {#if !applying && hasError}
       <button class="retry-btn" onclick={applyConfiguration}>
         Retry
       </button>
