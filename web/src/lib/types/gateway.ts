@@ -16,6 +16,7 @@ export interface GatewayDevice {
   community?: string;
   v3Auth?: Record<string, unknown> | null;
   unitId?: number | null;
+  byteOrder?: string | null;
   scanRate?: number | null;
   deadband?: DeadBandConfig | null;
   disableRBE?: boolean | null;
@@ -34,6 +35,10 @@ export interface GatewayVariable {
   deadband?: DeadBandConfig | null;
   disableRBE?: boolean | null;
   historyEnabled?: boolean | null;
+  functionCode?: number | null;
+  modbusDatatype?: string | null;
+  byteOrder?: string | null;
+  address?: number | null;
 }
 
 export interface GatewayUdtTemplateMember {
@@ -41,6 +46,8 @@ export interface GatewayUdtTemplateMember {
   datatype: string;
   templateRef: string | null;
   defaultDeadband?: DeadBandConfig | null;
+  functionCode?: string | null;
+  modbusDatatype?: string | null;
 }
 
 export interface GatewayUdtTemplate {
@@ -58,6 +65,8 @@ export interface GatewayUdtVariable {
   memberCipTypes?: Record<string, string> | null;
   memberDeadbands?: Record<string, DeadBandConfig> | null;
   historyEnabled?: boolean | null;
+  memberAddresses?: Record<string, number> | null;
+  memberByteOrders?: Record<string, string> | null;
 }
 
 export interface BrowseCacheItem {

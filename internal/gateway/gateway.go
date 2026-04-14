@@ -473,9 +473,38 @@ func (g *Gateway) subscribeToScannersLocked() {
 			if udtVar.MemberCipTypes != nil {
 				cipType = udtVar.MemberCipTypes[memberName]
 			}
-			grp.variables[syntheticID] = itypes.GatewayVariableConfig{
+			syntheticVar := itypes.GatewayVariableConfig{
 				ID: syntheticID, DeviceID: udtVar.DeviceID, Tag: memberTag, Datatype: "number", CipType: cipType,
 			}
+			// For Modbus devices, populate register metadata from template + instance.
+			if device.Protocol == "modbus" {
+				if tmpl, tmplOk := g.config.UdtTemplates[udtVar.TemplateName]; tmplOk {
+					for _, m := range tmpl.Members {
+						if m.Name == memberName {
+							if m.FunctionCode != "" {
+								fc := modbusStringFCToInt(m.FunctionCode)
+								syntheticVar.FunctionCode = &fc
+							}
+							if m.ModbusDatatype != "" {
+								syntheticVar.ModbusDatatype = m.ModbusDatatype
+							}
+							break
+						}
+					}
+				}
+				if udtVar.MemberAddresses != nil {
+					if addr, ok := udtVar.MemberAddresses[memberName]; ok {
+						addrCopy := addr
+						syntheticVar.Address = &addrCopy
+					}
+				}
+				if udtVar.MemberByteOrders != nil {
+					if bo, ok := udtVar.MemberByteOrders[memberName]; ok {
+						syntheticVar.ByteOrder = bo
+					}
+				}
+			}
+			grp.variables[syntheticID] = syntheticVar
 		}
 	}
 
@@ -613,11 +642,11 @@ func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.Gateway
 		payload, err = json.Marshal(req)
 
 	case "modbus":
-		registers := make([]itypes.ModbusRegister, 0, len(vars))
+		tags := make([]itypes.ModbusTagConfig, 0, len(vars))
 		for _, v := range vars {
-			fc := 3
+			fc := "holding"
 			if v.FunctionCode != nil {
-				fc = *v.FunctionCode
+				fc = itypes.FunctionCodeToString(*v.FunctionCode)
 			}
 			addr := 0
 			if v.Address != nil {
@@ -627,11 +656,11 @@ func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.Gateway
 			if v.ModbusDatatype != "" {
 				dt = v.ModbusDatatype
 			}
-			bo := "big"
+			bo := device.ByteOrder
 			if v.ByteOrder != "" {
 				bo = v.ByteOrder
 			}
-			registers = append(registers, itypes.ModbusRegister{Tag: v.Tag, Address: addr, FunctionCode: fc, ModbusDatatype: dt, ByteOrder: bo})
+			tags = append(tags, itypes.ModbusTagConfig{ID: v.Tag, Address: addr, FunctionCode: fc, Datatype: dt, ByteOrder: bo})
 		}
 		port := 502
 		if device.Port != nil {
@@ -641,9 +670,9 @@ func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.Gateway
 		if device.UnitID != nil {
 			unitID = *device.UnitID
 		}
-		req := itypes.ModbusSubscribeRequest{
+		req := itypes.ModbusScannerSubscribeRequest{
 			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
-			UnitID: unitID, Registers: registers, ScanRate: scanRate(1000),
+			UnitID: unitID, ByteOrder: device.ByteOrder, Tags: tags, ScanRate: scanRate(1000),
 		}
 		payload, err = json.Marshal(req)
 	}
@@ -903,4 +932,20 @@ func (g *Gateway) setupCommandRoutingLocked() {
 		return
 	}
 	g.cmdSub = sub
+}
+
+// modbusStringFCToInt converts a Modbus function code string to its numeric value.
+func modbusStringFCToInt(fc string) int {
+	switch fc {
+	case "coil":
+		return 1
+	case "discrete":
+		return 2
+	case "holding":
+		return 3
+	case "input":
+		return 4
+	default:
+		return 3
+	}
 }

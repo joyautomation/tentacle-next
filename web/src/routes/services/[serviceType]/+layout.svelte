@@ -180,6 +180,16 @@
       <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
+    {:else if serviceType === 'modbus'}
+      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+        Overview
+      </a>
+      <a href="/services/{serviceType}/tag-config" class="tab" class:active={currentTab() === 'tag-config'}>
+        Tags
+      </a>
+      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+        Logs
+      </a>
     {:else}
       <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
         Overview
