@@ -563,7 +563,7 @@ func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.Gateway
 
 	bucket := topics.ScannerBucket(device.Protocol)
 	if bucket == "" {
-		g.log.Warn("gateway: unknown protocol", "protocol", device.Protocol, "device", deviceID)
+		g.log.Debug("gateway: no scanner bucket for protocol (self-publishing source)", "protocol", device.Protocol, "device", deviceID)
 		return
 	}
 
