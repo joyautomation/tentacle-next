@@ -18,6 +18,7 @@ type PlcDeviceConfigKV struct {
 	Protocol    string `json:"protocol"`              // "ethernetip", "opcua", "modbus", "snmp"
 	Host        string `json:"host,omitempty"`
 	Port        *int   `json:"port,omitempty"`
+	Slot        *int   `json:"slot,omitempty"`         // EtherNet/IP: chassis slot (default 0)
 	EndpointURL string `json:"endpointUrl,omitempty"` // OPC UA
 	Version     string `json:"version,omitempty"`     // SNMP: "1", "2c", "3"
 	Community   string `json:"community,omitempty"`   // SNMP
