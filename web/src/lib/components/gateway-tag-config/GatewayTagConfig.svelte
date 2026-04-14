@@ -293,6 +293,9 @@
           });
           liveProgress = updated;
           if (isTerminal) {
+            if (p.phase === 'failed') {
+              saltState.addNotification({ message: `Browse failed for ${deviceId}: ${p.message}`, type: 'error' });
+            }
             // Remove from local subs so we don't re-subscribe
             const next = new Map(localBrowseSubs);
             next.delete(deviceId);
