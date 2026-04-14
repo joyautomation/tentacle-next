@@ -607,8 +607,12 @@ func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.Gateway
 		if device.Port != nil {
 			port = *device.Port
 		}
+		slot := 0
+		if device.Slot != nil {
+			slot = *device.Slot
+		}
 		req := itypes.EthernetIPSubscribeRequest{
-			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
+			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port, Slot: slot,
 			Tags: tags, ScanRate: scanRate(1000), CipTypes: cipTypes, StructTypes: structTypes,
 			Deadbands: deadbands, DisableRBE: disableRBE,
 		}

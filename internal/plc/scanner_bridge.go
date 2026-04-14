@@ -89,11 +89,16 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 				if device.Port != nil {
 					port = *device.Port
 				}
+				slot := 0
+				if device.Slot != nil {
+					slot = *device.Slot
+				}
 				req = &itypes.EthernetIPSubscribeRequest{
 					SubscriberID: "plc-" + sb.plcID,
 					DeviceID:     src.DeviceID,
 					Host:         device.Host,
 					Port:         port,
+					Slot:         slot,
 					ScanRate:     scanRate,
 					CipTypes:     make(map[string]string),
 				}

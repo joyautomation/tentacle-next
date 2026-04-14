@@ -64,6 +64,7 @@
     protocol: 'ethernetip' as string,
     host: '',
     port: '',
+    slot: '',
     endpointUrl: '',
     version: '2c',
     community: 'public',
@@ -78,7 +79,7 @@
 
   function resetNewDevice() {
     newDevice = {
-      deviceId: '', protocol: defaultProtocol, host: '', port: '',
+      deviceId: '', protocol: defaultProtocol, host: '', port: '', slot: '',
       endpointUrl: '', version: '2c', community: 'public', unitId: '1',
     };
   }
@@ -109,6 +110,7 @@
         protocol: device.protocol,
         ...(device.host ? { host: device.host } : {}),
         ...(device.port ? { port: device.port } : {}),
+        ...(device.protocol === 'ethernetip' && device.slot != null ? { slot: device.slot } : {}),
         ...(device.endpointUrl ? { endpointUrl: device.endpointUrl } : {}),
         ...(device.version ? { version: device.version } : {}),
         ...(device.community ? { community: device.community } : {}),
@@ -150,6 +152,7 @@
         protocol: newDevice.protocol,
         ...(newDevice.protocol !== 'opcua' && newDevice.host ? { host: newDevice.host } : {}),
         ...(newDevice.port ? { port: parseInt(newDevice.port) } : {}),
+        ...(newDevice.protocol === 'ethernetip' && newDevice.slot ? { slot: parseInt(newDevice.slot) } : {}),
         ...(newDevice.protocol === 'opcua' && newDevice.endpointUrl ? { endpointUrl: newDevice.endpointUrl } : {}),
         ...(newDevice.protocol === 'snmp' ? { version: newDevice.version, community: newDevice.community } : {}),
         ...(newDevice.protocol === 'modbus' && newDevice.unitId ? { unitId: parseInt(newDevice.unitId) } : {}),
@@ -310,6 +313,12 @@
             <label for="gw-port">Port</label>
             <input id="gw-port" type="text" bind:value={newDevice.port} placeholder={newDevice.protocol === 'ethernetip' ? '44818' : newDevice.protocol === 'snmp' ? '161' : '502'} />
           </div>
+          {#if newDevice.protocol === 'ethernetip'}
+            <div class="form-row">
+              <label for="gw-slot">Slot</label>
+              <input id="gw-slot" type="text" bind:value={newDevice.slot} placeholder="0" />
+            </div>
+          {/if}
         {/if}
         {#if newDevice.protocol === 'snmp'}
           <div class="form-row">

@@ -11,6 +11,7 @@ export interface GatewayDevice {
   autoManaged?: boolean;
   host?: string;
   port?: number | null;
+  slot?: number | null;
   endpointUrl?: string;
   version?: string;
   community?: string;

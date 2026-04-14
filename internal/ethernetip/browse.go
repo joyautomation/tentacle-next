@@ -14,8 +14,8 @@ import (
 const browseTimeout = 30 * time.Second
 
 // listTags reads all controller-scoped tags from the PLC using @tags.
-func listTags(gateway string, port int) ([]TagEntry, error) {
-	attrs := buildListTagAttrs(gateway, port)
+func listTags(gateway string, port int, slot int) ([]TagEntry, error) {
+	attrs := buildListTagAttrs(gateway, port, slot)
 	tag, err := createTag(attrs, browseTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create @tags tag: %w", err)
@@ -85,8 +85,8 @@ func parseTagList(tag TagAccessor) ([]TagEntry, error) {
 }
 
 // readUdtTemplate reads a UDT template definition using @udt/<id>.
-func readUdtTemplate(gateway string, port int, templateID uint16) (*UdtTemplate, error) {
-	attrs := buildUdtAttrs(gateway, port, templateID)
+func readUdtTemplate(gateway string, port int, slot int, templateID uint16) (*UdtTemplate, error) {
+	attrs := buildUdtAttrs(gateway, port, slot, templateID)
 	tag, err := createTag(attrs, browseTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create @udt/%d tag: %w", templateID, err)
@@ -229,7 +229,7 @@ func isPrintable(s string) bool {
 }
 
 // browseDevice lists all tags and reads all UDT templates from a device.
-func browseDevice(gateway string, port int, deviceID string, moduleID string, browseID string, publishProgress func(types.BrowseProgressMessage)) (*BrowseResult, error) {
+func browseDevice(gateway string, port int, slot int, deviceID string, moduleID string, browseID string, publishProgress func(types.BrowseProgressMessage)) (*BrowseResult, error) {
 	if port == 0 {
 		port = 44818
 	}
@@ -243,7 +243,7 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
-	tags, err := listTags(gateway, port)
+	tags, err := listTags(gateway, port, slot)
 	if err != nil {
 		return nil, fmt.Errorf("tag listing failed: %w", err)
 	}
@@ -290,7 +290,7 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 			continue
 		}
 
-		tmpl, err := readUdtTemplate(gateway, port, id)
+		tmpl, err := readUdtTemplate(gateway, port, slot, id)
 		if err != nil {
 			continue
 		}
@@ -372,7 +372,7 @@ func browseDevice(gateway string, port int, deviceID string, moduleID string, br
 		}
 	}
 
-	readableStructVars := filterReadable(structCandidates, gateway, port, publishProgress, browseID, deviceID, moduleID)
+	readableStructVars := filterReadable(structCandidates, gateway, port, slot, publishProgress, browseID, deviceID, moduleID)
 
 	variables := make([]VariableInfo, 0, len(atomicVars)+len(readableStructVars))
 	variables = append(variables, atomicVars...)
@@ -472,7 +472,7 @@ const (
 	readableWorkerCount = 10
 )
 
-func filterReadable(candidates []candidateVar, gateway string, port int, publishProgress func(types.BrowseProgressMessage), browseID, deviceID, moduleID string) []VariableInfo {
+func filterReadable(candidates []candidateVar, gateway string, port int, slot int, publishProgress func(types.BrowseProgressMessage), browseID, deviceID, moduleID string) []VariableInfo {
 	type result struct {
 		index    int
 		readable bool
@@ -492,7 +492,7 @@ func filterReadable(candidates []candidateVar, gateway string, port int, publish
 		go func() {
 			defer wg.Done()
 			for idx := range work {
-				readable := testTagReadable(gateway, port, candidates[idx].path)
+				readable := testTagReadable(gateway, port, slot, candidates[idx].path)
 				results <- result{idx, readable}
 			}
 		}()
@@ -531,8 +531,8 @@ func filterReadable(candidates []candidateVar, gateway string, port int, publish
 	return out
 }
 
-func testTagReadable(gateway string, port int, tagPath string) bool {
-	attrs := buildTagAttrs(gateway, port, tagPath, 0)
+func testTagReadable(gateway string, port int, slot int, tagPath string) bool {
+	attrs := buildTagAttrs(gateway, port, slot, tagPath, 0)
 	tag, err := createTag(attrs, readableTestTimeout)
 	if err != nil {
 		return false

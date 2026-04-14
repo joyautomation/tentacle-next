@@ -23,6 +23,7 @@ type DeviceConnection struct {
 	DeviceID        string
 	Gateway         string
 	Port            int
+	Slot            int
 	Variables       map[string]*CachedVar
 	StructTypes     map[string]string
 	Subscribers     map[string]map[string]bool
@@ -274,7 +275,7 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 	// Respond immediately with browseID, run browse in background
 	s.respondJSON(reply, map[string]string{"browseId": browseID})
 	go func() {
-		result, err := browseDevice(req.Host, req.Port, req.DeviceID, s.moduleID, browseID, publishProgress)
+		result, err := browseDevice(req.Host, req.Port, req.Slot, req.DeviceID, s.moduleID, browseID, publishProgress)
 		if err != nil {
 			s.log.Error("eip: browse failed", "device", req.DeviceID, "error", err)
 			publishProgress(types.BrowseProgressMessage{
@@ -322,6 +323,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 			DeviceID:        req.DeviceID,
 			Gateway:         req.Host,
 			Port:            req.Port,
+			Slot:            req.Slot,
 			Variables:       make(map[string]*CachedVar),
 			StructTypes:     make(map[string]string),
 			Subscribers:     make(map[string]map[string]bool),
@@ -330,7 +332,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 			scanRateChanged: make(chan struct{}, 1),
 		}
 		s.connections[req.DeviceID] = conn
-		s.log.Info("eip: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port)
+		s.log.Info("eip: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port, "slot", req.Slot)
 	}
 	s.mu.Unlock()
 
@@ -538,7 +540,7 @@ func (s *Scanner) handleCommand(subj string, data []byte, reply bus.ReplyFunc) {
 		return
 	}
 
-	attrs := buildTagAttrs(targetConn.Gateway, targetConn.Port, tagName, 0)
+	attrs := buildTagAttrs(targetConn.Gateway, targetConn.Port, targetConn.Slot, tagName, 0)
 	tag, err := createTag(attrs, 10*time.Second)
 	if err != nil {
 		s.log.Error("eip: failed to create tag for write", "tag", tagName, "error", err)
@@ -613,7 +615,7 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 	conn.mu.RUnlock()
 
 	for _, tagName := range needsHandle {
-		attrs := buildTagAttrs(conn.Gateway, conn.Port, tagName, 0)
+		attrs := buildTagAttrs(conn.Gateway, conn.Port, conn.Slot, tagName, 0)
 		handle, err := createTag(attrs, 10*time.Second)
 		conn.mu.Lock()
 		v := conn.Variables[tagName]

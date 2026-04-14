@@ -1186,6 +1186,7 @@
       const input: Record<string, unknown> = { deviceId, protocol: device.protocol };
       if (device.host) input.host = device.host;
       if (device.port) input.port = device.port;
+      if (device.protocol === 'ethernetip' && device.slot != null) input.slot = device.slot;
       if (device.endpointUrl) input.endpointUrl = device.endpointUrl;
       if (device.version) input.version = device.version;
       if (device.community) input.community = device.community;
