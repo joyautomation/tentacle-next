@@ -74,8 +74,8 @@ Experimental modules are marked with a badge in the web UI. On stable builds, th
 Download the latest binary from [GitHub Releases](https://github.com/joyautomation/tentacle-next/releases):
 
 ```bash
-# Replace VERSION with the desired release (e.g. 0.0.7)
-VERSION=0.0.7
+# Replace VERSION with the desired release (e.g. 0.0.8)
+VERSION=0.0.8
 
 # For amd64
 curl -LO "https://github.com/joyautomation/tentacle-next/releases/download/v${VERSION}/tentacle_${VERSION}_linux_amd64.tar.gz"
