@@ -24,6 +24,7 @@ type GatewayDeviceConfig struct {
 	Community             string                   `json:"community,omitempty"`   // SNMP
 	V3Auth                *V3Auth                  `json:"v3Auth,omitempty"`      // SNMP v3
 	UnitID                *int                     `json:"unitId,omitempty"`      // Modbus
+	ByteOrder             string                   `json:"byteOrder,omitempty"`   // Modbus: "ABCD", "BADC", "CDAB", "DCBA"
 	ScanRate              *int                     `json:"scanRate,omitempty"`
 	Deadband              *ttypes.DeadBandConfig   `json:"deadband,omitempty"`
 	DisableRBE            *bool                    `json:"disableRBE,omitempty"`
@@ -65,6 +66,9 @@ type GatewayUdtTemplateMemberConfig struct {
 	Datatype        string                 `json:"datatype"`
 	TemplateRef     string                 `json:"templateRef,omitempty"`
 	DefaultDeadband *ttypes.DeadBandConfig `json:"defaultDeadband,omitempty"`
+	// Modbus-specific structural fields (shared across all instances of a template).
+	FunctionCode   string `json:"functionCode,omitempty"`   // "holding", "input", "coil", "discrete"
+	ModbusDatatype string `json:"modbusDatatype,omitempty"` // "int16", "uint16", "int32", "uint32", "float32", "float64"
 }
 
 // GatewayUdtTemplateConfig is a UDT template definition stored in gateway config.
@@ -86,6 +90,9 @@ type GatewayUdtVariableConfig struct {
 	Deadband        *ttypes.DeadBandConfig            `json:"deadband,omitempty"`
 	DisableRBE      bool                              `json:"disableRBE,omitempty"`
 	HistoryEnabled  bool                              `json:"historyEnabled,omitempty"`
+	// Modbus-specific per-instance fields.
+	MemberAddresses  map[string]int    `json:"memberAddresses,omitempty"`  // member name → register address
+	MemberByteOrders map[string]string `json:"memberByteOrders,omitempty"` // member name → byte order override
 }
 
 // ─── Scanner Subscribe Requests ─────────────────────────────────────────────
@@ -126,24 +133,21 @@ type SNMPSubscribeRequest struct {
 	ScanRate     int      `json:"scanRate,omitempty"`
 }
 
-// ModbusRegister describes a single Modbus register for subscription.
-type ModbusRegister struct {
-	Tag            string `json:"tag"`
-	Address        int    `json:"address"`
-	FunctionCode   int    `json:"functionCode"`
-	ModbusDatatype string `json:"modbusDatatype"`
-	ByteOrder      string `json:"byteOrder,omitempty"`
-}
 
-// ModbusSubscribeRequest is the subscribe payload for the Modbus scanner.
-type ModbusSubscribeRequest struct {
-	SubscriberID string           `json:"subscriberId"`
-	DeviceID     string           `json:"deviceId"`
-	Host         string           `json:"host"`
-	Port         int              `json:"port,omitempty"`
-	UnitID       int              `json:"unitId,omitempty"`
-	Registers    []ModbusRegister `json:"registers"`
-	ScanRate     int              `json:"scanRate,omitempty"`
+// FunctionCodeToString converts a numeric Modbus function code to its string name.
+func FunctionCodeToString(fc int) string {
+	switch fc {
+	case 1:
+		return "coil"
+	case 2:
+		return "discrete"
+	case 3:
+		return "holding"
+	case 4:
+		return "input"
+	default:
+		return "holding"
+	}
 }
 
 // CipToNatsDatatype normalizes CIP type names to tentacle datatypes.

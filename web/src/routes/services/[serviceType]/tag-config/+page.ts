@@ -5,6 +5,27 @@ import type { GatewayConfig, BrowseCache, GatewayBrowseState } from '$lib/types/
 export const load: PageLoad = async ({ params }) => {
   const { serviceType } = params;
 
+  if (serviceType === 'modbus') {
+    try {
+      const result = await api<GatewayConfig>('/gateways/gateway');
+      return {
+        serviceType,
+        gatewayConfig: result.data ?? null,
+        browseCaches: [] as BrowseCache[],
+        browseStates: [] as GatewayBrowseState[],
+        error: result.error?.error ?? null,
+      };
+    } catch (e) {
+      return {
+        serviceType,
+        gatewayConfig: null,
+        browseCaches: [] as BrowseCache[],
+        browseStates: [] as GatewayBrowseState[],
+        error: e instanceof Error ? e.message : 'Failed to fetch gateway config',
+      };
+    }
+  }
+
   if (serviceType !== 'gateway') {
     return { serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], error: null };
   }

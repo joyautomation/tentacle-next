@@ -54,7 +54,7 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 		deviceID string
 	}
 	eipRequests := make(map[string]*itypes.EthernetIPSubscribeRequest)
-	modbusRequests := make(map[string]*itypes.ModbusSubscribeRequest)
+	modbusRequests := make(map[string]*itypes.ModbusScannerSubscribeRequest)
 	opcuaRequests := make(map[string]*itypes.OpcUASubscribeRequest)
 	snmpRequests := make(map[string]*itypes.SNMPSubscribeRequest)
 
@@ -115,7 +115,7 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 				if device.UnitID != nil {
 					unitID = *device.UnitID
 				}
-				req = &itypes.ModbusSubscribeRequest{
+				req = &itypes.ModbusScannerSubscribeRequest{
 					SubscriberID: "plc-" + sb.plcID,
 					DeviceID:     src.DeviceID,
 					Host:         device.Host,
@@ -125,16 +125,24 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 				}
 				modbusRequests[dk] = req
 			}
-			reg := itypes.ModbusRegister{Tag: src.Tag}
-			if src.Address != nil {
-				reg.Address = *src.Address
-			}
+			fc := "holding"
 			if src.FunctionCode != nil {
-				reg.FunctionCode = *src.FunctionCode
+				fc = itypes.FunctionCodeToString(*src.FunctionCode)
 			}
-			reg.ModbusDatatype = src.ModbusDatatype
-			reg.ByteOrder = src.ByteOrder
-			req.Registers = append(req.Registers, reg)
+			dt := src.ModbusDatatype
+			if dt == "" {
+				dt = "uint16"
+			}
+			tag := itypes.ModbusTagConfig{
+				ID:           src.Tag,
+				FunctionCode: fc,
+				Datatype:     dt,
+				ByteOrder:    src.ByteOrder,
+			}
+			if src.Address != nil {
+				tag.Address = *src.Address
+			}
+			req.Tags = append(req.Tags, tag)
 
 		case "opcua":
 			req, exists := opcuaRequests[dk]
