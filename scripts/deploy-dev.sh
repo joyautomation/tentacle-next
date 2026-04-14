@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER="tentacle-next-dev-1"
+# Auto-detect container from worktree directory name.
+# tentacle-next       → tentacle-next-dev-1   (main)
+# tentacle-next-plc   → tentacle-next-dev-plc (worktree)
+REPO_DIR=$(basename "$(git rev-parse --show-toplevel)")
+if [[ "$REPO_DIR" =~ ^tentacle-next-(.+)$ ]]; then
+  CONTAINER="tentacle-next-dev-${BASH_REMATCH[1]}"
+else
+  CONTAINER="tentacle-next-dev-1"
+fi
+
 BINARY="bin/tentacle"
 REMOTE_PATH="/usr/local/bin/tentacle"
 
