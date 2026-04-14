@@ -16,6 +16,13 @@
   let expandedDevice: string | null = $state(null);
   let deleteTarget: { deviceId: string; varCount: number } | null = $state(null);
   let deleteConfirmInput = $state('');
+  let editHost = $state('');
+  let editPort = $state('');
+  let editSlot = $state('');
+  let editEndpointUrl = $state('');
+  let editVersion = $state('2c');
+  let editCommunity = $state('public');
+  let editUnitId = $state('1');
   let editScanRate = $state('');
   let editDeadbandValue = $state('');
   let editDeadbandMinTime = $state('');
@@ -94,6 +101,13 @@
       expandedDevice = null;
     } else {
       expandedDevice = device.deviceId;
+      editHost = device.host ?? '';
+      editPort = device.port?.toString() ?? '';
+      editSlot = device.slot?.toString() ?? '';
+      editEndpointUrl = device.endpointUrl ?? '';
+      editVersion = device.version ?? '2c';
+      editCommunity = device.community ?? 'public';
+      editUnitId = device.unitId?.toString() ?? '1';
       editScanRate = device.scanRate?.toString() ?? '';
       editDeadbandValue = device.deadband?.value?.toString() ?? '';
       editDeadbandMinTime = device.deadband?.minTime?.toString() ?? '';
@@ -108,13 +122,12 @@
       const input: Record<string, unknown> = {
         deviceId: device.deviceId,
         protocol: device.protocol,
-        ...(device.host ? { host: device.host } : {}),
-        ...(device.port ? { port: device.port } : {}),
-        ...(device.protocol === 'ethernetip' && device.slot != null ? { slot: device.slot } : {}),
-        ...(device.endpointUrl ? { endpointUrl: device.endpointUrl } : {}),
-        ...(device.version ? { version: device.version } : {}),
-        ...(device.community ? { community: device.community } : {}),
-        ...(device.unitId ? { unitId: device.unitId } : {}),
+        ...(device.protocol !== 'opcua' && editHost ? { host: editHost } : {}),
+        ...(editPort ? { port: parseInt(editPort) } : {}),
+        ...(device.protocol === 'ethernetip' && editSlot ? { slot: parseInt(editSlot) } : {}),
+        ...(device.protocol === 'opcua' && editEndpointUrl ? { endpointUrl: editEndpointUrl } : {}),
+        ...(device.protocol === 'snmp' ? { version: editVersion, community: editCommunity } : {}),
+        ...(device.protocol === 'modbus' && editUnitId ? { unitId: parseInt(editUnitId) } : {}),
       };
 
       if (editScanRate) input.scanRate = parseInt(editScanRate);
@@ -375,6 +388,50 @@
             {#if expandedDevice === device.deviceId}
               <div class="device-settings" transition:slide|local={{ duration: 200 }}>
                 <div class="settings-grid">
+                  <div class="setting-group">
+                    <h3>Connection</h3>
+                    {#if device.protocol === 'opcua'}
+                      <div class="form-row">
+                        <label for="edit-endpoint-{device.deviceId}">Endpoint URL</label>
+                        <input id="edit-endpoint-{device.deviceId}" type="text" bind:value={editEndpointUrl} placeholder="opc.tcp://192.168.1.50:4840" />
+                      </div>
+                    {:else if device.protocol !== 'plc'}
+                      <div class="form-row">
+                        <label for="edit-host-{device.deviceId}">Host</label>
+                        <input id="edit-host-{device.deviceId}" type="text" bind:value={editHost} placeholder="192.168.1.100" />
+                      </div>
+                      <div class="form-row">
+                        <label for="edit-port-{device.deviceId}">Port</label>
+                        <input id="edit-port-{device.deviceId}" type="text" bind:value={editPort} placeholder={device.protocol === 'ethernetip' ? '44818' : device.protocol === 'snmp' ? '161' : '502'} />
+                      </div>
+                      {#if device.protocol === 'ethernetip'}
+                        <div class="form-row">
+                          <label for="edit-slot-{device.deviceId}">Slot</label>
+                          <input id="edit-slot-{device.deviceId}" type="text" bind:value={editSlot} placeholder="0" />
+                        </div>
+                      {/if}
+                      {#if device.protocol === 'snmp'}
+                        <div class="form-row">
+                          <label for="edit-version-{device.deviceId}">SNMP Version</label>
+                          <select id="edit-version-{device.deviceId}" bind:value={editVersion}>
+                            <option value="1">v1</option>
+                            <option value="2c">v2c</option>
+                            <option value="3">v3</option>
+                          </select>
+                        </div>
+                        <div class="form-row">
+                          <label for="edit-community-{device.deviceId}">Community</label>
+                          <input id="edit-community-{device.deviceId}" type="text" bind:value={editCommunity} placeholder="public" />
+                        </div>
+                      {/if}
+                      {#if device.protocol === 'modbus'}
+                        <div class="form-row">
+                          <label for="edit-unitid-{device.deviceId}">Unit ID</label>
+                          <input id="edit-unitid-{device.deviceId}" type="text" bind:value={editUnitId} placeholder="1" />
+                        </div>
+                      {/if}
+                    {/if}
+                  </div>
                   <div class="setting-group">
                     <h3>Polling</h3>
                     <div class="form-row">
