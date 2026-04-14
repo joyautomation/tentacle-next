@@ -689,8 +689,6 @@
   });
 
   onMount(() => {
-    render();
-
     const resizeObserver = new ResizeObserver(() => {
       handleResize();
     });
