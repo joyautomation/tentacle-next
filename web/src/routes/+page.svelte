@@ -30,7 +30,17 @@
 
     function fingerprint(svcs: typeof liveServices): string {
       return svcs
-        .map(s => `${s.serviceType}:${s.moduleId}:${JSON.stringify(s.metadata ?? {})}`)
+        .map(s => {
+          // Only include metadata that affects topology structure/visual state
+          // Exclude volatile counters (recordsWritten, lastFlushTime, bufferSize, etc.)
+          const parts = [s.serviceType, s.moduleId, String(s.enabled)];
+          if (s.metadata) {
+            if (s.metadata.devices != null) parts.push(`d:${s.metadata.devices}`);
+            if (s.metadata.mode != null) parts.push(`m:${s.metadata.mode}`);
+            if (s.metadata.connected != null) parts.push(`c:${s.metadata.connected}`);
+          }
+          return parts.join(':');
+        })
         .sort()
         .join('|');
     }
