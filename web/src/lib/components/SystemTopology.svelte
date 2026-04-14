@@ -665,16 +665,11 @@
     });
 
     if (isRestore && savedTransform) {
-      // Re-render: restore previous zoom/pan and settle gently
+      // Re-render: restore previous zoom/pan, no simulation restart needed
       svg.call(zoom.transform, savedTransform);
-      simulation.alpha(0.05).restart();
     } else {
-      // First render: fit to viewport
-      simulation.on('end', () => {
-        zoomToFit(true);
-      });
+      // First render: fit to viewport after pre-settling
       zoomToFit(false);
-      simulation.alpha(0.1).restart();
     }
   }
 
