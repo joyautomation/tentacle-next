@@ -5,6 +5,7 @@ REPO_ROOT="/home/joyja/Development/joyautomation/kraken/tentacle-next"
 WORKTREE_BASE="/home/joyja/Development/joyautomation/kraken"
 IMAGE_ALIAS="tentacle-next-dev-golden"
 CONTAINER_PREFIX="tentacle-next-dev"
+TS_KEY_FILE="$HOME/.config/tentacle-next/tailscale-auth-key"
 
 usage() {
   cat <<'EOF'
@@ -41,6 +42,11 @@ cmd_init_image() {
   incus exec tentacle-next-dev-1 -- systemctl stop tentacle-web-dev 2>/dev/null || true
   incus exec tentacle-next-dev-1 -- bash -c 'rm -rf /var/lib/tentacle/*' 2>/dev/null || true
 
+  # Clear Tailscale state so new containers get fresh identities
+  incus exec tentacle-next-dev-1 -- tailscale down 2>/dev/null || true
+  incus exec tentacle-next-dev-1 -- systemctl stop tailscaled 2>/dev/null || true
+  incus exec tentacle-next-dev-1 -- bash -c 'rm -rf /var/lib/tailscale/*' 2>/dev/null || true
+
   # Must stop the container to publish
   incus stop tentacle-next-dev-1
 
@@ -52,6 +58,13 @@ cmd_init_image() {
 
   # Restart the original container
   incus start tentacle-next-dev-1
+
+  # Re-register Tailscale on the source container
+  if [ -f "$TS_KEY_FILE" ]; then
+    echo "==> Re-registering Tailscale on tentacle-next-dev-1..."
+    sleep 3
+    incus exec tentacle-next-dev-1 -- tailscale up --auth-key="$(cat "$TS_KEY_FILE")" --hostname=tentacle-next-dev-1
+  fi
 
   echo "==> Golden image '$IMAGE_ALIAS' created."
 }
@@ -124,20 +137,34 @@ cmd_create() {
     incus exec "$ct_name" -- systemctl restart tentacle-web-dev || true
     incus exec "$ct_name" -- systemctl restart caddy || true
 
+    # Register with Tailscale using a unique hostname
+    if [ -f "$TS_KEY_FILE" ]; then
+      echo "==> Registering Tailscale as $ct_name..."
+      incus exec "$ct_name" -- bash -c 'rm -rf /var/lib/tailscale/*' 2>/dev/null || true
+      incus exec "$ct_name" -- systemctl restart tailscaled
+      sleep 2
+      incus exec "$ct_name" -- tailscale up --auth-key="$(cat "$TS_KEY_FILE")" --hostname="$ct_name"
+      echo "    Tailscale registered."
+    else
+      echo "    NOTE: No Tailscale key at $TS_KEY_FILE — skipping Tailscale setup."
+    fi
+
     echo "    Container ready."
   fi
 
-  # Get container IP
-  local ip
+  # Get container IPs
+  local ip ts_ip
   ip=$(incus list "$ct_name" -f csv -c 4 | grep -oP '[\d.]+(?=.*eth0)' | head -1) || true
+  ts_ip=$(incus exec "$ct_name" -- tailscale ip -4 2>/dev/null) || true
 
   echo ""
   echo "==> Worktree '$name' is ready!"
-  echo "    Source:     $wt_path"
-  echo "    Branch:     $branch"
-  echo "    Container:  $ct_name"
-  echo "    Web UI:     http://${ip:-<pending>}"
-  echo "    Vite HMR:   http://${ip:-<pending>}:3012"
+  echo "    Source:      $wt_path"
+  echo "    Branch:      $branch"
+  echo "    Container:   $ct_name"
+  echo "    LAN:         http://${ip:-<pending>}"
+  echo "    Tailscale:   http://${ts_ip:-<not configured>}"
+  echo "    Vite HMR:    http://${ip:-<pending>}:3012"
   echo ""
   echo "    Deploy:  scripts/worktree-dev.sh deploy $name"
   echo "    Shell:   scripts/worktree-dev.sh shell $name"
