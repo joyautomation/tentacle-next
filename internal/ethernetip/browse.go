@@ -11,18 +11,21 @@ import (
 	"github.com/joyautomation/tentacle/types"
 )
 
-const browseTimeout = 30 * time.Second
+const (
+	browseConnectTimeout = 5 * time.Second  // timeout for initial PLC connection (tag creation)
+	browseReadTimeout    = 30 * time.Second // timeout for reading tag data (large PLCs need time)
+)
 
 // listTags reads all controller-scoped tags from the PLC using @tags.
 func listTags(gateway string, port int, slot int) ([]TagEntry, error) {
 	attrs := buildListTagAttrs(gateway, port, slot)
-	tag, err := createTag(attrs, browseTimeout)
+	tag, err := createTag(attrs, browseConnectTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create @tags tag: %w", err)
 	}
 	defer tag.Close()
 
-	if err := tag.Read(browseTimeout); err != nil {
+	if err := tag.Read(browseReadTimeout); err != nil {
 		return nil, fmt.Errorf("failed to read @tags: %w", err)
 	}
 
@@ -87,13 +90,13 @@ func parseTagList(tag TagAccessor) ([]TagEntry, error) {
 // readUdtTemplate reads a UDT template definition using @udt/<id>.
 func readUdtTemplate(gateway string, port int, slot int, templateID uint16) (*UdtTemplate, error) {
 	attrs := buildUdtAttrs(gateway, port, slot, templateID)
-	tag, err := createTag(attrs, browseTimeout)
+	tag, err := createTag(attrs, browseConnectTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create @udt/%d tag: %w", templateID, err)
 	}
 	defer tag.Close()
 
-	if err := tag.Read(browseTimeout); err != nil {
+	if err := tag.Read(browseReadTimeout); err != nil {
 		return nil, fmt.Errorf("failed to read @udt/%d: %w", templateID, err)
 	}
 
