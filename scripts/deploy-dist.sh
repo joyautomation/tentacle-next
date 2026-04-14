@@ -15,7 +15,7 @@
 set -euo pipefail
 
 CONTAINER="tentacle-dist"
-IMAGE="ubuntu:24.04"
+IMAGE="images:ubuntu/24.04"
 REMOTE_BIN="/usr/local/bin/tentacle"
 REPO="joyautomation/tentacle-next"
 TENTACLE_PORT=4000
