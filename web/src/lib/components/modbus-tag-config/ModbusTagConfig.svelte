@@ -2,7 +2,7 @@
   import { invalidateAll } from '$app/navigation';
   import { fly, slide } from 'svelte/transition';
   import { state as saltState } from '@joyautomation/salt';
-  import { apiPost } from '$lib/api/client';
+  import { apiPost, apiPut } from '$lib/api/client';
   import type {
     GatewayConfig,
     GatewayDevice,
@@ -89,8 +89,19 @@
     if (!needsInit || !gatewayConfig) return;
     needsInit = false;
 
+    // Determine which templates are used by Modbus device instances
+    const modbusDeviceIds = new Set(modbusDevices.map((d) => d.deviceId));
+    const modbusTemplateNames = new Set(
+      (gatewayConfig.udtVariables ?? [])
+        .filter((uv) => modbusDeviceIds.has(uv.deviceId))
+        .map((uv) => uv.templateName)
+    );
+
     const tpls = new Map<string, WorkingTemplate>();
     for (const t of gatewayConfig.udtTemplates ?? []) {
+      // Only load templates that are used by Modbus instances or have Modbus member fields
+      const hasModbusFields = t.members.some((m) => m.functionCode || m.modbusDatatype);
+      if (!modbusTemplateNames.has(t.name) && !hasModbusFields) continue;
       tpls.set(t.name, {
         name: t.name,
         version: t.version ?? '1.0',
@@ -437,6 +448,41 @@
     }
   }
 
+  // ── Device management ──
+  let showAddDevice = $state(false);
+  let newDeviceId = $state('');
+  let newDeviceHost = $state('');
+  let newDevicePort = $state('502');
+  let newDeviceUnitId = $state('1');
+
+  async function addDevice() {
+    const deviceId = newDeviceId.trim();
+    const host = newDeviceHost.trim();
+    if (!deviceId || !host) return;
+
+    const result = await apiPut('/gateways/gateway/devices', {
+      deviceId,
+      protocol: 'modbus',
+      host,
+      port: parseInt(newDevicePort, 10) || 502,
+      unitId: parseInt(newDeviceUnitId, 10) || 1,
+    });
+
+    if (result.error) {
+      saltState.addNotification({ message: result.error.error, type: 'error' });
+      return;
+    }
+
+    saltState.addNotification({ message: `Device "${deviceId}" added`, type: 'success' });
+    newDeviceId = '';
+    newDeviceHost = '';
+    newDevicePort = '502';
+    newDeviceUnitId = '1';
+    showAddDevice = false;
+    await invalidateAll();
+    needsInit = true;
+  }
+
   function discardChanges() {
     needsInit = true;
   }
@@ -492,6 +538,24 @@
           <span class="member-count">{dev.host}{dev.port ? `:${dev.port}` : ''}</span>
         </button>
       {/each}
+      {#if showAddDevice}
+        <div class="tc-side-add-device" transition:slide|local={{ duration: 150 }}>
+          <input type="text" class="add-input" placeholder="Device ID" bind:value={newDeviceId} />
+          <input type="text" class="add-input" placeholder="Host / IP" bind:value={newDeviceHost} />
+          <div class="add-device-row">
+            <input type="text" class="add-input" placeholder="Port" bind:value={newDevicePort} />
+            <input type="text" class="add-input" placeholder="Unit" bind:value={newDeviceUnitId} />
+          </div>
+          <div class="add-device-row">
+            <button class="add-row-btn" onclick={addDevice} disabled={!newDeviceId.trim() || !newDeviceHost.trim()}>Add</button>
+            <button class="action-btn" onclick={() => showAddDevice = false}>Cancel</button>
+          </div>
+        </div>
+      {:else}
+        <div class="tc-side-add">
+          <button class="add-row-btn" style="width:100%" onclick={() => showAddDevice = true}>+ Add Device</button>
+        </div>
+      {/if}
     </div>
   </nav>
 
@@ -499,10 +563,6 @@
   <div class="tc-main">
     {#if error}
       <div class="error-banner">{error}</div>
-    {:else if modbusDevices.length === 0}
-      <div class="empty-state">
-        <p>No Modbus devices configured. Add a Modbus device in the Gateway configuration first.</p>
-      </div>
     {:else}
       <!-- Tabs -->
       <div class="tc-tabs">
@@ -915,7 +975,8 @@
 
   .tc-layout {
     display: flex;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
 
@@ -928,6 +989,7 @@
     background: var(--theme-surface);
     overflow-y: auto;
     flex-shrink: 0;
+    min-height: calc(100vh - var(--header-height, 60px) - 7rem);
   }
 
   .tc-side-head {
@@ -1032,6 +1094,19 @@
     display: flex;
     gap: 0.25rem;
     padding: 0.5rem 1rem;
+  }
+
+  .tc-side-add-device {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.5rem 1rem;
+    border-top: 1px solid var(--theme-border);
+  }
+
+  .add-device-row {
+    display: flex;
+    gap: 0.25rem;
   }
 
   .add-input {
