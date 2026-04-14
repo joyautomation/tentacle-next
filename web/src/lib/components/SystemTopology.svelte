@@ -52,8 +52,6 @@
   let simulation: d3.Simulation<NodeDatum, LinkDatum> | null = null;
   let svgSelection: d3.Selection<SVGSVGElement, unknown, null, undefined> | null = null;
   let currentNodes: NodeDatum[] = [];
-  let savedPositions = new Map<string, { x: number; y: number }>();
-  let savedTransform: d3.ZoomTransform | null = null;
 
   function getNodeColor(type: NodeType): string {
     switch (type) {
@@ -286,19 +284,6 @@
   function render() {
     if (!container) return;
 
-    // Preserve positions and zoom from previous layout for smooth re-renders
-    if (currentNodes.length > 0) {
-      savedPositions.clear();
-      for (const n of currentNodes) {
-        if (n.x != null && n.y != null) {
-          savedPositions.set(n.id, { x: n.x, y: n.y });
-        }
-      }
-      if (svgSelection) {
-        try { savedTransform = d3.zoomTransform(svgSelection.node()!); } catch { /* ignore */ }
-      }
-    }
-
     // Stop previous simulation
     simulation?.stop();
 
@@ -388,56 +373,30 @@
       natsNode.fy = cy;
     }
 
-    // Restore saved positions on re-renders, or seed from scratch on first render
-    const isRestore = savedPositions.size > 0;
-    if (isRestore) {
-      for (const node of nodes) {
-        if (node.id === 'nats') continue;
-        const saved = savedPositions.get(node.id);
-        if (saved) {
-          node.x = saved.x;
-          node.y = saved.y;
-        } else {
-          // New node — place near its parent
-          const parentLink = links.find(l => {
-            const targetId = typeof l.target === 'string' ? l.target : (l.target as NodeDatum).id;
-            return targetId === node.id;
-          });
-          if (parentLink) {
-            const sourceId = typeof parentLink.source === 'string' ? parentLink.source : (parentLink.source as NodeDatum).id;
-            const parent = nodes.find(p => p.id === sourceId);
-            if (parent?.x != null && parent?.y != null) {
-              node.x = parent.x + (Math.random() - 0.5) * 60;
-              node.y = parent.y + (Math.random() - 0.5) * 60;
-            }
-          }
+    // Seed initial positions so connected nodes start in the same quadrant
+    const layer1 = nodes.filter(n => n.depth === 1);
+    const angleStep = (2 * Math.PI) / Math.max(layer1.length, 1);
+    layer1.forEach((n, i) => {
+      const angle = angleStep * i - Math.PI / 2;
+      n.x = cx + Math.cos(angle) * 120;
+      n.y = cy + Math.sin(angle) * 120;
+    });
+    // Place depth-2 nodes near their parent (same angle, further out)
+    nodes.filter(n => n.depth === 2).forEach(n => {
+      const parentLink = links.find(l => {
+        const targetId = typeof l.target === 'string' ? l.target : (l.target as NodeDatum).id;
+        return targetId === n.id;
+      });
+      if (parentLink) {
+        const sourceId = typeof parentLink.source === 'string' ? parentLink.source : (parentLink.source as NodeDatum).id;
+        const parent = nodes.find(p => p.id === sourceId);
+        if (parent?.x != null && parent?.y != null) {
+          const angle = Math.atan2(parent.y - cy, parent.x - cx);
+          n.x = cx + Math.cos(angle) * 200;
+          n.y = cy + Math.sin(angle) * 200;
         }
       }
-    } else {
-      // First render: seed using angle-based radial layout
-      const layer1 = nodes.filter(n => n.depth === 1);
-      const angleStep = (2 * Math.PI) / Math.max(layer1.length, 1);
-      layer1.forEach((n, i) => {
-        const angle = angleStep * i - Math.PI / 2;
-        n.x = cx + Math.cos(angle) * 120;
-        n.y = cy + Math.sin(angle) * 120;
-      });
-      nodes.filter(n => n.depth === 2).forEach(n => {
-        const parentLink = links.find(l => {
-          const targetId = typeof l.target === 'string' ? l.target : (l.target as NodeDatum).id;
-          return targetId === n.id;
-        });
-        if (parentLink) {
-          const sourceId = typeof parentLink.source === 'string' ? parentLink.source : (parentLink.source as NodeDatum).id;
-          const parent = nodes.find(p => p.id === sourceId);
-          if (parent?.x != null && parent?.y != null) {
-            const angle = Math.atan2(parent.y - cy, parent.x - cx);
-            n.x = cx + Math.cos(angle) * 200;
-            n.y = cy + Math.sin(angle) * 200;
-          }
-        }
-      });
-    }
+    });
 
     // Radial distance per depth layer — floor prevents cramping on small screens
     const layerRadius = Math.max(Math.min(width, height) * 0.2, 120);
@@ -459,11 +418,9 @@
         .radius(d => getNodeRadius(d.type) + 30)
       );
 
-    // Pre-settle only on first render; re-renders use saved positions
+    // Pre-settle the simulation (150 ticks) for a stable initial layout
     simulation.stop();
-    if (!isRestore) {
-      for (let i = 0; i < 150; i++) simulation.tick();
-    }
+    for (let i = 0; i < 150; i++) simulation.tick();
 
     // Draw links
     const link = g.append('g')
@@ -664,13 +621,14 @@
       biTickFn(flowBiReverse, -1);
     });
 
-    if (isRestore && savedTransform) {
-      // Re-render: restore previous zoom/pan, no simulation restart needed
-      svg.call(zoom.transform, savedTransform);
-    } else {
-      // First render: fit to viewport after pre-settling
-      zoomToFit(false);
-    }
+    // Auto-fit on simulation end
+    simulation.on('end', () => {
+      zoomToFit(true);
+    });
+
+    // Fit to viewport immediately after pre-settling, then gently restart
+    zoomToFit(false);
+    simulation.alpha(0.1).restart();
   }
 
   // Re-render when data changes
@@ -684,6 +642,8 @@
   });
 
   onMount(() => {
+    render();
+
     const resizeObserver = new ResizeObserver(() => {
       handleResize();
     });
