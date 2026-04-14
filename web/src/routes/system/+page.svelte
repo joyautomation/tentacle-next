@@ -138,7 +138,7 @@
 </script>
 
 <div class="system-page">
-  <h1>System</h1>
+  <h1>Version & Updates</h1>
 
   <!-- Version Info -->
   <section class="card">

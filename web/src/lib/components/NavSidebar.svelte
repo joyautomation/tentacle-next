@@ -404,13 +404,10 @@
   {/if}
 
   <div class="sidebar-footer">
-    <span class="sidebar-section-label">System</span>
+    <span class="sidebar-section-label">System {#if appVersion}<span class="version-label">{appVersion}</span>{/if}</span>
     <a href="/system" class="sidebar-item footer-btn" onclick={close}>
       <ComputerDesktop size="1.25rem" />
-      <span>System</span>
-      {#if appVersion}
-        <span class="version-label">{appVersion}</span>
-      {/if}
+      <span>Version & Updates</span>
     </a>
     <button class="sidebar-item footer-btn" onclick={exportConfig}>
       <ArrowDownTray size="1.25rem" />
@@ -532,6 +529,7 @@
     will-change: transform;
     transition: transform 0.25s ease;
     overflow-y: auto;
+    overflow-x: hidden;
 
     &.open {
       transform: translateX(0);
@@ -646,6 +644,8 @@
   }
 
   .sidebar-section-label {
+    display: flex;
+    align-items: baseline;
     font-size: 0.6875rem;
     font-weight: 600;
     color: var(--theme-text-muted);
@@ -742,8 +742,11 @@
 
   .version-label {
     margin-left: auto;
-    font-size: 0.6875rem;
+    font-size: 0.625rem;
     font-family: 'IBM Plex Mono', monospace;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
     color: var(--theme-text-muted);
     opacity: 0.7;
   }
