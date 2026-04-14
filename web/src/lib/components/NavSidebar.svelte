@@ -50,9 +50,10 @@
     availableModules: ModuleRegistryInfo[];
     desiredServices: DesiredService[];
     open: boolean;
+    appVersion?: string;
   }
 
-  let { services, availableModules = [], desiredServices = [], open = $bindable(false) }: Props = $props();
+  let { services, availableModules = [], desiredServices = [], open = $bindable(false), appVersion = '' }: Props = $props();
 
   const uniqueServices = $derived(
     [...new Map(services.map((s) => [s.serviceType, s])).values()]
@@ -404,6 +405,13 @@
 
   <div class="sidebar-footer">
     <span class="sidebar-section-label">System</span>
+    <a href="/system" class="sidebar-item footer-btn" onclick={close}>
+      <ComputerDesktop size="1.25rem" />
+      <span>System</span>
+      {#if appVersion}
+        <span class="version-label">{appVersion}</span>
+      {/if}
+    </a>
     <button class="sidebar-item footer-btn" onclick={exportConfig}>
       <ArrowDownTray size="1.25rem" />
       <span>Export Config</span>
@@ -729,6 +737,15 @@
     cursor: pointer;
     font: inherit;
     color: var(--theme-text-muted);
+    text-decoration: none;
+  }
+
+  .version-label {
+    margin-left: auto;
+    font-size: 0.6875rem;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--theme-text-muted);
+    opacity: 0.7;
   }
 
   .reset-btn {

@@ -17,9 +17,10 @@ REMOTE_PATH="/usr/local/bin/tentacle"
 echo "==> Building web assets..."
 (cd web && npm run build)
 
-echo "==> Building tentacle..."
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+echo "==> Building tentacle (version: $VERSION)..."
 CGO_ENABLED=1 CGO_LDFLAGS="-L/tmp/libplctag-check/build/bin_dist" \
-  go build -tags all -o "$BINARY" ./cmd/tentacle
+  go build -tags all -ldflags "-X github.com/joyautomation/tentacle/internal/version.Version=$VERSION" -o "$BINARY" ./cmd/tentacle
 
 echo "==> Stopping tentacle service..."
 incus exec "$CONTAINER" -- systemctl stop tentacle

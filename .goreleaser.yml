@@ -6,6 +6,11 @@ builds:
   - id: tentacle
     dir: cmd/tentacle
     binary: tentacle
+    ldflags:
+      - -s -w
+      - -X github.com/joyautomation/tentacle/internal/version.Version={{.Version}}
+      - -X github.com/joyautomation/tentacle/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/joyautomation/tentacle/internal/version.Date={{.Date}}
     tags:
       - stable
       - api
@@ -34,6 +39,11 @@ builds:
   - id: tentacle-experimental
     dir: cmd/tentacle
     binary: tentacle-experimental
+    ldflags:
+      - -s -w
+      - -X github.com/joyautomation/tentacle/internal/version.Version={{.Version}}
+      - -X github.com/joyautomation/tentacle/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/joyautomation/tentacle/internal/version.Date={{.Date}}
     tags:
       - all
     env:
