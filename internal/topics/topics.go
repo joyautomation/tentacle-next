@@ -5,6 +5,7 @@ import "fmt"
 
 // Scanner subjects (per protocol: ethernetip, opcua, snmp, modbus).
 func Browse(protocol string) string                    { return protocol + ".browse" }
+func BrowseCancel(protocol, browseID string) string    { return fmt.Sprintf("%s.browse.cancel.%s", protocol, browseID) }
 func BrowseProgress(protocol, browseID string) string  { return fmt.Sprintf("%s.browse.progress.%s", protocol, browseID) }
 func ScannerSubscribe(protocol string) string          { return protocol + ".subscribe" }
 func ScannerUnsubscribe(protocol string) string        { return protocol + ".unsubscribe" }

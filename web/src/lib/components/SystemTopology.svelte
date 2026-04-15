@@ -367,7 +367,7 @@
       const padding = 80;
       const bw = x1 - x0 + padding * 2;
       const bh = y1 - y0 + padding * 2;
-      const scale = Math.min(1.5, Math.min(width / bw, height / bh));
+      const scale = Math.min(1.0, Math.min(width / bw, height / bh));
       const tx = width / 2 - scale * ((x0 + x1) / 2);
       const ty = height / 2 - scale * ((y0 + y1) / 2);
       const transform = d3.zoomIdentity.translate(tx, ty).scale(scale);

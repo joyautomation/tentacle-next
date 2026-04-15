@@ -57,9 +57,11 @@ type BrowseState struct {
 	GatewayID string          `json:"gatewayId,omitempty"`
 	DeviceID  string          `json:"deviceId"`
 	Protocol  string          `json:"protocol"`
-	Status    string          `json:"status"` // "in-progress", "completed", "failed"
+	Status    string          `json:"status"` // "browsing", "completed", "failed", "cancelled"
 	StartedAt int64           `json:"startedAt"`
 	Result    json.RawMessage `json:"result,omitempty"`
+	// cleanup releases subscriptions when the browse reaches a terminal state.
+	cleanup func() `json:"-"`
 }
 
 // New creates a new API module.
@@ -213,6 +215,7 @@ func (m *Module) routes() http.Handler {
 		r.Post("/browse/{protocol}", m.handleBrowseTags)
 		r.Get("/browse/{browseId}/progress", m.handleStreamBrowseProgress)
 		r.Post("/gateways/{gatewayId}/browse", m.handleStartGatewayBrowse)
+		r.Post("/gateways/{gatewayId}/browse/{browseId}/cancel", m.handleCancelGatewayBrowse)
 		r.Get("/gateways/{gatewayId}/browse/{browseId}/progress", m.handleStreamGatewayBrowseProgress)
 		r.Post("/scanner/{protocol}/subscribe", m.handleScannerSubscribe)
 		r.Post("/scanner/{protocol}/unsubscribe", m.handleScannerUnsubscribe)
@@ -265,6 +268,10 @@ func (m *Module) routes() http.Handler {
 
 		// System
 		r.Get("/system/hostname", m.handleGetHostname)
+		r.Get("/system/version", m.handleGetVersion)
+		r.Get("/system/releases", m.handleListReleases)
+		r.Post("/system/upgrade", m.handleUpgrade)
+		r.Get("/system/upgrade/status", m.handleUpgradeStatus)
 		r.Get("/system/service", m.handleGetServiceStatus)
 		r.Post("/system/service/install", m.handleServiceInstall)
 		r.Post("/system/service/activate", m.handleServiceActivate)

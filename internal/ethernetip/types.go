@@ -13,6 +13,7 @@ type BrowseRequest struct {
 	DeviceID string `json:"deviceId"`
 	Host     string `json:"host"`
 	Port     int    `json:"port,omitempty"`
+	Slot     int    `json:"slot"`
 	BrowseID string `json:"browseId,omitempty"`
 	Async    bool   `json:"async,omitempty"`
 }
@@ -22,6 +23,7 @@ type SubscribeRequest struct {
 	DeviceID     string                          `json:"deviceId"`
 	Host         string                          `json:"host"`
 	Port         int                             `json:"port,omitempty"`
+	Slot         int                             `json:"slot"`
 	Tags         []string                        `json:"tags"`
 	CipTypes     map[string]string               `json:"cipTypes,omitempty"`
 	StructTypes  map[string]string               `json:"structTypes,omitempty"`

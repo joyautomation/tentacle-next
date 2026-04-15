@@ -50,9 +50,10 @@
     availableModules: ModuleRegistryInfo[];
     desiredServices: DesiredService[];
     open: boolean;
+    appVersion?: string;
   }
 
-  let { services, availableModules = [], desiredServices = [], open = $bindable(false) }: Props = $props();
+  let { services, availableModules = [], desiredServices = [], open = $bindable(false), appVersion = '' }: Props = $props();
 
   const uniqueServices = $derived(
     [...new Map(services.map((s) => [s.serviceType, s])).values()]
@@ -403,7 +404,11 @@
   {/if}
 
   <div class="sidebar-footer">
-    <span class="sidebar-section-label">System</span>
+    <span class="sidebar-section-label">System {#if appVersion}<span class="version-label">{appVersion}</span>{/if}</span>
+    <a href="/system" class="sidebar-item footer-btn" onclick={close}>
+      <ComputerDesktop size="1.25rem" />
+      <span>Updates</span>
+    </a>
     <button class="sidebar-item footer-btn" onclick={exportConfig}>
       <ArrowDownTray size="1.25rem" />
       <span>Export Config</span>
@@ -524,6 +529,7 @@
     will-change: transform;
     transition: transform 0.25s ease;
     overflow-y: auto;
+    overflow-x: hidden;
 
     &.open {
       transform: translateX(0);
@@ -577,15 +583,14 @@
 
   .sidebar-modules {
     border-top: 1px solid var(--theme-border);
-    padding: 0.5rem 0;
   }
 
   .module-section-header {
+    border-radius: 0;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     width: 100%;
-    padding: 0.75rem 1rem 0.25rem;
     background: none;
     border: none;
     cursor: pointer;
@@ -607,6 +612,7 @@
     gap: 0.5rem;
     width: 100%;
     padding: 0.375rem 1rem;
+    border-radius: 0;
     background: none;
     border: none;
     cursor: pointer;
@@ -638,6 +644,8 @@
   }
 
   .sidebar-section-label {
+    display: flex;
+    align-items: baseline;
     font-size: 0.6875rem;
     font-weight: 600;
     color: var(--theme-text-muted);
@@ -729,6 +737,18 @@
     cursor: pointer;
     font: inherit;
     color: var(--theme-text-muted);
+    text-decoration: none;
+  }
+
+  .version-label {
+    margin-left: auto;
+    font-size: 0.625rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--theme-text-muted);
+    opacity: 0.7;
   }
 
   .reset-btn {

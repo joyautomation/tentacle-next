@@ -11,6 +11,7 @@ export interface GatewayDevice {
   autoManaged?: boolean;
   host?: string;
   port?: number | null;
+  slot?: number | null;
   endpointUrl?: string;
   version?: string;
   community?: string;
@@ -113,7 +114,7 @@ export interface GatewayBrowseState {
   deviceId: string;
   browseId: string;
   protocol: string;
-  status: "browsing" | "completed" | "failed";
+  status: "browsing" | "completed" | "failed" | "cancelled";
   phase: string;
   discoveredCount: number;
   totalCount: number;
