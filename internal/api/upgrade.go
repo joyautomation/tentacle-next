@@ -22,33 +22,13 @@ func (m *Module) handleGetVersion(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleCheckUpdates queries GitHub for a newer release.
-// GET /api/v1/system/updates
-func (m *Module) handleCheckUpdates(w http.ResponseWriter, _ *http.Request) {
-	ghOrg := os.Getenv("TENTACLE_GH_ORG")
-	ghToken := os.Getenv("GITHUB_TOKEN")
-
-	info, err := selfupgrade.CheckForUpdate(ghOrg, ghToken)
-	if err != nil {
-		status := http.StatusBadGateway
-		var offline *selfupgrade.OfflineError
-		if errors.As(err, &offline) {
-			status = http.StatusServiceUnavailable
-		}
-		writeError(w, status, err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, info)
-}
-
-// handleListReleases returns all available releases from GitHub.
+// handleListReleases returns all available releases from GitHub (cached).
 // GET /api/v1/system/releases
 func (m *Module) handleListReleases(w http.ResponseWriter, _ *http.Request) {
 	ghOrg := os.Getenv("TENTACLE_GH_ORG")
 	ghToken := os.Getenv("GITHUB_TOKEN")
 
-	releases, err := selfupgrade.ListReleases(ghOrg, ghToken)
+	resp, err := selfupgrade.ListReleases(ghOrg, ghToken)
 	if err != nil {
 		status := http.StatusBadGateway
 		var offline *selfupgrade.OfflineError
@@ -59,7 +39,7 @@ func (m *Module) handleListReleases(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, releases)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleUpgrade downloads a new release and restarts via systemd.
@@ -86,20 +66,20 @@ func (m *Module) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// If no version specified, resolve latest.
+	// If no version specified, resolve latest from release list.
 	if body.Version == "" {
 		ghOrg := os.Getenv("TENTACLE_GH_ORG")
 		ghToken := os.Getenv("GITHUB_TOKEN")
-		info, err := selfupgrade.CheckForUpdate(ghOrg, ghToken)
-		if err != nil {
-			writeError(w, http.StatusBadGateway, "failed to resolve latest version: "+err.Error())
+		resp, err := selfupgrade.ListReleases(ghOrg, ghToken)
+		if err != nil || len(resp.Releases) == 0 {
+			msg := "failed to resolve latest version"
+			if err != nil {
+				msg += ": " + err.Error()
+			}
+			writeError(w, http.StatusBadGateway, msg)
 			return
 		}
-		if !info.UpdateAvailable {
-			writeError(w, http.StatusBadRequest, "already running the latest version")
-			return
-		}
-		body.Version = info.LatestVersion
+		body.Version = resp.Releases[0].Version
 	}
 
 	ghOrg := os.Getenv("TENTACLE_GH_ORG")

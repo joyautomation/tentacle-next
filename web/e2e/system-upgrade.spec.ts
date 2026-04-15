@@ -6,6 +6,11 @@ import {
   SYSTEM_VERSION_DEV,
 } from './helpers/mock-api';
 
+/** Wrap a release array into the ReleasesResponse shape the API returns. */
+function releasesResponse(releases: unknown[]) {
+  return { releases, lastChecked: Date.now() };
+}
+
 // ---------------------------------------------------------------------------
 // System page — version display
 // ---------------------------------------------------------------------------
@@ -48,12 +53,12 @@ test.describe('System page — releases', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([
+        body: JSON.stringify(releasesResponse([
           { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
           { version: '0.0.7', tagName: 'v0.0.7', name: 'v0.0.7', releaseUrl: '', publishedAt: '2026-04-05T00:00:00Z', current: false },
           { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
           { version: '0.0.4', tagName: 'v0.0.4', name: 'v0.0.4', releaseUrl: '', publishedAt: '2026-03-15T00:00:00Z', current: false },
-        ]),
+        ])),
       }),
     );
     await page.goto('/system');
@@ -66,6 +71,8 @@ test.describe('System page — releases', () => {
     // Non-current releases should have Switch buttons
     const switchButtons = page.getByRole('button', { name: 'Switch' });
     await expect(switchButtons).toHaveCount(3);
+    // Shows "checked" timestamp
+    await expect(page.getByText(/checked/)).toBeVisible();
   });
 
   test('shows offline message when no internet', async ({ page }) => {
@@ -87,10 +94,10 @@ test.describe('System page — releases', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([
+        body: JSON.stringify(releasesResponse([
           { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
           { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
-        ]),
+        ])),
       }),
     );
     await page.goto('/system');
@@ -116,10 +123,10 @@ test.describe('System page — upgrade flow', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([
+        body: JSON.stringify(releasesResponse([
           { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
           { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
-        ]),
+        ])),
       }),
     );
     await page.goto('/system');
@@ -140,10 +147,10 @@ test.describe('System page — upgrade flow', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([
+        body: JSON.stringify(releasesResponse([
           { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
           { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
-        ]),
+        ])),
       }),
     );
     await page.goto('/system');
@@ -163,10 +170,10 @@ test.describe('System page — upgrade flow', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([
+        body: JSON.stringify(releasesResponse([
           { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
           { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
-        ]),
+        ])),
       }),
     );
     await page.route('**/api/v1/system/upgrade', (route) => {
@@ -203,10 +210,10 @@ test.describe('System page — upgrade flow', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify([
+        body: JSON.stringify(releasesResponse([
           { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
           { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
-        ]),
+        ])),
       }),
     );
     await page.route('**/api/v1/system/upgrade', (route) =>

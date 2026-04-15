@@ -10,32 +10,26 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/joyautomation/tentacle/internal/paths"
 	"github.com/joyautomation/tentacle/internal/version"
 )
 
 const (
 	defaultGhOrg  = "joyautomation"
 	defaultRepo   = "tentacle-next"
-	cacheTTL      = 5 * time.Minute
+	cacheTTL      = 1 * time.Hour
 	binaryName    = "tentacle"
 	httpTimeout   = 120 * time.Second
 	unitName      = "tentacle.service"
+	cacheFileName = "releases-cache.json"
 )
-
-// UpdateInfo describes an available update.
-type UpdateInfo struct {
-	CurrentVersion  string `json:"currentVersion"`
-	LatestVersion   string `json:"latestVersion"`
-	UpdateAvailable bool   `json:"updateAvailable"`
-	ReleaseURL      string `json:"releaseUrl,omitempty"`
-	CheckedAt       int64  `json:"checkedAt"`
-}
 
 // UpgradeStatus tracks the progress of an in-flight upgrade.
 type UpgradeStatus struct {
@@ -44,17 +38,23 @@ type UpgradeStatus struct {
 	Version string `json:"version,omitempty"`
 }
 
+// ReleasesResponse wraps a release list with cache metadata.
+type ReleasesResponse struct {
+	Releases    []ReleaseInfo `json:"releases"`
+	LastChecked int64         `json:"lastChecked"` // unix millis
+}
+
+// diskCache is the JSON structure persisted to disk.
+type diskCache struct {
+	Releases    []ReleaseInfo `json:"releases"`
+	FetchedAt   time.Time     `json:"fetchedAt"`
+}
+
 var (
 	statusMu sync.Mutex
 	status   = UpgradeStatus{State: "idle"}
 
-	cacheMu    sync.RWMutex
-	cachedInfo *UpdateInfo
-	cacheTime  time.Time
-
-	releasesCacheMu   sync.RWMutex
-	cachedReleases    []ReleaseInfo
-	releasesCacheTime time.Time
+	releasesMu sync.RWMutex
 )
 
 // GetStatus returns the current upgrade status.
@@ -70,71 +70,32 @@ func setStatus(state, version, errMsg string) {
 	status = UpgradeStatus{State: state, Version: version, Error: errMsg}
 }
 
-// CheckForUpdate queries the GitHub releases API for the latest version.
-func CheckForUpdate(ghOrg, ghToken string) (*UpdateInfo, error) {
-	if ghOrg == "" {
-		ghOrg = defaultGhOrg
-	}
+func cacheFilePath() string {
+	return filepath.Join(paths.DataDir(), cacheFileName)
+}
 
-	cacheMu.RLock()
-	if cachedInfo != nil && time.Since(cacheTime) < cacheTTL {
-		info := *cachedInfo
-		cacheMu.RUnlock()
-		return &info, nil
-	}
-	cacheMu.RUnlock()
-
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", ghOrg, defaultRepo)
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest("GET", url, nil)
+func readDiskCache() (*diskCache, error) {
+	data, err := os.ReadFile(cacheFilePath())
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", "tentacle-selfupgrade")
-	if ghToken != "" {
-		req.Header.Set("Authorization", "Bearer "+ghToken)
+	var dc diskCache
+	if err := json.Unmarshal(data, &dc); err != nil {
+		return nil, err
 	}
+	return &dc, nil
+}
 
-	resp, err := client.Do(req)
+func writeDiskCache(dc *diskCache) error {
+	dir := paths.DataDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(dc)
 	if err != nil {
-		return nil, &OfflineError{Cause: err}
+		return err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("GitHub API rate limit exceeded — try again later or set GITHUB_TOKEN")
-	}
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var release struct {
-		TagName string `json:"tag_name"`
-		HTMLURL string `json:"html_url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	latest := strings.TrimPrefix(release.TagName, "v")
-	current := strings.TrimPrefix(version.Version, "v")
-
-	info := &UpdateInfo{
-		CurrentVersion:  version.Version,
-		LatestVersion:   latest,
-		UpdateAvailable: compareSemver(latest, current) > 0,
-		ReleaseURL:      release.HTMLURL,
-		CheckedAt:       time.Now().UnixMilli(),
-	}
-
-	cacheMu.Lock()
-	cachedInfo = info
-	cacheTime = time.Now()
-	cacheMu.Unlock()
-
-	return info, nil
+	return os.WriteFile(cacheFilePath(), data, 0o644)
 }
 
 // OfflineError indicates that GitHub could not be reached.
@@ -159,20 +120,70 @@ type ReleaseInfo struct {
 }
 
 // ListReleases returns all published, non-prerelease, non-draft releases.
-func ListReleases(ghOrg, ghToken string) ([]ReleaseInfo, error) {
+// Results are cached to disk with a 1-hour TTL. On fetch failure, stale
+// cached data is returned instead of an error.
+func ListReleases(ghOrg, ghToken string) (*ReleasesResponse, error) {
 	if ghOrg == "" {
 		ghOrg = defaultGhOrg
 	}
 
-	releasesCacheMu.RLock()
-	if cachedReleases != nil && time.Since(releasesCacheTime) < cacheTTL {
-		result := make([]ReleaseInfo, len(cachedReleases))
-		copy(result, cachedReleases)
-		releasesCacheMu.RUnlock()
-		return result, nil
-	}
-	releasesCacheMu.RUnlock()
+	releasesMu.RLock()
+	dc, _ := readDiskCache()
+	releasesMu.RUnlock()
 
+	// Return cached data if still fresh.
+	if dc != nil && time.Since(dc.FetchedAt) < cacheTTL {
+		return &ReleasesResponse{
+			Releases:    stampCurrent(dc.Releases),
+			LastChecked: dc.FetchedAt.UnixMilli(),
+		}, nil
+	}
+
+	// Fetch from GitHub.
+	result, fetchErr := fetchReleasesFromGitHub(ghOrg, ghToken)
+
+	if fetchErr != nil {
+		// Serve stale cache on error instead of failing.
+		if dc != nil && len(dc.Releases) > 0 {
+			return &ReleasesResponse{
+				Releases:    stampCurrent(dc.Releases),
+				LastChecked: dc.FetchedAt.UnixMilli(),
+			}, nil
+		}
+		return nil, fetchErr
+	}
+
+	// Persist to disk.
+	now := time.Now()
+	newCache := &diskCache{Releases: result, FetchedAt: now}
+	releasesMu.Lock()
+	if err := writeDiskCache(newCache); err != nil {
+		slog.Warn("selfupgrade: failed to write release cache", "error", err)
+	}
+	releasesMu.Unlock()
+
+	return &ReleasesResponse{
+		Releases:    stampCurrent(result),
+		LastChecked: now.UnixMilli(),
+	}, nil
+}
+
+// stampCurrent sets the Current flag based on the running version.
+func stampCurrent(releases []ReleaseInfo) []ReleaseInfo {
+	current := strings.TrimPrefix(version.Version, "v")
+	// Strip dev suffix (e.g. "0.0.8-7-gabcdef-dirty" → "0.0.8").
+	if idx := strings.IndexByte(current, '-'); idx >= 0 {
+		current = current[:idx]
+	}
+	out := make([]ReleaseInfo, len(releases))
+	copy(out, releases)
+	for i := range out {
+		out[i].Current = out[i].Version == current
+	}
+	return out
+}
+
+func fetchReleasesFromGitHub(ghOrg, ghToken string) ([]ReleaseInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=50", ghOrg, defaultRepo)
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
@@ -211,7 +222,6 @@ func ListReleases(ghOrg, ghToken string) ([]ReleaseInfo, error) {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	current := strings.TrimPrefix(version.Version, "v")
 	var result []ReleaseInfo
 	for _, r := range releases {
 		if r.Draft || r.Prerelease {
@@ -224,15 +234,8 @@ func ListReleases(ghOrg, ghToken string) ([]ReleaseInfo, error) {
 			Name:        r.Name,
 			ReleaseURL:  r.HTMLURL,
 			PublishedAt: r.PublishedAt,
-			Current:     ver == current,
 		})
 	}
-
-	releasesCacheMu.Lock()
-	cachedReleases = make([]ReleaseInfo, len(result))
-	copy(cachedReleases, result)
-	releasesCacheTime = time.Now()
-	releasesCacheMu.Unlock()
 
 	return result, nil
 }
@@ -301,13 +304,10 @@ func PerformUpgrade(targetVersion, ghOrg, ghToken, binaryPath string, log *slog.
 		return
 	}
 
-	// Invalidate caches so the next check shows the new version.
-	cacheMu.Lock()
-	cachedInfo = nil
-	cacheMu.Unlock()
-	releasesCacheMu.Lock()
-	cachedReleases = nil
-	releasesCacheMu.Unlock()
+	// Invalidate disk cache so the next check fetches fresh data.
+	releasesMu.Lock()
+	os.Remove(cacheFilePath())
+	releasesMu.Unlock()
 
 	// Spawn restart script.
 	setStatus("restarting", targetVersion, "")

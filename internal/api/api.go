@@ -266,7 +266,6 @@ func (m *Module) routes() http.Handler {
 		// System
 		r.Get("/system/hostname", m.handleGetHostname)
 		r.Get("/system/version", m.handleGetVersion)
-		r.Get("/system/updates", m.handleCheckUpdates)
 		r.Get("/system/releases", m.handleListReleases)
 		r.Post("/system/upgrade", m.handleUpgrade)
 		r.Get("/system/upgrade/status", m.handleUpgradeStatus)

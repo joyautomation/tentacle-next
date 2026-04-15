@@ -18,6 +18,11 @@
     current: boolean;
   }
 
+  interface ReleasesResponse {
+    releases: ReleaseInfo[];
+    lastChecked: number; // unix millis
+  }
+
   interface UpgradeStatus {
     state: string;
     error?: string;
@@ -26,6 +31,7 @@
 
   let versionInfo = $state<VersionInfo | null>(null);
   let releases = $state<ReleaseInfo[]>([]);
+  let lastChecked = $state<number | null>(null);
   let upgradeStatus = $state<UpgradeStatus | null>(null);
   let checkError = $state('');
   let offline = $state(false);
@@ -72,7 +78,7 @@
 
   async function fetchReleases() {
     loadingReleases = true;
-    const result = await api<ReleaseInfo[]>('/system/releases');
+    const result = await api<ReleasesResponse>('/system/releases');
     if (result.error) {
       if (result.error.status === 503) {
         offline = true;
@@ -80,9 +86,21 @@
         checkError = result.error.error;
       }
     } else if (result.data) {
-      releases = result.data;
+      releases = result.data.releases;
+      lastChecked = result.data.lastChecked;
     }
     loadingReleases = false;
+  }
+
+  function timeAgo(ms: number): string {
+    const seconds = Math.floor((Date.now() - ms) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
   }
 
   function promptUpgrade(version: string) {
@@ -200,7 +218,12 @@
 
   <!-- Releases -->
   <section class="card">
-    <h2>Releases</h2>
+    <div class="card-header">
+      <h2>Releases</h2>
+      {#if lastChecked}
+        <span class="last-checked">checked {timeAgo(lastChecked)}</span>
+      {/if}
+    </div>
 
     {#if mode !== 'systemd'}
       <div class="notice warning" transition:slide>
@@ -347,6 +370,23 @@
       color: var(--theme-text);
       margin-bottom: 1rem;
     }
+  }
+
+  .card-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0;
+
+    h2 {
+      margin-bottom: 1rem;
+    }
+  }
+
+  .last-checked {
+    font-size: 0.75rem;
+    color: var(--theme-text-muted);
+    font-weight: 400;
   }
 
   .version-grid {
