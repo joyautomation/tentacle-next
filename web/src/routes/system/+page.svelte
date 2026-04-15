@@ -51,9 +51,14 @@
     if (result.data) mode = result.data.mode;
   }
 
+  function baseSemver(v: string): string {
+    // Extract "0.0.8" from "0.0.8-7-g6673bdb-dirty" or "v0.0.8"
+    return v.replace(/^v/, '').split('-')[0];
+  }
+
   function isNewer(a: string, b: string): boolean {
-    const pa = a.split('.').map(Number);
-    const pb = b.split('.').map(Number);
+    const pa = baseSemver(a).split('.').map(Number);
+    const pb = baseSemver(b).split('.').map(Number);
     for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
       const va = pa[i] ?? 0;
       const vb = pb[i] ?? 0;
@@ -62,6 +67,8 @@
     }
     return false;
   }
+
+  let runningVersion = $derived(versionInfo?.version ?? '');
 
   async function fetchReleases() {
     loadingReleases = true;
@@ -260,14 +267,13 @@
     {:else if releases.length > 0 && phase === 'idle'}
       <div class="release-list">
         {#each releases as release}
-          {@const currentVersion = releases.find(r => r.current)?.version ?? ''}
-          <div class="release-row" class:current={release.current} class:newer={!release.current && isNewer(release.version, currentVersion)}>
+          <div class="release-row" class:current={release.current} class:newer={!release.current && isNewer(release.version, runningVersion)}>
             <div class="release-info">
               <span class="release-version">
                 v{release.version}
                 {#if release.current}
                   <span class="current-badge">current</span>
-                {:else if isNewer(release.version, currentVersion)}
+                {:else if isNewer(release.version, runningVersion)}
                   <span class="update-badge">update</span>
                 {/if}
               </span>
