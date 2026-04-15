@@ -407,7 +407,7 @@
     <span class="sidebar-section-label">System {#if appVersion}<span class="version-label">{appVersion}</span>{/if}</span>
     <a href="/system" class="sidebar-item footer-btn" onclick={close}>
       <ComputerDesktop size="1.25rem" />
-      <span>Version & Updates</span>
+      <span>Updates</span>
     </a>
     <button class="sidebar-item footer-btn" onclick={exportConfig}>
       <ArrowDownTray size="1.25rem" />

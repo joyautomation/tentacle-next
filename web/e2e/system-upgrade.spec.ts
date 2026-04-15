@@ -18,7 +18,7 @@ test.describe('System page — version display', () => {
     });
     await page.goto('/system');
 
-    await expect(page.getByRole('heading', { name: 'Version & Updates' })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Updates' })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('main').getByText('0.0.5')).toBeVisible();
     await expect(page.getByRole('main').getByText('systemd').first()).toBeVisible();
   });
