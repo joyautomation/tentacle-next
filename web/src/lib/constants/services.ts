@@ -17,14 +17,18 @@ export const SERVICE_NAMES: Record<string, string> = {
   profinet: 'PROFINET Device',
   profinetcontroller: 'PROFINET Controller',
   snmp: 'SNMP',
+  telemetry: 'Telemetry',
   web: 'Web UI',
 };
 
 /** Display names for module IDs (keyed by full moduleId like "tentacle-mqtt") */
 export const MODULE_NAMES: Record<string, string> = {
+  caddy: 'Caddy',
+  gateway: 'Gateway',
+  gitops: 'GitOps',
+  plc: 'PLC',
   'tentacle-ethernetip': 'EtherNet/IP',
   'tentacle-ethernetip-server': 'EtherNet/IP Server',
-  gitops: 'GitOps',
   'tentacle-history': 'History',
   'tentacle-modbus': 'Modbus',
   'tentacle-modbus-server': 'Modbus Server',
@@ -35,6 +39,7 @@ export const MODULE_NAMES: Record<string, string> = {
   'tentacle-profinet': 'PROFINET Device',
   'tentacle-profinetcontroller': 'PROFINET Controller',
   'tentacle-snmp': 'SNMP',
+  'tentacle-telemetry': 'Telemetry',
 };
 
 /** Get a display name for a serviceType, falling back to the raw string */

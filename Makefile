@@ -45,6 +45,7 @@ build-all: build build-cli
 	go build -tags web,api -o bin/tentacle-web ./cmd/tentacle-web
 	go build -tags profinet -o bin/tentacle-profinet ./cmd/tentacle-profinet
 	go build -tags profinetcontroller -o bin/tentacle-profinet-controller ./cmd/tentacle-profinet-controller
+	go build -tags telemetry -o bin/tentacle-telemetry ./cmd/tentacle-telemetry
 
 test:
 	go test ./...

@@ -10,14 +10,6 @@ func init() {
 	moduleRegistry = append(moduleRegistry,
 		otypes.ModuleRegistryEntry{
 			Repo:         "tentacle-next",
-			ModuleID:     "caddy",
-			Description:  "Caddy reverse proxy",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
 			ModuleID:     "opcua",
 			Description:  "OPC UA client",
 			Category:     "optional",
