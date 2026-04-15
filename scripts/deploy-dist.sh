@@ -151,6 +151,8 @@ done
 TS_IP=""
 if [ -f "$TS_KEY_FILE" ]; then
   echo "==> Installing and registering Tailscale..."
+  incus exec "$CONTAINER" -- apt-get update -qq
+  incus exec "$CONTAINER" -- apt-get install -y -qq curl >/dev/null
   incus exec "$CONTAINER" -- bash -c '
     curl -fsSL https://tailscale.com/install.sh | sh
   '
