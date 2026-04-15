@@ -266,6 +266,8 @@
     // Re-center NATS pin
     const natsNode = currentNodes.find(n => n.id === 'nats');
     if (natsNode) {
+      natsNode.x = width / 2;
+      natsNode.y = height / 2;
       natsNode.fx = width / 2;
       natsNode.fy = height / 2;
     }
@@ -369,6 +371,8 @@
     // Pin NATS to center
     const natsNode = nodes.find(n => n.id === 'nats');
     if (natsNode) {
+      natsNode.x = cx;
+      natsNode.y = cy;
       natsNode.fx = cx;
       natsNode.fy = cy;
     }
