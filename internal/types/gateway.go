@@ -136,6 +136,45 @@ type SNMPSubscribeRequest struct {
 }
 
 
+// ProfinetControllerSubscribeRequest asks the PROFINET IO Controller scanner
+// to connect to a device. Mirrors profinetcontroller.SubscribeRequest.
+type ProfinetControllerSubscribeRequest struct {
+	SubscriberID  string                       `json:"subscriberId"`
+	DeviceID      string                       `json:"deviceId"`
+	StationName   string                       `json:"stationName"`
+	IP            string                       `json:"ip,omitempty"`
+	InterfaceName string                       `json:"interfaceName"`
+	VendorID      uint16                       `json:"vendorId,omitempty"`
+	DeviceIDPN    uint16                       `json:"deviceIdPn,omitempty"`
+	CycleTimeMs   int                          `json:"cycleTimeMs,omitempty"`
+	Slots         []ProfinetControllerSlot     `json:"slots"`
+}
+
+// ProfinetControllerSlot describes a module slot.
+type ProfinetControllerSlot struct {
+	SlotNumber    uint16                          `json:"slotNumber"`
+	ModuleIdentNo uint32                         `json:"moduleIdentNo"`
+	Subslots      []ProfinetControllerSubslot    `json:"subslots"`
+}
+
+// ProfinetControllerSubslot describes a submodule and its I/O data.
+type ProfinetControllerSubslot struct {
+	SubslotNumber    uint16                     `json:"subslotNumber"`
+	SubmoduleIdentNo uint32                     `json:"submoduleIdentNo"`
+	InputSize        uint16                     `json:"inputSize"`
+	OutputSize       uint16                     `json:"outputSize"`
+	Tags             []ProfinetControllerTag    `json:"tags"`
+}
+
+// ProfinetControllerTag maps a PROFINET I/O byte position to a Tentacle tag.
+type ProfinetControllerTag struct {
+	TagID      string `json:"tagId"`
+	ByteOffset uint16 `json:"byteOffset"`
+	BitOffset  uint8  `json:"bitOffset,omitempty"`
+	Datatype   string `json:"datatype"`
+	Direction  string `json:"direction"` // "input" or "output"
+}
+
 // FunctionCodeToString converts a numeric Modbus function code to its string name.
 func FunctionCodeToString(fc int) string {
 	switch fc {

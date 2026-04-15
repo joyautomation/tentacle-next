@@ -15,7 +15,7 @@ type PlcConfigKV struct {
 
 // PlcDeviceConfigKV maps a scanner device that this PLC subscribes to.
 type PlcDeviceConfigKV struct {
-	Protocol    string `json:"protocol"`              // "ethernetip", "opcua", "modbus", "snmp"
+	Protocol    string `json:"protocol"`              // "ethernetip", "opcua", "modbus", "snmp", "profinetcontroller"
 	Host        string `json:"host,omitempty"`
 	Port        *int   `json:"port,omitempty"`
 	Slot        *int   `json:"slot,omitempty"`         // EtherNet/IP: chassis slot (default 0)
@@ -24,6 +24,13 @@ type PlcDeviceConfigKV struct {
 	Community   string `json:"community,omitempty"`   // SNMP
 	UnitID      *int   `json:"unitId,omitempty"`      // Modbus
 	ScanRate    *int   `json:"scanRate,omitempty"`
+
+	// PROFINET IO Controller fields
+	StationName   string `json:"stationName,omitempty"`   // PROFINET: station name for DCP discovery
+	InterfaceName string `json:"interfaceName,omitempty"` // PROFINET: network interface for raw L2
+	CycleTimeMs   *int   `json:"cycleTimeMs,omitempty"`   // PROFINET: RT cycle time in ms
+	VendorID      *int   `json:"vendorId,omitempty"`      // PROFINET: vendor ID for verification
+	DeviceIDPN    *int   `json:"deviceIdPn,omitempty"`    // PROFINET: device ID for verification
 }
 
 // PlcVariableConfigKV defines a single PLC variable.
@@ -40,7 +47,7 @@ type PlcVariableConfigKV struct {
 
 // PlcVariableSourceKV ties a PLC input variable to a scanner tag.
 type PlcVariableSourceKV struct {
-	Protocol       string `json:"protocol"`              // "ethernetip", "opcua", "modbus", "snmp"
+	Protocol       string `json:"protocol"`              // "ethernetip", "opcua", "modbus", "snmp", "profinetcontroller"
 	DeviceID       string `json:"deviceId"`
 	Tag            string `json:"tag"`
 	CipType        string `json:"cipType,omitempty"`     // EtherNet/IP CIP type hint
@@ -48,6 +55,18 @@ type PlcVariableSourceKV struct {
 	ModbusDatatype string `json:"modbusDatatype,omitempty"` // Modbus
 	ByteOrder      string `json:"byteOrder,omitempty"`      // Modbus
 	Address        *int   `json:"address,omitempty"`        // Modbus
+
+	// PROFINET IO Controller fields
+	PnSlotNumber       *int   `json:"pnSlotNumber,omitempty"`       // PROFINET: slot number
+	PnSubslotNumber    *int   `json:"pnSubslotNumber,omitempty"`    // PROFINET: subslot number
+	PnModuleIdentNo    *int   `json:"pnModuleIdentNo,omitempty"`    // PROFINET: module ident number
+	PnSubmoduleIdentNo *int   `json:"pnSubmoduleIdentNo,omitempty"` // PROFINET: submodule ident number
+	PnInputSize        *int   `json:"pnInputSize,omitempty"`        // PROFINET: input data size (bytes) for this subslot
+	PnOutputSize       *int   `json:"pnOutputSize,omitempty"`       // PROFINET: output data size (bytes) for this subslot
+	PnByteOffset       *int   `json:"pnByteOffset,omitempty"`       // PROFINET: byte offset in cyclic I/O data
+	PnBitOffset        *int   `json:"pnBitOffset,omitempty"`        // PROFINET: bit offset (for bool)
+	PnDatatype         string `json:"pnDatatype,omitempty"`         // PROFINET: binary datatype (float32, uint16, etc.)
+	PnDirection        string `json:"pnDirection,omitempty"`        // PROFINET: "input" (from device) or "output" (to device)
 }
 
 // PlcUdtTemplateConfigKV defines a UDT template for variables produced by this PLC.

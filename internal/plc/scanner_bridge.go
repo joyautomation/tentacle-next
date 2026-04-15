@@ -57,6 +57,7 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 	modbusRequests := make(map[string]*itypes.ModbusScannerSubscribeRequest)
 	opcuaRequests := make(map[string]*itypes.OpcUASubscribeRequest)
 	snmpRequests := make(map[string]*itypes.SNMPSubscribeRequest)
+	pnRequests := make(map[string]*itypes.ProfinetControllerSubscribeRequest)
 
 	for varID, vcfg := range config.Variables {
 		if vcfg.Direction != "input" || vcfg.Source == nil {
@@ -181,6 +182,108 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 				snmpRequests[dk] = req
 			}
 			req.OIDs = append(req.OIDs, src.Tag)
+
+		case "profinetcontroller":
+			req, exists := pnRequests[dk]
+			if !exists {
+				cycleMs := 32
+				if device.CycleTimeMs != nil {
+					cycleMs = *device.CycleTimeMs
+				}
+				var vendorID, deviceIDPN uint16
+				if device.VendorID != nil {
+					vendorID = uint16(*device.VendorID)
+				}
+				if device.DeviceIDPN != nil {
+					deviceIDPN = uint16(*device.DeviceIDPN)
+				}
+				req = &itypes.ProfinetControllerSubscribeRequest{
+					SubscriberID:  "plc-" + sb.plcID,
+					DeviceID:      src.DeviceID,
+					StationName:   device.StationName,
+					IP:            device.Host,
+					InterfaceName: device.InterfaceName,
+					VendorID:      vendorID,
+					DeviceIDPN:    deviceIDPN,
+					CycleTimeMs:   cycleMs,
+				}
+				pnRequests[dk] = req
+			}
+			// Build tag from variable source fields.
+			pnDir := src.PnDirection
+			if pnDir == "" {
+				pnDir = vcfg.Direction // fall back to PLC variable direction
+			}
+			tag := itypes.ProfinetControllerTag{
+				TagID:     src.Tag,
+				Datatype:  src.PnDatatype,
+				Direction: pnDir,
+			}
+			if src.PnByteOffset != nil {
+				tag.ByteOffset = uint16(*src.PnByteOffset)
+			}
+			if src.PnBitOffset != nil {
+				tag.BitOffset = uint8(*src.PnBitOffset)
+			}
+			// Find or create the matching slot/subslot.
+			slotNum := uint16(1)
+			if src.PnSlotNumber != nil {
+				slotNum = uint16(*src.PnSlotNumber)
+			}
+			subslotNum := uint16(1)
+			if src.PnSubslotNumber != nil {
+				subslotNum = uint16(*src.PnSubslotNumber)
+			}
+			var moduleIdent uint32
+			if src.PnModuleIdentNo != nil {
+				moduleIdent = uint32(*src.PnModuleIdentNo)
+			}
+			var submoduleIdent uint32
+			if src.PnSubmoduleIdentNo != nil {
+				submoduleIdent = uint32(*src.PnSubmoduleIdentNo)
+			}
+			var inputSize, outputSize uint16
+			if src.PnInputSize != nil {
+				inputSize = uint16(*src.PnInputSize)
+			}
+			if src.PnOutputSize != nil {
+				outputSize = uint16(*src.PnOutputSize)
+			}
+			// Find existing slot or create new one.
+			slotIdx := -1
+			for i, s := range req.Slots {
+				if s.SlotNumber == slotNum {
+					slotIdx = i
+					break
+				}
+			}
+			if slotIdx < 0 {
+				req.Slots = append(req.Slots, itypes.ProfinetControllerSlot{
+					SlotNumber:    slotNum,
+					ModuleIdentNo: moduleIdent,
+				})
+				slotIdx = len(req.Slots) - 1
+			}
+			// Find existing subslot or create new one.
+			subslotIdx := -1
+			for i, ss := range req.Slots[slotIdx].Subslots {
+				if ss.SubslotNumber == subslotNum {
+					subslotIdx = i
+					break
+				}
+			}
+			if subslotIdx < 0 {
+				req.Slots[slotIdx].Subslots = append(req.Slots[slotIdx].Subslots, itypes.ProfinetControllerSubslot{
+					SubslotNumber:    subslotNum,
+					SubmoduleIdentNo: submoduleIdent,
+					InputSize:        inputSize,
+					OutputSize:       outputSize,
+				})
+				subslotIdx = len(req.Slots[slotIdx].Subslots) - 1
+			}
+			req.Slots[slotIdx].Subslots[subslotIdx].Tags = append(
+				req.Slots[slotIdx].Subslots[subslotIdx].Tags, tag,
+			)
 		}
 	}
 
@@ -197,6 +300,9 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 	}
 	for _, req := range snmpRequests {
 		sb.writeSubscription(topics.BucketScannerSNMP, subscriberKey+":"+req.DeviceID, req)
+	}
+	for _, req := range pnRequests {
+		sb.writeSubscription(topics.BucketScannerProfinetController, subscriberKey+":"+req.DeviceID, req)
 	}
 
 	// Subscribe to scanner data topics for all protocols that have input variables.
