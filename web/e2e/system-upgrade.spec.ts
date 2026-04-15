@@ -35,100 +35,11 @@ test.describe('System page — version display', () => {
 });
 
 // ---------------------------------------------------------------------------
-// System page — check for updates (auto-loads on mount)
+// System page — releases (auto-loads on mount)
 // ---------------------------------------------------------------------------
 
-test.describe('System page — check for updates', () => {
-  test('shows update available when newer version exists', async ({ page }) => {
-    await mockConfiguredSystem(page, {
-      mode: 'systemd',
-      systemService: SERVICE_STATUS_SYSTEMD,
-    });
-    await page.route('**/api/v1/system/updates', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          currentVersion: '0.0.5',
-          latestVersion: '0.0.8',
-          updateAvailable: true,
-          releaseUrl: 'https://github.com/test/releases/v0.0.8',
-          checkedAt: Date.now(),
-        }),
-      }),
-    );
-    await page.goto('/system');
-
-    await expect(page.getByText('Version 0.0.8 is available')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole('button', { name: /Upgrade to v0\.0\.8/ })).toBeVisible();
-  });
-
-  test('shows already up to date message', async ({ page }) => {
-    await mockConfiguredSystem(page, {
-      mode: 'systemd',
-      systemService: SERVICE_STATUS_SYSTEMD,
-    });
-    await page.route('**/api/v1/system/updates', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          currentVersion: '0.0.8',
-          latestVersion: '0.0.8',
-          updateAvailable: false,
-          checkedAt: Date.now(),
-        }),
-      }),
-    );
-    await page.goto('/system');
-
-    await expect(page.getByText('You are running the latest version')).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('shows offline message when no internet', async ({ page }) => {
-    await mockConfiguredSystem(page, {
-      mode: 'systemd',
-      systemService: SERVICE_STATUS_SYSTEMD,
-    });
-    await page.route('**/api/v1/system/updates', (route) =>
-      jsonError(route, 'unable to reach GitHub — check your internet connection', 503),
-    );
-    await page.route('**/api/v1/system/releases', (route) =>
-      jsonError(route, 'unable to reach GitHub', 503),
-    );
-    await page.goto('/system');
-
-    await expect(page.getByText('Unable to reach GitHub')).toBeVisible({ timeout: 10_000 });
-  });
-
-  test('hides upgrade button when not in systemd mode', async ({ page }) => {
-    await mockConfiguredSystem(page, { mode: 'dev' });
-    await page.route('**/api/v1/system/updates', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          currentVersion: '0.0.5',
-          latestVersion: '0.0.8',
-          updateAvailable: true,
-          checkedAt: Date.now(),
-        }),
-      }),
-    );
-    await page.goto('/system');
-
-    await expect(page.getByText('Version 0.0.8 is available')).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('Upgrades are only available when running as a systemd service')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Upgrade to/ })).not.toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// System page — release list (auto-loads on mount)
-// ---------------------------------------------------------------------------
-
-test.describe('System page — release list', () => {
-  test('shows all releases with current badge', async ({ page }) => {
+test.describe('System page — releases', () => {
+  test('shows releases with current and update badges', async ({ page }) => {
     await mockConfiguredSystem(page, {
       mode: 'systemd',
       systemService: SERVICE_STATUS_SYSTEMD,
@@ -139,6 +50,7 @@ test.describe('System page — release list', () => {
         contentType: 'application/json',
         body: JSON.stringify([
           { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
+          { version: '0.0.7', tagName: 'v0.0.7', name: 'v0.0.7', releaseUrl: '', publishedAt: '2026-04-05T00:00:00Z', current: false },
           { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
           { version: '0.0.4', tagName: 'v0.0.4', name: 'v0.0.4', releaseUrl: '', publishedAt: '2026-03-15T00:00:00Z', current: false },
         ]),
@@ -146,14 +58,17 @@ test.describe('System page — release list', () => {
     );
     await page.goto('/system');
 
-    await expect(page.getByText('Available Releases')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Releases' })).toBeVisible({ timeout: 10_000 });
+    // Current release has "current" badge
     await expect(page.locator('.current-badge')).toBeVisible();
+    // Newer releases have "update" badges
+    await expect(page.locator('.update-badge')).toHaveCount(2);
     // Non-current releases should have Switch buttons
     const switchButtons = page.getByRole('button', { name: 'Switch' });
-    await expect(switchButtons).toHaveCount(2);
+    await expect(switchButtons).toHaveCount(3);
   });
 
-  test('shows offline message when releases fetch fails', async ({ page }) => {
+  test('shows offline message when no internet', async ({ page }) => {
     await mockConfiguredSystem(page, {
       mode: 'systemd',
       systemService: SERVICE_STATUS_SYSTEMD,
@@ -161,12 +76,29 @@ test.describe('System page — release list', () => {
     await page.route('**/api/v1/system/releases', (route) =>
       jsonError(route, 'unable to reach GitHub', 503),
     );
-    await page.route('**/api/v1/system/updates', (route) =>
-      jsonError(route, 'unable to reach GitHub', 503),
-    );
     await page.goto('/system');
 
     await expect(page.getByText('Unable to reach GitHub')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('hides switch buttons when not in systemd mode', async ({ page }) => {
+    await mockConfiguredSystem(page, { mode: 'dev' });
+    await page.route('**/api/v1/system/releases', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
+          { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
+        ]),
+      }),
+    );
+    await page.goto('/system');
+
+    // Releases still show but Switch buttons are hidden
+    await expect(page.locator('.update-badge')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Upgrades are only available when running as a systemd service')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Switch' })).not.toBeVisible();
   });
 });
 
@@ -180,21 +112,19 @@ test.describe('System page — upgrade flow', () => {
       mode: 'systemd',
       systemService: SERVICE_STATUS_SYSTEMD,
     });
-    await page.route('**/api/v1/system/updates', (route) =>
+    await page.route('**/api/v1/system/releases', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          currentVersion: '0.0.5',
-          latestVersion: '0.0.8',
-          updateAvailable: true,
-          checkedAt: Date.now(),
-        }),
+        body: JSON.stringify([
+          { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
+          { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
+        ]),
       }),
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Switch' }).first().click({ timeout: 10_000 });
 
     await expect(page.getByText('Confirm Version Change')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
@@ -206,21 +136,19 @@ test.describe('System page — upgrade flow', () => {
       mode: 'systemd',
       systemService: SERVICE_STATUS_SYSTEMD,
     });
-    await page.route('**/api/v1/system/updates', (route) =>
+    await page.route('**/api/v1/system/releases', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          currentVersion: '0.0.5',
-          latestVersion: '0.0.8',
-          updateAvailable: true,
-          checkedAt: Date.now(),
-        }),
+        body: JSON.stringify([
+          { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
+          { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
+        ]),
       }),
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Switch' }).first().click({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await expect(page.getByText('Confirm Version Change')).not.toBeVisible();
@@ -231,16 +159,14 @@ test.describe('System page — upgrade flow', () => {
       mode: 'systemd',
       systemService: SERVICE_STATUS_SYSTEMD,
     });
-    await page.route('**/api/v1/system/updates', (route) =>
+    await page.route('**/api/v1/system/releases', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          currentVersion: '0.0.5',
-          latestVersion: '0.0.8',
-          updateAvailable: true,
-          checkedAt: Date.now(),
-        }),
+        body: JSON.stringify([
+          { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
+          { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
+        ]),
       }),
     );
     await page.route('**/api/v1/system/upgrade', (route) => {
@@ -262,7 +188,7 @@ test.describe('System page — upgrade flow', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Switch' }).first().click({ timeout: 10_000 });
     await page.getByRole('button', { name: /Switch to v0\.0\.8/ }).click();
 
     await expect(page.getByText('Downloading new version')).toBeVisible({ timeout: 5_000 });
@@ -273,16 +199,14 @@ test.describe('System page — upgrade flow', () => {
       mode: 'systemd',
       systemService: SERVICE_STATUS_SYSTEMD,
     });
-    await page.route('**/api/v1/system/updates', (route) =>
+    await page.route('**/api/v1/system/releases', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          currentVersion: '0.0.5',
-          latestVersion: '0.0.8',
-          updateAvailable: true,
-          checkedAt: Date.now(),
-        }),
+        body: JSON.stringify([
+          { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
+          { version: '0.0.5', tagName: 'v0.0.5', name: 'v0.0.5', releaseUrl: '', publishedAt: '2026-04-01T00:00:00Z', current: true },
+        ]),
       }),
     );
     await page.route('**/api/v1/system/upgrade', (route) =>
@@ -290,7 +214,7 @@ test.describe('System page — upgrade flow', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Switch' }).first().click({ timeout: 10_000 });
     await page.getByRole('button', { name: /Switch to v0\.0\.8/ }).click();
 
     await expect(page.getByText('Upgrade failed')).toBeVisible({ timeout: 5_000 });

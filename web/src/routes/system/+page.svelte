@@ -9,14 +9,6 @@
     date: string;
   }
 
-  interface UpdateInfo {
-    currentVersion: string;
-    latestVersion: string;
-    updateAvailable: boolean;
-    releaseUrl?: string;
-    checkedAt: number;
-  }
-
   interface ReleaseInfo {
     version: string;
     tagName: string;
@@ -33,10 +25,8 @@
   }
 
   let versionInfo = $state<VersionInfo | null>(null);
-  let updateInfo = $state<UpdateInfo | null>(null);
   let releases = $state<ReleaseInfo[]>([]);
   let upgradeStatus = $state<UpgradeStatus | null>(null);
-  let checking = $state(false);
   let checkError = $state('');
   let offline = $state(false);
   let loadingReleases = $state(false);
@@ -48,7 +38,6 @@
   onMount(() => {
     fetchVersion();
     fetchMode();
-    checkForUpdates();
     fetchReleases();
   });
 
@@ -62,19 +51,16 @@
     if (result.data) mode = result.data.mode;
   }
 
-  async function checkForUpdates() {
-    checking = true;
-    const result = await api<UpdateInfo>('/system/updates');
-    if (result.error) {
-      if (result.error.status === 503) {
-        offline = true;
-      } else {
-        checkError = result.error.error;
-      }
-    } else if (result.data) {
-      updateInfo = result.data;
+  function isNewer(a: string, b: string): boolean {
+    const pa = a.split('.').map(Number);
+    const pb = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const va = pa[i] ?? 0;
+      const vb = pb[i] ?? 0;
+      if (va > vb) return true;
+      if (va < vb) return false;
     }
-    checking = false;
+    return false;
   }
 
   async function fetchReleases() {
@@ -146,7 +132,6 @@
         if (result.data) {
           clearInterval(interval);
           versionInfo = result.data;
-          updateInfo = null;
           releases = [];
           phase = 'success';
         }
@@ -206,9 +191,9 @@
     {/if}
   </section>
 
-  <!-- Updates -->
+  <!-- Releases -->
   <section class="card">
-    <h2>Updates</h2>
+    <h2>Releases</h2>
 
     {#if mode !== 'systemd'}
       <div class="notice warning" transition:slide>
@@ -222,36 +207,11 @@
       </div>
     {/if}
 
-    {#if phase === 'idle'}
-      {#if updateInfo}
-        {#if updateInfo.updateAvailable}
-          <div class="notice info" transition:slide>
-            <div class="notice-content">
-              <strong>Version {updateInfo.latestVersion} is available</strong>
-              <span>Currently running {updateInfo.currentVersion}</span>
-            </div>
-            {#if mode === 'systemd'}
-              <button class="btn-primary" onclick={() => promptUpgrade(updateInfo!.latestVersion)}>
-                Upgrade to v{updateInfo.latestVersion}
-              </button>
-            {/if}
-          </div>
-        {:else}
-          <div class="notice success" transition:slide>
-            You are running the latest version ({updateInfo.currentVersion}).
-          </div>
-        {/if}
-      {/if}
+    {#if checkError}
+      <div class="notice error" transition:slide>{checkError}</div>
+    {/if}
 
-      {#if checkError}
-        <div class="notice error" transition:slide>{checkError}</div>
-      {/if}
-
-      {#if checking || loadingReleases}
-        <p class="muted">Loading...</p>
-      {/if}
-
-    {:else if phase === 'upgrading'}
+    {#if phase === 'upgrading'}
       <div class="notice info upgrading" transition:slide>
         <svg class="spinner" viewBox="0 0 24 24" width="18" height="18">
           <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="31 31" />
@@ -279,7 +239,7 @@
       <div class="notice success" transition:slide>
         <strong>Upgrade complete!</strong> Now running version {versionInfo?.version}.
       </div>
-      <button class="btn-secondary" onclick={() => { phase = 'idle'; }}>
+      <button class="btn-secondary" onclick={() => { phase = 'idle'; fetchReleases(); }}>
         Done
       </button>
 
@@ -294,20 +254,21 @@
         Dismiss
       </button>
     {/if}
-  </section>
 
-  <!-- Release List -->
-  {#if releases.length > 0 && phase === 'idle'}
-    <section class="card" transition:slide>
-      <h2>Available Releases</h2>
+    {#if loadingReleases}
+      <p class="muted">Loading...</p>
+    {:else if releases.length > 0 && phase === 'idle'}
       <div class="release-list">
         {#each releases as release}
-          <div class="release-row" class:current={release.current}>
+          {@const currentVersion = releases.find(r => r.current)?.version ?? ''}
+          <div class="release-row" class:current={release.current} class:newer={!release.current && isNewer(release.version, currentVersion)}>
             <div class="release-info">
               <span class="release-version">
                 v{release.version}
                 {#if release.current}
                   <span class="current-badge">current</span>
+                {:else if isNewer(release.version, currentVersion)}
+                  <span class="update-badge">update</span>
                 {/if}
               </span>
               {#if release.name && release.name !== release.tagName}
@@ -328,8 +289,8 @@
           </div>
         {/each}
       </div>
-    </section>
-  {/if}
+    {/if}
+  </section>
 </div>
 
 {#if showConfirm}
@@ -446,18 +407,6 @@
     }
   }
 
-  .notice-content {
-    display: flex;
-    flex-direction: column;
-    gap: 0.125rem;
-    flex: 1;
-
-    span {
-      color: var(--theme-text-muted);
-      font-size: 0.8125rem;
-    }
-  }
-
   .notice-text {
     display: flex;
     flex-direction: column;
@@ -467,21 +416,6 @@
       color: var(--theme-text-muted);
       font-size: 0.8125rem;
     }
-  }
-
-  .btn-primary {
-    flex-shrink: 0;
-    padding: 0.5rem 1rem;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    border: none;
-    border-radius: var(--rounded);
-    background: var(--theme-primary);
-    color: white;
-    cursor: pointer;
-    transition: background 0.15s;
-
-    &:hover { background: var(--theme-primary-hover); }
   }
 
   .btn-secondary {
@@ -541,6 +475,10 @@
     &.current {
       .release-version { color: var(--badge-green-text, #22c55e); }
     }
+
+    &.newer {
+      .release-version { color: var(--badge-blue-text, #3b82f6); }
+    }
   }
 
   .release-info {
@@ -558,7 +496,7 @@
     white-space: nowrap;
   }
 
-  .current-badge {
+  .current-badge, .update-badge {
     font-size: 0.625rem;
     font-weight: 600;
     font-family: 'Space Grotesk', sans-serif;
@@ -566,10 +504,19 @@
     letter-spacing: 0.05em;
     padding: 0.0625rem 0.375rem;
     border-radius: var(--rounded-full);
+    vertical-align: middle;
+  }
+
+  .current-badge {
     background: var(--badge-green-bg);
     color: var(--badge-green-text);
     border: 1px solid var(--badge-green-border);
-    vertical-align: middle;
+  }
+
+  .update-badge {
+    background: var(--badge-blue-bg, rgba(59, 130, 246, 0.1));
+    color: var(--badge-blue-text, #3b82f6);
+    border: 1px solid var(--badge-blue-border, rgba(59, 130, 246, 0.3));
   }
 
   .release-name {
