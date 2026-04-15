@@ -391,16 +391,19 @@ func (m *Module) handleScannerUnsubscribe(w http.ResponseWriter, r *http.Request
 // POST /api/v1/gateways/{gatewayId}/browse/{browseId}/cancel
 func (m *Module) handleCancelGatewayBrowse(w http.ResponseWriter, r *http.Request) {
 	browseID := chi.URLParam(r, "browseId")
+	m.log.Info("api: cancel browse requested", "browseId", browseID)
 
 	m.browseMu.Lock()
 	state := m.browseStates[browseID]
 	if state == nil {
 		m.browseMu.Unlock()
+		m.log.Warn("api: cancel browse: not found", "browseId", browseID)
 		writeError(w, http.StatusNotFound, "browse not found")
 		return
 	}
 	if state.Status != "browsing" {
 		m.browseMu.Unlock()
+		m.log.Info("api: cancel browse: already terminal", "browseId", browseID, "status", state.Status)
 		writeJSON(w, http.StatusOK, map[string]string{"status": state.Status})
 		return
 	}
@@ -411,7 +414,10 @@ func (m *Module) handleCancelGatewayBrowse(w http.ResponseWriter, r *http.Reques
 
 	// Tell the scanner to stop the browse.
 	cancelSubject := topics.BrowseCancel(protocol, browseID)
-	_ = m.bus.Publish(cancelSubject, []byte(`{}`))
+	m.log.Info("api: publishing browse cancel", "subject", cancelSubject)
+	if err := m.bus.Publish(cancelSubject, []byte(`{}`)); err != nil {
+		m.log.Error("api: failed to publish browse cancel", "subject", cancelSubject, "error", err)
+	}
 
 	if cleanup != nil {
 		go cleanup()

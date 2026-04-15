@@ -270,6 +270,12 @@
     for (const [did, info] of localBrowseSubs) {
       toSubscribe.set(did, info);
     }
+    // Don't re-subscribe for devices that were locally cancelled
+    for (const [did, progress] of liveProgress) {
+      if (progress.status === 'cancelled') {
+        toSubscribe.delete(did);
+      }
+    }
 
     for (const [deviceId, info] of toSubscribe) {
       const cleanup = subscribe<{
@@ -1229,13 +1235,25 @@
     } catch {
       // Cancellation is best-effort
     }
-    // Remove from local subs and clear progress
+    // Remove from local subs so SSE is torn down and not re-created
     const next = new Map(localBrowseSubs);
     next.delete(deviceId);
     localBrowseSubs = next;
-    const cleared = new Map(liveProgress);
-    cleared.delete(deviceId);
-    liveProgress = cleared;
+    // Set cancelled status in liveProgress (overrides stale browseStates server prop)
+    const updated = new Map(liveProgress);
+    updated.set(deviceId, {
+      deviceId, browseId: info.browseId, protocol: info.protocol,
+      status: 'cancelled', phase: 'cancelled', discoveredCount: 0, totalCount: 0,
+      message: 'Cancelled', startedAt: '', updatedAt: new Date().toISOString(),
+    });
+    liveProgress = updated;
+    // Refresh server state, then clear the cancelled indicator
+    setTimeout(() => {
+      invalidateAll();
+      const cleared = new Map(liveProgress);
+      cleared.delete(deviceId);
+      liveProgress = cleared;
+    }, 500);
   }
 
   // ── Unified save ──
