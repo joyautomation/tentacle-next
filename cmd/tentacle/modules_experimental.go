@@ -3,7 +3,6 @@
 package main
 
 import (
-	"github.com/joyautomation/tentacle/internal/caddy"
 	"github.com/joyautomation/tentacle/internal/ethernetipserver"
 	"github.com/joyautomation/tentacle/internal/history"
 	"github.com/joyautomation/tentacle/internal/modbus"
@@ -15,12 +14,10 @@ import (
 	"github.com/joyautomation/tentacle/internal/plc"
 	"github.com/joyautomation/tentacle/internal/profinet"
 	"github.com/joyautomation/tentacle/internal/profinetcontroller"
-	"github.com/joyautomation/tentacle/internal/telemetry"
 )
 
 func experimentalFactories() map[string]orchestrator.ModuleFactory {
 	return map[string]orchestrator.ModuleFactory{
-		"caddy":             func(id string) module.Module { return caddy.New(id) },
 		"opcua":             func(id string) module.Module { return opcua.New(id) },
 		"modbus":            func(id string) module.Module { return modbus.New(id) },
 		"profinet":          func(id string) module.Module { return profinet.New(id) },
@@ -30,14 +27,11 @@ func experimentalFactories() map[string]orchestrator.ModuleFactory {
 		"history":           func(id string) module.Module { return history.New(id) },
 		"nftables":          func(id string) module.Module { return nftables.New(id) },
 		"plc":               func(id string) module.Module { return plc.New(id) },
-		"telemetry":          func(id string) module.Module { return telemetry.New(id) },
 	}
 }
 
 func experimentalModuleByName(name string) module.Module {
 	switch name {
-	case "caddy":
-		return caddy.New("caddy")
 	case "opcua":
 		return opcua.New("opcua")
 	case "modbus":
@@ -56,8 +50,6 @@ func experimentalModuleByName(name string) module.Module {
 		return nftables.New("nftables")
 	case "plc":
 		return plc.New("plc")
-	case "telemetry":
-		return telemetry.New("telemetry")
 	default:
 		return nil
 	}

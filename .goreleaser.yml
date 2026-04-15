@@ -21,6 +21,8 @@ builds:
       - mqtt
       - network
       - gitops
+      - caddy
+      - telemetry
       - web
     env:
       - CGO_ENABLED=1
