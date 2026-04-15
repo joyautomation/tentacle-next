@@ -318,8 +318,31 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 		}
 		s.log.Info("eip: browse complete", "device", req.DeviceID, "vars", len(result.Variables), "udts", len(result.Udts))
 		resultSubject := fmt.Sprintf("ethernetip.browse.result.%s", browseID)
-		resultData, _ := json.Marshal(result)
-		_ = s.b.Publish(resultSubject, resultData)
+		resultData, err := json.Marshal(result)
+		if err != nil {
+			s.log.Error("eip: failed to marshal browse result", "device", req.DeviceID, "error", err)
+			publishProgress(types.BrowseProgressMessage{
+				BrowseID:  browseID,
+				ModuleID:  s.moduleID,
+				DeviceID:  req.DeviceID,
+				Phase:     "failed",
+				Message:   fmt.Sprintf("Browse result too large to encode: %v", err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
+		if err := s.b.Publish(resultSubject, resultData); err != nil {
+			s.log.Error("eip: failed to publish browse result", "device", req.DeviceID, "bytes", len(resultData), "error", err)
+			publishProgress(types.BrowseProgressMessage{
+				BrowseID:  browseID,
+				ModuleID:  s.moduleID,
+				DeviceID:  req.DeviceID,
+				Phase:     "failed",
+				Message:   fmt.Sprintf("Browse result publish failed (%d bytes): %v", len(resultData), err),
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+			})
+			return
+		}
 	}()
 }
 
