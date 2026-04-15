@@ -93,5 +93,13 @@ func init() {
 			Runtime:      "embedded",
 			Experimental: true,
 		},
+		otypes.ModuleRegistryEntry{
+			Repo:         "tentacle-next",
+			ModuleID:     "telemetry",
+			Description:  "Anonymous usage & error reporting",
+			Category:     "optional",
+			Runtime:      "embedded",
+			Experimental: true,
+		},
 	)
 }

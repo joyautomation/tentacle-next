@@ -15,6 +15,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/plc"
 	"github.com/joyautomation/tentacle/internal/profinet"
 	"github.com/joyautomation/tentacle/internal/profinetcontroller"
+	"github.com/joyautomation/tentacle/internal/telemetry"
 )
 
 func experimentalFactories() map[string]orchestrator.ModuleFactory {
@@ -29,6 +30,7 @@ func experimentalFactories() map[string]orchestrator.ModuleFactory {
 		"history":           func(id string) module.Module { return history.New(id) },
 		"nftables":          func(id string) module.Module { return nftables.New(id) },
 		"plc":               func(id string) module.Module { return plc.New(id) },
+		"telemetry":          func(id string) module.Module { return telemetry.New(id) },
 	}
 }
 
@@ -54,6 +56,8 @@ func experimentalModuleByName(name string) module.Module {
 		return nftables.New("nftables")
 	case "plc":
 		return plc.New("plc")
+	case "telemetry":
+		return telemetry.New("telemetry")
 	default:
 		return nil
 	}

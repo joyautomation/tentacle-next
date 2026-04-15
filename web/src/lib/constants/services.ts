@@ -17,6 +17,7 @@ export const SERVICE_NAMES: Record<string, string> = {
   profinet: 'PROFINET Device',
   profinetcontroller: 'PROFINET Controller',
   snmp: 'SNMP',
+  telemetry: 'Telemetry',
   web: 'Web UI',
 };
 
@@ -35,6 +36,7 @@ export const MODULE_NAMES: Record<string, string> = {
   'tentacle-profinet': 'PROFINET Device',
   'tentacle-profinetcontroller': 'PROFINET Controller',
   'tentacle-snmp': 'SNMP',
+  'tentacle-telemetry': 'Telemetry',
 };
 
 /** Get a display name for a serviceType, falling back to the raw string */
