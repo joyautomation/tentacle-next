@@ -583,15 +583,14 @@
 
   .sidebar-modules {
     border-top: 1px solid var(--theme-border);
-    padding: 0.5rem 0;
   }
 
   .module-section-header {
+    border-radius: 0;
     display: flex;
     align-items: center;
     gap: 0.5rem;
     width: 100%;
-    padding: 0.75rem 1rem 0.25rem;
     background: none;
     border: none;
     cursor: pointer;
@@ -613,6 +612,7 @@
     gap: 0.5rem;
     width: 100%;
     padding: 0.375rem 1rem;
+    border-radius: 0;
     background: none;
     border: none;
     cursor: pointer;

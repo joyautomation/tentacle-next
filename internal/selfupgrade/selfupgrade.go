@@ -51,6 +51,10 @@ var (
 	cacheMu    sync.RWMutex
 	cachedInfo *UpdateInfo
 	cacheTime  time.Time
+
+	releasesCacheMu   sync.RWMutex
+	cachedReleases    []ReleaseInfo
+	releasesCacheTime time.Time
 )
 
 // GetStatus returns the current upgrade status.
@@ -160,6 +164,15 @@ func ListReleases(ghOrg, ghToken string) ([]ReleaseInfo, error) {
 		ghOrg = defaultGhOrg
 	}
 
+	releasesCacheMu.RLock()
+	if cachedReleases != nil && time.Since(releasesCacheTime) < cacheTTL {
+		result := make([]ReleaseInfo, len(cachedReleases))
+		copy(result, cachedReleases)
+		releasesCacheMu.RUnlock()
+		return result, nil
+	}
+	releasesCacheMu.RUnlock()
+
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=50", ghOrg, defaultRepo)
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
@@ -214,6 +227,12 @@ func ListReleases(ghOrg, ghToken string) ([]ReleaseInfo, error) {
 			Current:     ver == current,
 		})
 	}
+
+	releasesCacheMu.Lock()
+	cachedReleases = make([]ReleaseInfo, len(result))
+	copy(cachedReleases, result)
+	releasesCacheTime = time.Now()
+	releasesCacheMu.Unlock()
 
 	return result, nil
 }
@@ -282,10 +301,13 @@ func PerformUpgrade(targetVersion, ghOrg, ghToken, binaryPath string, log *slog.
 		return
 	}
 
-	// Invalidate the update cache so the next check shows the new version.
+	// Invalidate caches so the next check shows the new version.
 	cacheMu.Lock()
 	cachedInfo = nil
 	cacheMu.Unlock()
+	releasesCacheMu.Lock()
+	cachedReleases = nil
+	releasesCacheMu.Unlock()
 
 	// Spawn restart script.
 	setStatus("restarting", targetVersion, "")
