@@ -114,7 +114,7 @@ export interface GatewayBrowseState {
   deviceId: string;
   browseId: string;
   protocol: string;
-  status: "browsing" | "completed" | "failed";
+  status: "browsing" | "completed" | "failed" | "cancelled";
   phase: string;
   discoveredCount: number;
   totalCount: number;

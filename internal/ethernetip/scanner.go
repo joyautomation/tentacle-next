@@ -3,6 +3,7 @@
 package ethernetip
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -272,11 +273,38 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 		_ = s.b.Publish(subj, d)
 	}
 
+	// Create a cancellable context for this browse operation.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Listen for cancel messages from the API layer.
+	cancelSubject := topics.BrowseCancel("ethernetip", browseID)
+	cancelSub, _ := s.b.Subscribe(cancelSubject, func(_ string, _ []byte, _ bus.ReplyFunc) {
+		s.log.Info("eip: browse cancelled by user", "device", req.DeviceID, "browseId", browseID)
+		cancel()
+	})
+
 	// Respond immediately with browseID, run browse in background
 	s.respondJSON(reply, map[string]string{"browseId": browseID})
 	go func() {
-		result, err := browseDevice(req.Host, req.Port, req.Slot, req.DeviceID, s.moduleID, browseID, publishProgress)
+		defer cancel()
+		if cancelSub != nil {
+			defer cancelSub.Unsubscribe()
+		}
+
+		result, err := browseDevice(ctx, req.Host, req.Port, req.Slot, req.DeviceID, s.moduleID, browseID, publishProgress)
 		if err != nil {
+			if ctx.Err() != nil {
+				s.log.Info("eip: browse cancelled", "device", req.DeviceID)
+				publishProgress(types.BrowseProgressMessage{
+					BrowseID:  browseID,
+					ModuleID:  s.moduleID,
+					DeviceID:  req.DeviceID,
+					Phase:     "cancelled",
+					Message:   "Browse cancelled by user",
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				})
+				return
+			}
 			s.log.Error("eip: browse failed", "device", req.DeviceID, "error", err)
 			publishProgress(types.BrowseProgressMessage{
 				BrowseID:  browseID,

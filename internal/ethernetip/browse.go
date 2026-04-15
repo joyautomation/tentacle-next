@@ -3,6 +3,7 @@
 package ethernetip
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -232,7 +233,7 @@ func isPrintable(s string) bool {
 }
 
 // browseDevice lists all tags and reads all UDT templates from a device.
-func browseDevice(gateway string, port int, slot int, deviceID string, moduleID string, browseID string, publishProgress func(types.BrowseProgressMessage)) (*BrowseResult, error) {
+func browseDevice(ctx context.Context, gateway string, port int, slot int, deviceID string, moduleID string, browseID string, publishProgress func(types.BrowseProgressMessage)) (*BrowseResult, error) {
 	if port == 0 {
 		port = 44818
 	}
@@ -249,6 +250,10 @@ func browseDevice(gateway string, port int, slot int, deviceID string, moduleID 
 	tags, err := listTags(gateway, port, slot)
 	if err != nil {
 		return nil, fmt.Errorf("tag listing failed: %w", err)
+	}
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	publishProgress(types.BrowseProgressMessage{
@@ -286,6 +291,10 @@ func browseDevice(gateway string, port int, slot int, deviceID string, moduleID 
 	}
 
 	for len(toProcess) > 0 {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		id := toProcess[0]
 		toProcess = toProcess[1:]
 
@@ -375,7 +384,15 @@ func browseDevice(gateway string, port int, slot int, deviceID string, moduleID 
 		}
 	}
 
-	readableStructVars := filterReadable(structCandidates, gateway, port, slot, publishProgress, browseID, deviceID, moduleID)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	readableStructVars := filterReadable(ctx, structCandidates, gateway, port, slot, publishProgress, browseID, deviceID, moduleID)
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	variables := make([]VariableInfo, 0, len(atomicVars)+len(readableStructVars))
 	variables = append(variables, atomicVars...)
@@ -475,7 +492,7 @@ const (
 	readableWorkerCount = 10
 )
 
-func filterReadable(candidates []candidateVar, gateway string, port int, slot int, publishProgress func(types.BrowseProgressMessage), browseID, deviceID, moduleID string) []VariableInfo {
+func filterReadable(ctx context.Context, candidates []candidateVar, gateway string, port int, slot int, publishProgress func(types.BrowseProgressMessage), browseID, deviceID, moduleID string) []VariableInfo {
 	type result struct {
 		index    int
 		readable bool
@@ -484,10 +501,16 @@ func filterReadable(candidates []candidateVar, gateway string, port int, slot in
 	results := make(chan result, len(candidates))
 	work := make(chan int, len(candidates))
 
-	for i := range candidates {
-		work <- i
-	}
-	close(work)
+	go func() {
+		defer close(work)
+		for i := range candidates {
+			select {
+			case <-ctx.Done():
+				return
+			case work <- i:
+			}
+		}
+	}()
 
 	var wg sync.WaitGroup
 	for w := 0; w < readableWorkerCount; w++ {
@@ -495,6 +518,9 @@ func filterReadable(candidates []candidateVar, gateway string, port int, slot in
 		go func() {
 			defer wg.Done()
 			for idx := range work {
+				if ctx.Err() != nil {
+					return
+				}
 				readable := testTagReadable(gateway, port, slot, candidates[idx].path)
 				results <- result{idx, readable}
 			}

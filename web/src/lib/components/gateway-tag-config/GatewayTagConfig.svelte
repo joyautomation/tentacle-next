@@ -6,7 +6,7 @@
   import { fly, slide } from 'svelte/transition';
   import { untrack } from 'svelte';
   import { state as saltState } from '@joyautomation/salt';
-  import { ArrowPath, ChevronRight, ExclamationTriangle, PencilSquare, Signal } from '@joyautomation/salt/icons';
+  import { ArrowPath, ChevronRight, ExclamationTriangle, PencilSquare, Signal, XMark } from '@joyautomation/salt/icons';
   import { mapDatatype, type RbeState, type InstanceInfo, type ActiveSection } from './utils';
   import TemplateDefaultsTab from './TemplateDefaultsTab.svelte';
   import InstancesTab from './InstancesTab.svelte';
@@ -278,12 +278,12 @@
       }>(
         `/gateways/gateway/browse/${info.browseId}/progress`,
         (p) => {
-          const isTerminal = p.phase === 'completed' || p.phase === 'failed' ||
+          const isTerminal = p.phase === 'completed' || p.phase === 'failed' || p.phase === 'cancelled' ||
             (p.totalCount > 0 && p.discoveredCount >= p.totalCount);
           const updated = new Map(liveProgress);
           updated.set(deviceId, {
             deviceId, browseId: info.browseId, protocol: info.protocol,
-            status: isTerminal ? (p.phase === 'failed' ? 'failed' : 'completed') as 'completed' | 'failed' : 'browsing',
+            status: isTerminal ? (p.phase === 'failed' ? 'failed' : p.phase === 'cancelled' ? 'cancelled' : 'completed') as 'completed' | 'failed' | 'cancelled' : 'browsing',
             phase: p.phase,
             discoveredCount: p.discoveredCount,
             totalCount: p.totalCount,
@@ -1221,6 +1221,23 @@
     }
   }
 
+  async function cancelBrowse(deviceId: string) {
+    const info = localBrowseSubs.get(deviceId);
+    if (!info) return;
+    try {
+      await apiPost(`/gateways/gateway/browse/${info.browseId}/cancel`);
+    } catch {
+      // Cancellation is best-effort
+    }
+    // Remove from local subs and clear progress
+    const next = new Map(localBrowseSubs);
+    next.delete(deviceId);
+    localBrowseSubs = next;
+    const cleared = new Map(liveProgress);
+    cleared.delete(deviceId);
+    liveProgress = cleared;
+  }
+
   // ── Unified save ──
   async function saveChanges() {
     saving = true;
@@ -1511,6 +1528,11 @@
                 {:else if browseState.discoveredCount > 0}
                   <span class="side-browse-count">{browseState.discoveredCount}</span>
                 {/if}
+                {#if browseState.status === 'browsing'}
+                  <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
+                    <XMark size="0.85rem" />
+                  </button>
+                {/if}
               {:else}
                 <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
                   <ArrowPath size="1rem" />
@@ -1794,6 +1816,16 @@
     cursor: pointer; flex-shrink: 0;
     :global(svg) { flex-shrink: 0; }
     &:hover { color: var(--theme-text); background: var(--theme-surface-hover); border-color: var(--theme-primary); }
+  }
+
+  .side-cancel-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: var(--rounded-full);
+    border: none; padding: 0;
+    background: transparent; color: var(--theme-text-muted);
+    cursor: pointer; flex-shrink: 0;
+    :global(svg) { flex-shrink: 0; }
+    &:hover { color: var(--theme-danger); }
   }
 
   .circular-progress {
