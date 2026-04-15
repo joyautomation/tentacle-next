@@ -268,6 +268,8 @@
     // Re-center NATS pin
     const natsNode = currentNodes.find(n => n.id === 'nats');
     if (natsNode) {
+      natsNode.x = width / 2;
+      natsNode.y = height / 2;
       natsNode.fx = width / 2;
       natsNode.fy = height / 2;
     }
@@ -381,9 +383,11 @@
     const cx = width / 2;
     const cy = height / 2;
 
-    // Pin NATS to center
+    // Pin NATS to center — set both x/y and fx/fy so parent lookups work
     const natsNode = nodes.find(n => n.id === 'nats');
     if (natsNode) {
+      natsNode.x = cx;
+      natsNode.y = cy;
       natsNode.fx = cx;
       natsNode.fy = cy;
     }
@@ -398,7 +402,8 @@
           node.x = saved.x;
           node.y = saved.y;
         } else {
-          // New node — place near its parent
+          // New node — place near its parent (fall back to center)
+          let px = cx, py = cy;
           const parentLink = links.find(l => {
             const targetId = typeof l.target === 'string' ? l.target : (l.target as NodeDatum).id;
             return targetId === node.id;
@@ -407,10 +412,12 @@
             const sourceId = typeof parentLink.source === 'string' ? parentLink.source : (parentLink.source as NodeDatum).id;
             const parent = nodes.find(p => p.id === sourceId);
             if (parent?.x != null && parent?.y != null) {
-              node.x = parent.x + (Math.random() - 0.5) * 60;
-              node.y = parent.y + (Math.random() - 0.5) * 60;
+              px = parent.x;
+              py = parent.y;
             }
           }
+          node.x = px + (Math.random() - 0.5) * 60;
+          node.y = py + (Math.random() - 0.5) * 60;
         }
       }
     } else {
