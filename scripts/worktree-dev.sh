@@ -16,6 +16,7 @@ Commands:
   create <name>       Create worktree + dev container for a module/feature
   destroy <name>      Remove worktree + dev container
   list                Show all worktrees and container status
+  sync <name|all>     Merge main into worktree branch(es)
   deploy <name>       Build and deploy to a specific worktree's container
   shell <name>        Open a shell in the container
   logs <name> [svc]   Show logs (default: tentacle service)
@@ -24,6 +25,8 @@ Commands:
 
 Examples:
   worktree-dev.sh create plc
+  worktree-dev.sh sync hmi         # merge main into feature/hmi
+  worktree-dev.sh sync all         # merge main into all feature worktrees
   worktree-dev.sh deploy profinet
   worktree-dev.sh shell modbus
   worktree-dev.sh logs opcua tentacle-web-dev
@@ -274,6 +277,68 @@ cmd_logs() {
   exec incus exec "$ct_name" -- journalctl -u "$service" -n 100 -f
 }
 
+cmd_sync() {
+  local target="$1"
+
+  if [ "$target" = "all" ]; then
+    # Find all feature worktrees by listing worktree paths that match our pattern.
+    local failed=()
+    local synced=()
+    while IFS= read -r line; do
+      local wt_path
+      wt_path=$(echo "$line" | awk '{print $1}')
+      # Skip the main worktree
+      [[ "$wt_path" == "$REPO_ROOT" ]] && continue
+      # Extract name from path: /path/tentacle-next-<name> → <name>
+      local name="${wt_path##*/tentacle-next-}"
+      [ -z "$name" ] && continue
+
+      echo "==> Syncing '$name' (merging main)..."
+      if git -C "$wt_path" merge main --no-edit 2>&1; then
+        synced+=("$name")
+        echo "    OK"
+      else
+        echo "    CONFLICT — aborting merge for '$name'"
+        git -C "$wt_path" merge --abort 2>/dev/null || true
+        failed+=("$name")
+      fi
+      echo ""
+    done < <(git -C "$REPO_ROOT" worktree list)
+
+    echo "=== Sync Summary ==="
+    if [ ${#synced[@]} -gt 0 ]; then
+      echo "  Synced: ${synced[*]}"
+    fi
+    if [ ${#failed[@]} -gt 0 ]; then
+      echo "  Failed (conflicts): ${failed[*]}"
+      echo "  Resolve manually: cd <worktree> && git merge main"
+    fi
+    if [ ${#synced[@]} -eq 0 ] && [ ${#failed[@]} -eq 0 ]; then
+      echo "  No feature worktrees found."
+    fi
+  else
+    local wt_path
+    wt_path=$(worktree_path "$target")
+    if [ ! -d "$wt_path" ]; then
+      echo "ERROR: Worktree not found at $wt_path"
+      exit 1
+    fi
+
+    echo "==> Syncing '$target' (merging main)..."
+    if git -C "$wt_path" merge main --no-edit; then
+      echo "==> Done. '$target' is up to date with main."
+    else
+      echo ""
+      echo "==> Merge conflict detected. Resolve manually:"
+      echo "    cd $wt_path"
+      echo "    # fix conflicts, then: git merge --continue"
+      echo ""
+      echo "    Or abort: git -C $wt_path merge --abort"
+      exit 1
+    fi
+  fi
+}
+
 cmd_start() {
   local ct_name
   ct_name=$(container_name "$1")
@@ -294,6 +359,7 @@ case "${1:-}" in
   create)     cmd_create "${2:?Usage: worktree-dev.sh create <name>}" ;;
   destroy)    cmd_destroy "${2:?Usage: worktree-dev.sh destroy <name>}" ;;
   list)       cmd_list ;;
+  sync)       cmd_sync "${2:?Usage: worktree-dev.sh sync <name|all>}" ;;
   deploy)     cmd_deploy "${2:?Usage: worktree-dev.sh deploy <name>}" ;;
   shell)      cmd_shell "${2:?Usage: worktree-dev.sh shell <name>}" ;;
   logs)       cmd_logs "${2:?Usage: worktree-dev.sh logs <name>}" "${3:-}" ;;
