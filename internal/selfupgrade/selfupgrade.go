@@ -94,13 +94,16 @@ func CheckForUpdate(ghOrg, ghToken string) (*UpdateInfo, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("github request: %w", err)
+		return nil, &OfflineError{Cause: err}
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("GitHub API rate limit exceeded — try again later or set GITHUB_TOKEN")
+	}
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("github API returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var release struct {
@@ -128,6 +131,91 @@ func CheckForUpdate(ghOrg, ghToken string) (*UpdateInfo, error) {
 	cacheMu.Unlock()
 
 	return info, nil
+}
+
+// OfflineError indicates that GitHub could not be reached.
+type OfflineError struct {
+	Cause error
+}
+
+func (e *OfflineError) Error() string {
+	return "unable to reach GitHub — check your internet connection"
+}
+
+func (e *OfflineError) Unwrap() error { return e.Cause }
+
+// ReleaseInfo describes a single GitHub release.
+type ReleaseInfo struct {
+	Version    string `json:"version"`
+	TagName    string `json:"tagName"`
+	Name       string `json:"name"`
+	ReleaseURL string `json:"releaseUrl"`
+	PublishedAt string `json:"publishedAt"`
+	Current    bool   `json:"current"`
+}
+
+// ListReleases returns all published, non-prerelease, non-draft releases.
+func ListReleases(ghOrg, ghToken string) ([]ReleaseInfo, error) {
+	if ghOrg == "" {
+		ghOrg = defaultGhOrg
+	}
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=50", ghOrg, defaultRepo)
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "tentacle-selfupgrade")
+	if ghToken != "" {
+		req.Header.Set("Authorization", "Bearer "+ghToken)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, &OfflineError{Cause: err}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("GitHub API rate limit exceeded — try again later or set GITHUB_TOKEN")
+	}
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var releases []struct {
+		TagName     string `json:"tag_name"`
+		Name        string `json:"name"`
+		HTMLURL     string `json:"html_url"`
+		Draft       bool   `json:"draft"`
+		Prerelease  bool   `json:"prerelease"`
+		PublishedAt string `json:"published_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	current := strings.TrimPrefix(version.Version, "v")
+	var result []ReleaseInfo
+	for _, r := range releases {
+		if r.Draft || r.Prerelease {
+			continue
+		}
+		ver := strings.TrimPrefix(r.TagName, "v")
+		result = append(result, ReleaseInfo{
+			Version:     ver,
+			TagName:     r.TagName,
+			Name:        r.Name,
+			ReleaseURL:  r.HTMLURL,
+			PublishedAt: r.PublishedAt,
+			Current:     ver == current,
+		})
+	}
+
+	return result, nil
 }
 
 // PerformUpgrade downloads the target version and replaces the running binary.

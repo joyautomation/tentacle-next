@@ -104,6 +104,12 @@ export const GITOPS_CONFIG_EXISTING = [
   { moduleId: 'gitops', envVar: 'GITOPS_AUTO_PULL', value: 'true' },
 ];
 
+export const SYSTEM_VERSION_DEV = {
+  version: '0.0.5',
+  commit: 'abc1234',
+  date: '2026-04-14',
+};
+
 export const SERVICE_STATUS_DEV_CAN_INSTALL = {
   mode: 'dev',
   systemdAvailable: true,
@@ -148,6 +154,7 @@ type MockOverrides = {
   mqttConfig?: unknown[];
   gitopsConfig?: unknown[];
   systemService?: unknown;
+  systemVersion?: unknown;
   /** Extra route handlers keyed by glob pattern */
   extraRoutes?: Record<string, (route: Route) => Promise<void> | void>;
 };
@@ -166,6 +173,7 @@ export async function mockFreshInstall(page: Page, overrides: MockOverrides = {}
     mqttConfig: [],
     gitopsConfig: [],
     systemService: SERVICE_STATUS_DEV_CAN_INSTALL,
+    systemVersion: SYSTEM_VERSION_DEV,
     ...overrides,
   };
 
@@ -185,6 +193,7 @@ export async function mockConfiguredSystem(page: Page, overrides: MockOverrides 
     mqttConfig: MQTT_CONFIG_EXISTING,
     gitopsConfig: [],
     systemService: SERVICE_STATUS_DEV_CAN_INSTALL,
+    systemVersion: SYSTEM_VERSION_DEV,
     ...overrides,
   };
 
@@ -292,6 +301,11 @@ async function setupRoutes(page: Page, opts: Required<MockOverrides>) {
     }
     return route.continue();
   });
+
+  // System version
+  await page.route('**/api/v1/system/version', (route) =>
+    json(route, opts.systemVersion),
+  );
 
   // System service
   await page.route('**/api/v1/system/service', (route) =>

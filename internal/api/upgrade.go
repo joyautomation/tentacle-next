@@ -3,6 +3,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"os"
 
@@ -29,11 +30,36 @@ func (m *Module) handleCheckUpdates(w http.ResponseWriter, _ *http.Request) {
 
 	info, err := selfupgrade.CheckForUpdate(ghOrg, ghToken)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "failed to check for updates: "+err.Error())
+		status := http.StatusBadGateway
+		var offline *selfupgrade.OfflineError
+		if errors.As(err, &offline) {
+			status = http.StatusServiceUnavailable
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, info)
+}
+
+// handleListReleases returns all available releases from GitHub.
+// GET /api/v1/system/releases
+func (m *Module) handleListReleases(w http.ResponseWriter, _ *http.Request) {
+	ghOrg := os.Getenv("TENTACLE_GH_ORG")
+	ghToken := os.Getenv("GITHUB_TOKEN")
+
+	releases, err := selfupgrade.ListReleases(ghOrg, ghToken)
+	if err != nil {
+		status := http.StatusBadGateway
+		var offline *selfupgrade.OfflineError
+		if errors.As(err, &offline) {
+			status = http.StatusServiceUnavailable
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, releases)
 }
 
 // handleUpgrade downloads a new release and restarts via systemd.

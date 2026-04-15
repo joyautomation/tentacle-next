@@ -17,6 +17,15 @@
     checkedAt: number;
   }
 
+  interface ReleaseInfo {
+    version: string;
+    tagName: string;
+    name: string;
+    releaseUrl: string;
+    publishedAt: string;
+    current: boolean;
+  }
+
   interface UpgradeStatus {
     state: string;
     error?: string;
@@ -25,10 +34,14 @@
 
   let versionInfo = $state<VersionInfo | null>(null);
   let updateInfo = $state<UpdateInfo | null>(null);
+  let releases = $state<ReleaseInfo[]>([]);
   let upgradeStatus = $state<UpgradeStatus | null>(null);
   let checking = $state(false);
   let checkError = $state('');
+  let offline = $state(false);
+  let loadingReleases = $state(false);
   let showConfirm = $state(false);
+  let confirmVersion = $state('');
   let phase = $state<'idle' | 'upgrading' | 'restarting' | 'success' | 'failed'>('idle');
   let mode = $state('unknown');
 
@@ -50,13 +63,40 @@
   async function checkForUpdates() {
     checking = true;
     checkError = '';
+    offline = false;
     const result = await api<UpdateInfo>('/system/updates');
     if (result.error) {
-      checkError = result.error.error;
+      if (result.error.status === 503) {
+        offline = true;
+      } else {
+        checkError = result.error.error;
+      }
     } else if (result.data) {
       updateInfo = result.data;
     }
     checking = false;
+  }
+
+  async function fetchReleases() {
+    loadingReleases = true;
+    checkError = '';
+    offline = false;
+    const result = await api<ReleaseInfo[]>('/system/releases');
+    if (result.error) {
+      if (result.error.status === 503) {
+        offline = true;
+      } else {
+        checkError = result.error.error;
+      }
+    } else if (result.data) {
+      releases = result.data;
+    }
+    loadingReleases = false;
+  }
+
+  function promptUpgrade(version: string) {
+    confirmVersion = version;
+    showConfirm = true;
   }
 
   async function startUpgrade() {
@@ -64,7 +104,7 @@
     phase = 'upgrading';
 
     const result = await apiPost<{ status: string; version: string }>('/system/upgrade', {
-      version: updateInfo?.latestVersion
+      version: confirmVersion
     });
 
     if (result.error) {
@@ -73,7 +113,6 @@
       return;
     }
 
-    // Poll upgrade status until restarting, then switch to reconnect polling.
     pollUpgradeStatus();
   }
 
@@ -93,14 +132,12 @@
           }
         }
       } catch {
-        // Connection lost — service is restarting.
         phase = 'restarting';
         clearInterval(interval);
         pollForReconnect();
       }
     }, 1000);
 
-    // Safety: give up polling status after 120s.
     setTimeout(() => clearInterval(interval), 120000);
   }
 
@@ -112,6 +149,7 @@
           clearInterval(interval);
           versionInfo = result.data;
           updateInfo = null;
+          releases = [];
           phase = 'success';
         }
       } catch {
@@ -119,7 +157,6 @@
       }
     }, 2000);
 
-    // Give up after 60s.
     setTimeout(() => {
       clearInterval(interval);
       if (phase === 'restarting') {
@@ -127,6 +164,14 @@
         upgradeStatus = { state: 'failed', error: 'Service did not come back within 60 seconds. Check system logs.' };
       }
     }, 60000);
+  }
+
+  function formatDate(iso: string): string {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch {
+      return iso;
+    }
   }
 
   const stateLabel: Record<string, string> = {
@@ -173,6 +218,12 @@
       </div>
     {/if}
 
+    {#if offline}
+      <div class="notice warning" transition:slide>
+        Unable to reach GitHub — check your internet connection.
+      </div>
+    {/if}
+
     {#if phase === 'idle'}
       {#if updateInfo}
         {#if updateInfo.updateAvailable}
@@ -182,7 +233,7 @@
               <span>Currently running {updateInfo.currentVersion}</span>
             </div>
             {#if mode === 'systemd'}
-              <button class="btn-primary" onclick={() => { showConfirm = true; }}>
+              <button class="btn-primary" onclick={() => promptUpgrade(updateInfo!.latestVersion)}>
                 Upgrade to v{updateInfo.latestVersion}
               </button>
             {/if}
@@ -198,9 +249,14 @@
         <div class="notice error" transition:slide>{checkError}</div>
       {/if}
 
-      <button class="btn-secondary" onclick={checkForUpdates} disabled={checking}>
-        {checking ? 'Checking...' : 'Check for Updates'}
-      </button>
+      <div class="button-row">
+        <button class="btn-secondary" onclick={checkForUpdates} disabled={checking}>
+          {checking ? 'Checking...' : 'Check for Updates'}
+        </button>
+        <button class="btn-secondary" onclick={fetchReleases} disabled={loadingReleases}>
+          {loadingReleases ? 'Loading...' : 'All Releases'}
+        </button>
+      </div>
 
     {:else if phase === 'upgrading'}
       <div class="notice info upgrading" transition:slide>
@@ -246,6 +302,41 @@
       </button>
     {/if}
   </section>
+
+  <!-- Release List -->
+  {#if releases.length > 0 && phase === 'idle'}
+    <section class="card" transition:slide>
+      <h2>Available Releases</h2>
+      <div class="release-list">
+        {#each releases as release}
+          <div class="release-row" class:current={release.current}>
+            <div class="release-info">
+              <span class="release-version">
+                v{release.version}
+                {#if release.current}
+                  <span class="current-badge">current</span>
+                {/if}
+              </span>
+              {#if release.name && release.name !== release.tagName}
+                <span class="release-name">{release.name}</span>
+              {/if}
+              <span class="release-date">{formatDate(release.publishedAt)}</span>
+            </div>
+            <div class="release-actions">
+              {#if release.releaseUrl}
+                <a href={release.releaseUrl} target="_blank" rel="noopener" class="btn-link">Notes</a>
+              {/if}
+              {#if !release.current && mode === 'systemd'}
+                <button class="btn-secondary btn-sm" onclick={() => promptUpgrade(release.version)}>
+                  Switch
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
 </div>
 
 {#if showConfirm}
@@ -253,15 +344,17 @@
   <div class="modal-backdrop" onclick={() => { showConfirm = false; }}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>Confirm Upgrade</h2>
+      <h2>Confirm Version Change</h2>
       <p class="modal-warning">
-        This will download version <strong>{updateInfo?.latestVersion}</strong>,
+        This will download version <strong>v{confirmVersion}</strong>,
         replace the running binary, and restart the service.
         The UI will be briefly unavailable during the restart.
       </p>
       <div class="modal-actions">
         <button class="modal-cancel-btn" onclick={() => { showConfirm = false; }}>Cancel</button>
-        <button class="modal-apply-btn" onclick={startUpgrade}>Upgrade</button>
+        <button class="modal-apply-btn" onclick={startUpgrade}>
+          Switch to v{confirmVersion}
+        </button>
       </div>
     </div>
   </div>
@@ -383,6 +476,11 @@
     }
   }
 
+  .button-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+
   .btn-primary {
     flex-shrink: 0;
     padding: 0.5rem 1rem;
@@ -420,6 +518,94 @@
     }
   }
 
+  .btn-sm {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+  }
+
+  .btn-link {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--theme-text-muted);
+    text-decoration: none;
+
+    &:hover {
+      color: var(--theme-text);
+      text-decoration: underline;
+    }
+  }
+
+  /* Release list */
+  .release-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .release-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0;
+    border-bottom: 1px solid var(--theme-border);
+
+    &:last-child { border-bottom: none; }
+
+    &.current {
+      .release-version { color: var(--badge-green-text, #22c55e); }
+    }
+  }
+
+  .release-info {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+
+  .release-version {
+    font-size: 0.875rem;
+    font-weight: 600;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--theme-text);
+    white-space: nowrap;
+  }
+
+  .current-badge {
+    font-size: 0.625rem;
+    font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.0625rem 0.375rem;
+    border-radius: var(--rounded-full);
+    background: var(--badge-green-bg);
+    color: var(--badge-green-text);
+    border: 1px solid var(--badge-green-border);
+    vertical-align: middle;
+  }
+
+  .release-name {
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .release-date {
+    font-size: 0.75rem;
+    color: var(--theme-text-muted);
+    white-space: nowrap;
+  }
+
+  .release-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    margin-left: 1rem;
+  }
+
   .spinner {
     animation: spin 1s linear infinite;
   }
@@ -428,7 +614,7 @@
     to { transform: rotate(360deg); }
   }
 
-  /* Modal styles — match NavSidebar pattern */
+  /* Modal styles */
   .modal-backdrop {
     position: fixed;
     inset: 0;
