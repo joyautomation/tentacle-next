@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -60,6 +61,9 @@ func main() {
 
 	dcpClient := profinetcontroller.NewDCPClient(transport, log)
 
+	// Atomic pointer so the frame receiver can route RT frames once cyclic is created
+	var cyclicPtr atomic.Pointer[profinetcontroller.ControllerCyclic]
+
 	// Start frame receiver in background so DCP responses get routed
 	go func() {
 		for {
@@ -81,8 +85,13 @@ func main() {
 				continue
 			}
 
-			// Route cyclic RT frames (will be handled once cyclic starts)
-			_ = frameID
+			// Route cyclic RT frames (0xC000-0xF7FF = RT_CLASS_1 input)
+			if frameID >= 0xC000 && frameID <= 0xF7FF {
+				if cc := cyclicPtr.Load(); cc != nil {
+					cc.HandleInputFrame(payload)
+				}
+				continue
+			}
 		}
 	}()
 
@@ -155,6 +164,7 @@ func main() {
 		}
 	}, log)
 
+	cyclicPtr.Store(cyclic)
 	go cyclic.Start(ctx)
 
 	// Write output values periodically
