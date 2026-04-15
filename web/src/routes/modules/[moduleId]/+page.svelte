@@ -10,6 +10,7 @@
     ArrowDownTray,
   } from '@joyautomation/salt/icons';
   import GitOpsSetup from '$lib/components/GitOpsSetup.svelte';
+  import { getModuleName } from '$lib/constants/services';
   import { isMonolith } from '$lib/stores/mode';
   import { get } from 'svelte/store';
 
@@ -152,7 +153,8 @@
   {#if data.module}
     <div class="module-header">
       <div class="module-info">
-        <h1>{data.module.description}</h1>
+        <h1>{getModuleName(data.module.moduleId)}</h1>
+        <p class="module-desc">{data.module.description}</p>
         <p class="module-meta">{data.module.moduleId} &middot; {data.module.runtime} &middot; {data.module.category}</p>
       </div>
       <div class="header-badges">
@@ -328,6 +330,11 @@
       font-weight: 600;
       color: var(--theme-text);
       margin: 0;
+    }
+    .module-desc {
+      margin: 0.25rem 0 0;
+      color: var(--theme-text-secondary);
+      font-size: 0.875rem;
     }
     .module-meta {
       margin: 0.25rem 0 0;

@@ -23,9 +23,12 @@ export const SERVICE_NAMES: Record<string, string> = {
 
 /** Display names for module IDs (keyed by full moduleId like "tentacle-mqtt") */
 export const MODULE_NAMES: Record<string, string> = {
+  caddy: 'Caddy',
+  gateway: 'Gateway',
+  gitops: 'GitOps',
+  plc: 'PLC',
   'tentacle-ethernetip': 'EtherNet/IP',
   'tentacle-ethernetip-server': 'EtherNet/IP Server',
-  gitops: 'GitOps',
   'tentacle-history': 'History',
   'tentacle-modbus': 'Modbus',
   'tentacle-modbus-server': 'Modbus Server',
