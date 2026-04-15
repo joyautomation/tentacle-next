@@ -289,6 +289,10 @@ func (m *Module) routes() http.Handler {
 		r.Post("/validate", m.handleValidate)
 		r.Post("/diff", m.handleDiff)
 
+		// Telemetry
+		r.Get("/telemetry/status", m.handleGetTelemetryStatus)
+		r.Post("/telemetry/report-error", m.handleReportError)
+
 		// System
 		r.Post("/system/factory-reset", m.handleFactoryReset)
 

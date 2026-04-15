@@ -1,6 +1,7 @@
 <script lang="ts">
   import SystemTopology from '$lib/components/SystemTopology.svelte';
   import ServiceBanner from '$lib/components/ServiceBanner.svelte';
+  import TelemetryBanner from '$lib/components/TelemetryBanner.svelte';
   import { onMount } from 'svelte';
   import { api } from '$lib/api/client';
 
@@ -75,6 +76,7 @@
 </script>
 
 <div class="page">
+  <TelemetryBanner {apiConnected} />
   {#if apiConnected}
     <ServiceBanner />
   {/if}
