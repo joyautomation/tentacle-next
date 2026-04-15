@@ -18,7 +18,7 @@ import (
 // automatically in the Variables page.
 func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
 	// Ask the network module for discovered interfaces.
-	resp, err := m.bus.Request(topics.Browse("network"), []byte("{}"), 2*time.Second)
+	resp, err := m.bus.Request(topics.Browse("network"), []byte("{}"), 500*time.Millisecond)
 	if err != nil {
 		return false // network module not running — nothing to sync
 	}
