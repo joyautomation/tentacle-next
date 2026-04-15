@@ -418,7 +418,7 @@ func buildGSDMLDocument(cfg *ProfinetConfig) gsdmlISO15745Profile {
 										SupportedRT_Classes:  "RT_CLASS_1",
 										SupportedProtocols:   "LLDP",
 										ApplicationRelations: &gsdmlApplicationRelations{
-											StartupMode: "Advanced",
+											StartupMode: "Legacy;Advanced",
 											TimingProperties: gsdmlTimingProperties{
 												SendClock:      "32",
 												ReductionRatio: "1 2 4 8 16 32 64 128 256 512",

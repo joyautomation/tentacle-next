@@ -157,7 +157,10 @@ func parseDCPResponse(resp *DCPResponse) *DiscoveredDevice {
 				dev.DeviceID = binary.BigEndian.Uint16(block.Data[4:6])
 			}
 		case block.Option == profinet.DCPOptionIP && block.SubOption == profinet.DCPSubOptionIPSuite:
-			ip, mask, gw, _ := profinet.ParseIPSuiteBlock(block.Data)
+			if len(block.Data) < 14 {
+				continue // BlockInfo(2) + IP(4) + Mask(4) + Gateway(4)
+			}
+			ip, mask, gw, _ := profinet.ParseIPSuiteBlock(block.Data[2:])
 			dev.IP = ip
 			dev.Mask = mask
 			dev.Gateway = gw
