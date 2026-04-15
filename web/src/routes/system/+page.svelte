@@ -48,6 +48,8 @@
   onMount(() => {
     fetchVersion();
     fetchMode();
+    checkForUpdates();
+    fetchReleases();
   });
 
   async function fetchVersion() {
@@ -62,8 +64,6 @@
 
   async function checkForUpdates() {
     checking = true;
-    checkError = '';
-    offline = false;
     const result = await api<UpdateInfo>('/system/updates');
     if (result.error) {
       if (result.error.status === 503) {
@@ -79,8 +79,6 @@
 
   async function fetchReleases() {
     loadingReleases = true;
-    checkError = '';
-    offline = false;
     const result = await api<ReleaseInfo[]>('/system/releases');
     if (result.error) {
       if (result.error.status === 503) {
@@ -249,14 +247,9 @@
         <div class="notice error" transition:slide>{checkError}</div>
       {/if}
 
-      <div class="button-row">
-        <button class="btn-secondary" onclick={checkForUpdates} disabled={checking}>
-          {checking ? 'Checking...' : 'Check for Updates'}
-        </button>
-        <button class="btn-secondary" onclick={fetchReleases} disabled={loadingReleases}>
-          {loadingReleases ? 'Loading...' : 'All Releases'}
-        </button>
-      </div>
+      {#if checking || loadingReleases}
+        <p class="muted">Loading...</p>
+      {/if}
 
     {:else if phase === 'upgrading'}
       <div class="notice info upgrading" transition:slide>
@@ -474,11 +467,6 @@
       color: var(--theme-text-muted);
       font-size: 0.8125rem;
     }
-  }
-
-  .button-row {
-    display: flex;
-    gap: 0.5rem;
   }
 
   .btn-primary {

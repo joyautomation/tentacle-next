@@ -35,7 +35,7 @@ test.describe('System page — version display', () => {
 });
 
 // ---------------------------------------------------------------------------
-// System page — check for updates
+// System page — check for updates (auto-loads on mount)
 // ---------------------------------------------------------------------------
 
 test.describe('System page — check for updates', () => {
@@ -59,8 +59,7 @@ test.describe('System page — check for updates', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await expect(page.getByText('Version 0.0.8 is available')).toBeVisible();
+    await expect(page.getByText('Version 0.0.8 is available')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('button', { name: /Upgrade to v0\.0\.8/ })).toBeVisible();
   });
 
@@ -83,8 +82,7 @@ test.describe('System page — check for updates', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await expect(page.getByText('You are running the latest version')).toBeVisible();
+    await expect(page.getByText('You are running the latest version')).toBeVisible({ timeout: 10_000 });
   });
 
   test('shows offline message when no internet', async ({ page }) => {
@@ -95,10 +93,12 @@ test.describe('System page — check for updates', () => {
     await page.route('**/api/v1/system/updates', (route) =>
       jsonError(route, 'unable to reach GitHub — check your internet connection', 503),
     );
+    await page.route('**/api/v1/system/releases', (route) =>
+      jsonError(route, 'unable to reach GitHub', 503),
+    );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await expect(page.getByText('Unable to reach GitHub')).toBeVisible();
+    await expect(page.getByText('Unable to reach GitHub')).toBeVisible({ timeout: 10_000 });
   });
 
   test('hides upgrade button when not in systemd mode', async ({ page }) => {
@@ -117,15 +117,14 @@ test.describe('System page — check for updates', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await expect(page.getByText('Version 0.0.8 is available')).toBeVisible();
+    await expect(page.getByText('Version 0.0.8 is available')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('Upgrades are only available when running as a systemd service')).toBeVisible();
     await expect(page.getByRole('button', { name: /Upgrade to/ })).not.toBeVisible();
   });
 });
 
 // ---------------------------------------------------------------------------
-// System page — release list
+// System page — release list (auto-loads on mount)
 // ---------------------------------------------------------------------------
 
 test.describe('System page — release list', () => {
@@ -147,9 +146,8 @@ test.describe('System page — release list', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'All Releases' }).click({ timeout: 10_000 });
-    await expect(page.getByText('Available Releases')).toBeVisible();
-    await expect(page.getByText('current')).toBeVisible();
+    await expect(page.getByText('Available Releases')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.current-badge')).toBeVisible();
     // Non-current releases should have Switch buttons
     const switchButtons = page.getByRole('button', { name: 'Switch' });
     await expect(switchButtons).toHaveCount(2);
@@ -163,10 +161,12 @@ test.describe('System page — release list', () => {
     await page.route('**/api/v1/system/releases', (route) =>
       jsonError(route, 'unable to reach GitHub', 503),
     );
+    await page.route('**/api/v1/system/updates', (route) =>
+      jsonError(route, 'unable to reach GitHub', 503),
+    );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'All Releases' }).click({ timeout: 10_000 });
-    await expect(page.getByText('Unable to reach GitHub')).toBeVisible();
+    await expect(page.getByText('Unable to reach GitHub')).toBeVisible({ timeout: 10_000 });
   });
 });
 
@@ -194,8 +194,7 @@ test.describe('System page — upgrade flow', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click();
+    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
 
     await expect(page.getByText('Confirm Version Change')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
@@ -221,8 +220,7 @@ test.describe('System page — upgrade flow', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click();
+    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Cancel' }).click();
 
     await expect(page.getByText('Confirm Version Change')).not.toBeVisible();
@@ -264,8 +262,7 @@ test.describe('System page — upgrade flow', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click();
+    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
     await page.getByRole('button', { name: /Switch to v0\.0\.8/ }).click();
 
     await expect(page.getByText('Downloading new version')).toBeVisible({ timeout: 5_000 });
@@ -293,8 +290,7 @@ test.describe('System page — upgrade flow', () => {
     );
     await page.goto('/system');
 
-    await page.getByRole('button', { name: 'Check for Updates' }).click({ timeout: 10_000 });
-    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click();
+    await page.getByRole('button', { name: /Upgrade to v0\.0\.8/ }).click({ timeout: 10_000 });
     await page.getByRole('button', { name: /Switch to v0\.0\.8/ }).click();
 
     await expect(page.getByText('Upgrade failed')).toBeVisible({ timeout: 5_000 });
