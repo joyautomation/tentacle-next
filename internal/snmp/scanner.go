@@ -17,6 +17,7 @@ import (
 	"github.com/gosnmp/gosnmp"
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/topics"
+	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/types"
 )
 
@@ -35,6 +36,13 @@ type DeviceConnection struct {
 	UseBulkGet  bool
 	stopChan    chan struct{}
 	mu          sync.RWMutex
+
+	// Communication status (guarded by mu).
+	state               string // "connected" | "connecting" | "disconnected" | "error"
+	lastReadAt          int64  // unix ms of last cycle with any successful read
+	lastErrorAt         int64  // unix ms of last cycle with any error
+	lastError           string // most recent error message
+	consecutiveFailures int    // consecutive poll cycles with no successful batches
 }
 
 // CachedVar holds the cached state of a single OID.
@@ -131,6 +139,30 @@ func (s *Scanner) Start() {
 	}
 
 	s.log.Info("snmp: listening for browse/subscribe/unsubscribe/variables/set requests")
+}
+
+// DeviceStatuses returns a snapshot of communication status for every tracked device.
+func (s *Scanner) DeviceStatuses() []itypes.DeviceCommStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]itypes.DeviceCommStatus, 0, len(s.connections))
+	for _, conn := range s.connections {
+		conn.mu.RLock()
+		state := conn.state
+		if state == "" {
+			state = "connecting"
+		}
+		out = append(out, itypes.DeviceCommStatus{
+			DeviceID:            conn.DeviceID,
+			State:               state,
+			LastReadAt:          conn.lastReadAt,
+			LastErrorAt:         conn.lastErrorAt,
+			LastError:           conn.lastError,
+			ConsecutiveFailures: conn.consecutiveFailures,
+		})
+		conn.mu.RUnlock()
+	}
+	return out
 }
 
 // ActiveDevices returns info about all currently connected devices.
@@ -488,6 +520,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 			ScanRate:    time.Duration(scanRate) * time.Millisecond,
 			UseBulkGet:  req.UseBulkGet,
 			stopChan:    make(chan struct{}),
+			state:       "connecting",
 		}
 		s.connections[req.DeviceID] = conn
 		s.log.Info("snmp: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port, "version", req.Version)
@@ -697,6 +730,9 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 		return
 	}
 
+	var batchesAttempted, batchesFailed int
+	var lastBatchErr string
+
 	// SNMP GET can handle multiple OIDs per request, but there's a practical limit.
 	// Batch into groups of 20 to avoid exceeding device limits.
 	const batchSize = 20
@@ -706,6 +742,7 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 			end = len(oids)
 		}
 		batch := oids[i:end]
+		batchesAttempted++
 
 		var result *gosnmp.SnmpPacket
 		var err error
@@ -718,6 +755,8 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 
 		if err != nil {
 			s.log.Warn("snmp: poll failed", "device", conn.DeviceID, "error", err)
+			batchesFailed++
+			lastBatchErr = err.Error()
 			// Try to reconnect
 			if reconnErr := s.reconnect(conn); reconnErr != nil {
 				s.log.Warn("snmp: reconnect failed", "device", conn.DeviceID, "error", reconnErr)
@@ -782,6 +821,23 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 			}
 		}
 	}
+
+	// Update connection-level status based on cycle outcome.
+	conn.mu.Lock()
+	if batchesFailed >= batchesAttempted {
+		conn.state = "error"
+		conn.consecutiveFailures++
+		if lastBatchErr != "" {
+			conn.lastError = lastBatchErr
+			conn.lastErrorAt = time.Now().UnixMilli()
+		}
+	} else {
+		conn.state = "connected"
+		conn.lastReadAt = time.Now().UnixMilli()
+		conn.consecutiveFailures = 0
+		conn.lastError = ""
+	}
+	conn.mu.Unlock()
 }
 
 // reconnect attempts to re-establish the SNMP connection.

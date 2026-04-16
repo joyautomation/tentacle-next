@@ -66,16 +66,18 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 			"enabled": m.enabled,
 		}
 		if m.scanner != nil {
-			m.scanner.mu.Lock()
-			meta["deviceCount"] = len(m.scanner.devices)
+			statuses := m.scanner.DeviceStatuses()
+			meta["deviceCount"] = len(statuses)
 			tagCount := 0
+			m.scanner.mu.Lock()
 			for _, dev := range m.scanner.devices {
 				dev.mu.Lock()
 				tagCount += len(dev.allTags)
 				dev.mu.Unlock()
 			}
-			meta["tagCount"] = tagCount
 			m.scanner.mu.Unlock()
+			meta["tagCount"] = tagCount
+			meta["deviceStatuses"] = statuses
 		}
 		return meta
 	})

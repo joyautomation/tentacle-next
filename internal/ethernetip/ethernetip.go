@@ -63,9 +63,10 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		devices := m.scanner.ActiveDevices()
 		devicesJSON, _ := json.Marshal(devices)
 		return map[string]interface{}{
-			"devices":     string(devicesJSON),
-			"enabled":     m.scanner.IsEnabled(),
-			"publishRate": fmt.Sprintf("%.1f", m.scanner.PollRate()),
+			"devices":        string(devicesJSON),
+			"deviceStatuses": m.scanner.DeviceStatuses(),
+			"enabled":        m.scanner.IsEnabled(),
+			"publishRate":    fmt.Sprintf("%.1f", m.scanner.PollRate()),
 		}
 	})
 

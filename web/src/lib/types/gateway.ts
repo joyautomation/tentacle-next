@@ -143,3 +143,14 @@ export interface ActiveDevice {
   port: number;
   tagCount: number;
 }
+
+export type DeviceCommStatusState = 'connected' | 'connecting' | 'disconnected' | 'error';
+
+export interface DeviceCommStatus {
+  deviceId: string;
+  state: DeviceCommStatusState;
+  lastReadAt?: number;
+  lastErrorAt?: number;
+  lastError?: string;
+  consecutiveFailures?: number;
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/gopcua/opcua/monitor"
 	"github.com/gopcua/opcua/ua"
 	"github.com/joyautomation/tentacle/internal/bus"
+	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/internal/topics"
 	"github.com/joyautomation/tentacle/types"
 )
@@ -37,6 +38,9 @@ type OpcUaConnection struct {
 	ConnectionState     string // "disconnected", "connecting", "connected"
 	ConsecutiveFailures int
 	LastConnectAttempt  time.Time
+	LastReadAt          int64  // unix ms of last successful data change publish
+	LastErrorAt         int64  // unix ms of last error
+	LastError           string // most recent error message
 	cancel              context.CancelFunc
 }
 
@@ -166,21 +170,16 @@ func (s *Scanner) connectDevice(
 	// Discover endpoints
 	endpoints, err := opcua.GetEndpoints(ctx, endpointURL)
 	if err != nil {
-		s.mu.Lock()
-		conn.ConnectionState = "disconnected"
-		conn.ConsecutiveFailures++
-		s.mu.Unlock()
+		s.markConnFailure(conn, fmt.Errorf("get endpoints: %w", err))
 		return nil, fmt.Errorf("get endpoints: %w", err)
 	}
 
 	// Select endpoint based on security policy
 	ep := selectEndpoint(endpoints, securityPolicy, securityMode)
 	if ep == nil {
-		s.mu.Lock()
-		conn.ConnectionState = "disconnected"
-		conn.ConsecutiveFailures++
-		s.mu.Unlock()
-		return nil, fmt.Errorf("no matching endpoint for policy=%s mode=%s", securityPolicy, securityMode)
+		err := fmt.Errorf("no matching endpoint for policy=%s mode=%s", securityPolicy, securityMode)
+		s.markConnFailure(conn, err)
+		return nil, err
 	}
 
 	s.log.Info("opcua: selected endpoint",
@@ -237,10 +236,7 @@ func (s *Scanner) connectDevice(
 
 	client, err := opcua.NewClient(connectURL, opts...)
 	if err != nil {
-		s.mu.Lock()
-		conn.ConnectionState = "disconnected"
-		conn.ConsecutiveFailures++
-		s.mu.Unlock()
+		s.markConnFailure(conn, fmt.Errorf("create client: %w", err))
 		return nil, fmt.Errorf("create client: %w", err)
 	}
 
@@ -248,10 +244,7 @@ func (s *Scanner) connectDevice(
 	defer connectCancel()
 
 	if err := client.Connect(connectCtx); err != nil {
-		s.mu.Lock()
-		conn.ConnectionState = "disconnected"
-		conn.ConsecutiveFailures++
-		s.mu.Unlock()
+		s.markConnFailure(conn, fmt.Errorf("connect: %w", err))
 		return nil, fmt.Errorf("connect: %w", err)
 	}
 
@@ -259,10 +252,47 @@ func (s *Scanner) connectDevice(
 	conn.Client = client
 	conn.ConnectionState = "connected"
 	conn.ConsecutiveFailures = 0
+	conn.LastError = ""
+	conn.LastErrorAt = 0
 	s.mu.Unlock()
 
 	s.log.Info("opcua: connected", "deviceId", deviceID)
 	return conn, nil
+}
+
+// markConnFailure records a connection/read failure on the given connection.
+// Caller must NOT already hold s.mu.
+func (s *Scanner) markConnFailure(conn *OpcUaConnection, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conn.ConnectionState = "disconnected"
+	conn.ConsecutiveFailures++
+	conn.LastErrorAt = time.Now().UnixMilli()
+	if err != nil {
+		conn.LastError = err.Error()
+	}
+}
+
+// DeviceStatuses returns a snapshot of communication status for every tracked device.
+func (s *Scanner) DeviceStatuses() []itypes.DeviceCommStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]itypes.DeviceCommStatus, 0, len(s.connections))
+	for _, conn := range s.connections {
+		state := conn.ConnectionState
+		if state == "" {
+			state = "disconnected"
+		}
+		out = append(out, itypes.DeviceCommStatus{
+			DeviceID:            conn.DeviceID,
+			State:               state,
+			LastReadAt:          conn.LastReadAt,
+			LastErrorAt:         conn.LastErrorAt,
+			LastError:           conn.LastError,
+			ConsecutiveFailures: conn.ConsecutiveFailures,
+		})
+	}
+	return out
 }
 
 func (s *Scanner) disconnectDevice(conn *OpcUaConnection) {
@@ -455,6 +485,7 @@ func (s *Scanner) publishValue(conn *OpcUaConnection, nodeID string, value inter
 		cached.Quality = quality
 		cached.LastUpdated = now
 	}
+	conn.LastReadAt = now
 
 	// Skip publishing when disabled
 	if !s.enabled.Load() {

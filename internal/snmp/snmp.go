@@ -108,9 +108,10 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		devices := m.scanner.ActiveDevices()
 		devicesJSON, _ := json.Marshal(devices)
 		return map[string]interface{}{
-			"devices":  string(devicesJSON),
-			"trapPort": m.trapPort,
-			"enabled":  m.scanner.IsEnabled(),
+			"devices":        string(devicesJSON),
+			"deviceStatuses": m.scanner.DeviceStatuses(),
+			"trapPort":       m.trapPort,
+			"enabled":        m.scanner.IsEnabled(),
 		}
 	})
 

@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { api } from '$lib/api/client';
-import type { Variable, ActiveDevice, GatewayConfig } from '$lib/types/gateway';
+import type { Variable, ActiveDevice, GatewayConfig, DeviceCommStatus } from '$lib/types/gateway';
 import type { ControllerSubscription, NetworkState } from '$lib/types/profinet';
 
 interface Service {
@@ -9,8 +9,37 @@ interface Service {
   metadata: Record<string, unknown> | null;
 }
 
-export const load: PageLoad = async ({ params }) => {
+// Map module serviceType -> gateway-config protocol string.
+const SERVICE_TO_PROTOCOL: Record<string, string> = {
+  modbus: 'modbus',
+  opcua: 'opcua',
+  ethernetip: 'ethernetip',
+  snmp: 'snmp',
+};
+
+// Flatten per-device statuses from every scanner module heartbeat into
+// `${protocol}:${deviceId}` -> status for easy UI lookup.
+function collectDeviceStatuses(services: Service[]): Record<string, DeviceCommStatus> {
+  const out: Record<string, DeviceCommStatus> = {};
+  for (const svc of services) {
+    const protocol = SERVICE_TO_PROTOCOL[svc.serviceType];
+    if (!protocol) continue;
+    const raw = svc.metadata?.deviceStatuses;
+    if (!Array.isArray(raw)) continue;
+    for (const s of raw as DeviceCommStatus[]) {
+      if (!s || !s.deviceId) continue;
+      out[`${protocol}:${s.deviceId}`] = s;
+    }
+  }
+  return out;
+}
+
+export const load: PageLoad = async ({ params, depends }) => {
   const { serviceType } = params;
+
+  // Allow the client to trigger re-runs via invalidate('app:gateway-devices').
+  // Used for polling per-device comm status badges on the gateway sources page.
+  depends('app:gateway-devices');
 
   // PROFINET Controller: load subscriptions and network interfaces
   if (serviceType === 'profinetcontroller') {
@@ -42,26 +71,34 @@ export const load: PageLoad = async ({ params }) => {
     }
   }
 
-  // Gateway: load gateway config (includes availableProtocols from active services)
+  // Gateway: load gateway config + per-device comm status from scanner heartbeats
   if (serviceType === 'gateway') {
     try {
-      const result = await api<GatewayConfig>('/gateways/gateway');
+      const [gwResult, servicesResult] = await Promise.all([
+        api<GatewayConfig>('/gateways/gateway'),
+        api<Service[]>('/services'),
+      ]);
 
-      if (result.error) {
+      if (gwResult.error) {
         return {
           serviceType,
           variables: [],
           deviceInfo: {} as Record<string, ActiveDevice>,
+          deviceStatuses: {} as Record<string, DeviceCommStatus>,
           gatewayConfig: null,
-          error: result.error.error,
+          error: gwResult.error.error,
         };
       }
+
+      const deviceStatuses: Record<string, DeviceCommStatus> =
+        collectDeviceStatuses(servicesResult.data ?? []);
 
       return {
         serviceType,
         variables: [],
         deviceInfo: {} as Record<string, ActiveDevice>,
-        gatewayConfig: result.data ?? null,
+        deviceStatuses,
+        gatewayConfig: gwResult.data ?? null,
         error: null,
       };
     } catch (e) {
@@ -69,6 +106,7 @@ export const load: PageLoad = async ({ params }) => {
         serviceType,
         variables: [],
         deviceInfo: {} as Record<string, ActiveDevice>,
+        deviceStatuses: {} as Record<string, DeviceCommStatus>,
         gatewayConfig: null,
         error: e instanceof Error ? e.message : 'Failed to fetch gateway config',
       };

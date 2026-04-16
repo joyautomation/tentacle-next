@@ -74,7 +74,8 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	// Start heartbeat
 	m.stopHB = heartbeat.Start(b, m.moduleID, defaultServiceType, func() map[string]interface{} {
 		return map[string]interface{}{
-			"enabled": m.scanner.IsEnabled(),
+			"enabled":        m.scanner.IsEnabled(),
+			"deviceStatuses": m.scanner.DeviceStatuses(),
 		}
 	})
 

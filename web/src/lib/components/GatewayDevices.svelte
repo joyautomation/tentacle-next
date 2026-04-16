@@ -1,15 +1,39 @@
 <script lang="ts">
-  import type { GatewayConfig, GatewayDevice } from '$lib/types/gateway';
+  import type { GatewayConfig, GatewayDevice, DeviceCommStatus } from '$lib/types/gateway';
   import { apiPut, apiDelete } from '$lib/api/client';
   import { invalidateAll } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { slide } from 'svelte/transition';
   import { ChevronRight } from '@joyautomation/salt/icons';
 
-  let { gatewayConfig, error }: {
+  let { gatewayConfig, deviceStatuses = {}, error }: {
     gatewayConfig: GatewayConfig | null;
+    deviceStatuses?: Record<string, DeviceCommStatus>;
     error: string | null;
   } = $props();
+
+  function statusFor(device: GatewayDevice): DeviceCommStatus | undefined {
+    return deviceStatuses[`${device.protocol}:${device.deviceId}`];
+  }
+
+  function statusLabel(state: DeviceCommStatus['state']): string {
+    switch (state) {
+      case 'connected':    return 'Connected';
+      case 'connecting':   return 'Connecting';
+      case 'disconnected': return 'Disconnected';
+      case 'error':        return 'Error';
+      default:             return state;
+    }
+  }
+
+  function statusTooltip(s: DeviceCommStatus): string {
+    const lines: string[] = [`State: ${statusLabel(s.state)}`];
+    if (s.lastReadAt) lines.push(`Last read: ${new Date(s.lastReadAt).toLocaleString()}`);
+    if (s.consecutiveFailures && s.consecutiveFailures > 0) lines.push(`Consecutive failures: ${s.consecutiveFailures}`);
+    if (s.lastError) lines.push(`Error: ${s.lastError}`);
+    if (s.lastErrorAt) lines.push(`Last error: ${new Date(s.lastErrorAt).toLocaleString()}`);
+    return lines.join('\n');
+  }
 
   let showAddDevice = $state(false);
   let saving = $state(false);
@@ -370,6 +394,12 @@
               <span class="protocol-badge">{protocolLabels[device.protocol] ?? device.protocol}</span>
               <span class="leaf-name">{device.deviceId}</span>
               <span class="device-host">{formatDeviceInfo(device)}</span>
+              {#if statusFor(device)}
+                {@const s = statusFor(device)!}
+                <span class="status-badge {s.state}" title={statusTooltip(s)}>
+                  {statusLabel(s.state)}
+                </span>
+              {/if}
               {#if device.scanRate}
                 <span class="setting-badge">{device.scanRate}ms</span>
               {/if}
@@ -550,6 +580,18 @@
     font-size: 0.75rem; font-family: 'IBM Plex Mono', monospace; color: var(--badge-teal-text);
     padding: 0.1rem 0.3rem; border-radius: var(--rounded-sm); background: var(--badge-teal-bg);
     &.warn { background: var(--badge-amber-bg, #fef3c7); color: var(--badge-amber-text, #92400e); }
+  }
+
+  .status-badge {
+    font-size: 0.6875rem; font-weight: 600;
+    padding: 0.1rem 0.4rem; border-radius: var(--rounded-sm);
+    flex-shrink: 0; cursor: help;
+    background: var(--theme-bg-subtle, #f3f4f6);
+    color: var(--theme-text-muted, #6b7280);
+    &.connected    { background: var(--badge-green-bg, #d1fae5); color: var(--badge-green-text, #065f46); }
+    &.connecting   { background: var(--badge-amber-bg, #fef3c7); color: var(--badge-amber-text, #92400e); }
+    &.disconnected { background: var(--theme-bg-subtle, #f3f4f6); color: var(--theme-text-muted, #6b7280); }
+    &.error        { background: var(--badge-red-bg, #fee2e2); color: var(--badge-red-text, #991b1b); }
   }
 
   .var-count { font-size: 0.75rem; color: var(--theme-text-muted); margin-left: auto; flex-shrink: 0; }

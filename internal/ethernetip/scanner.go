@@ -16,6 +16,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/rbe"
 	"github.com/joyautomation/tentacle/internal/topics"
+	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/types"
 )
 
@@ -32,6 +33,13 @@ type DeviceConnection struct {
 	stopChan        chan struct{}
 	scanRateChanged chan struct{}
 	mu              sync.RWMutex
+
+	// Communication status (guarded by mu).
+	state               string // "connected" | "connecting" | "disconnected" | "error"
+	lastReadAt          int64  // unix ms of last cycle with any successful read
+	lastErrorAt         int64  // unix ms of last cycle with any read/create failure
+	lastError           string // most recent error message
+	consecutiveFailures int    // consecutive poll cycles with no successful reads
 }
 
 // CachedVar holds the cached state of a single tag.
@@ -201,6 +209,30 @@ type ActiveDevice struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	TagCount int    `json:"tagCount"`
+}
+
+// DeviceStatuses returns a snapshot of communication status for every tracked device.
+func (s *Scanner) DeviceStatuses() []itypes.DeviceCommStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]itypes.DeviceCommStatus, 0, len(s.connections))
+	for _, conn := range s.connections {
+		conn.mu.RLock()
+		state := conn.state
+		if state == "" {
+			state = "connecting"
+		}
+		out = append(out, itypes.DeviceCommStatus{
+			DeviceID:            conn.DeviceID,
+			State:               state,
+			LastReadAt:          conn.lastReadAt,
+			LastErrorAt:         conn.lastErrorAt,
+			LastError:           conn.lastError,
+			ConsecutiveFailures: conn.consecutiveFailures,
+		})
+		conn.mu.RUnlock()
+	}
+	return out
 }
 
 // ActiveDevices returns info about all currently connected devices.
@@ -381,6 +413,7 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 			ScanRate:        time.Duration(scanRate) * time.Millisecond,
 			stopChan:        make(chan struct{}),
 			scanRateChanged: make(chan struct{}, 1),
+			state:           "connecting",
 		}
 		s.connections[req.DeviceID] = conn
 		s.log.Info("eip: created connection", "device", req.DeviceID, "host", req.Host, "port", req.Port, "slot", req.Slot)
@@ -665,6 +698,7 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 	}
 	conn.mu.RUnlock()
 
+	var lastCreateErr string
 	for _, tagName := range needsHandle {
 		attrs := buildTagAttrs(conn.Gateway, conn.Port, conn.Slot, tagName, 0)
 		handle, err := createTag(attrs, 10*time.Second)
@@ -675,6 +709,7 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 				v.CreateFails++
 				v.Quality = "bad"
 			}
+			lastCreateErr = err.Error()
 		} else if v != nil {
 			v.TagHandle = handle
 			v.CreateFails = 0
@@ -684,6 +719,15 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 	}
 
 	if len(work) == 0 {
+		// No tags could be read (all handle creates failed or no tags).
+		if lastCreateErr != "" {
+			conn.mu.Lock()
+			conn.state = "error"
+			conn.lastError = lastCreateErr
+			conn.lastErrorAt = time.Now().UnixMilli()
+			conn.consecutiveFailures++
+			conn.mu.Unlock()
+		}
 		return
 	}
 
@@ -697,6 +741,9 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 	}
 	results := make(chan tagResult, len(work))
 
+	var readErrMu sync.Mutex
+	var lastReadErr string
+	var readFailures int
 	var wg sync.WaitGroup
 	for _, tw := range work {
 		wg.Add(1)
@@ -716,6 +763,10 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 					v.CreateFails = 0
 				}
 				conn.mu.Unlock()
+				readErrMu.Lock()
+				lastReadErr = err.Error()
+				readFailures++
+				readErrMu.Unlock()
 				return
 			}
 
@@ -733,6 +784,10 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 					v.Quality = "bad"
 				}
 				conn.mu.Unlock()
+				readErrMu.Lock()
+				lastReadErr = readErr.Error()
+				readFailures++
+				readErrMu.Unlock()
 				return
 			}
 
@@ -795,6 +850,24 @@ func (s *Scanner) pollOnce(conn *DeviceConnection) {
 		s.recordPublish(published)
 	}
 	s.recordPolls(len(work))
+
+	// Update connection-level status based on cycle outcome.
+	conn.mu.Lock()
+	if readFailures >= len(work) {
+		// Every tag read failed this cycle.
+		conn.state = "error"
+		conn.consecutiveFailures++
+		if lastReadErr != "" {
+			conn.lastError = lastReadErr
+			conn.lastErrorAt = time.Now().UnixMilli()
+		}
+	} else {
+		conn.state = "connected"
+		conn.lastReadAt = time.Now().UnixMilli()
+		conn.consecutiveFailures = 0
+		conn.lastError = ""
+	}
+	conn.mu.Unlock()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -263,6 +263,30 @@ func (s *Scanner) handleUnsubscribe(data []byte, reply bus.ReplyFunc) {
 	sendReply(reply, true, "")
 }
 
+// DeviceStatuses returns a snapshot of communication status for every tracked device.
+func (s *Scanner) DeviceStatuses() []itypes.DeviceCommStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]itypes.DeviceCommStatus, 0, len(s.devices))
+	for _, dev := range s.devices {
+		dev.mu.Lock()
+		state := dev.state
+		if state == "" {
+			state = "disconnected"
+		}
+		out = append(out, itypes.DeviceCommStatus{
+			DeviceID:            dev.DeviceID,
+			State:               state,
+			LastReadAt:          dev.lastReadAt,
+			LastErrorAt:         dev.lastErrorAt,
+			LastError:           dev.lastError,
+			ConsecutiveFailures: dev.failures,
+		})
+		dev.mu.Unlock()
+	}
+	return out
+}
+
 // handleVariables responds with all current tag values.
 func (s *Scanner) handleVariables(reply bus.ReplyFunc) {
 	if reply == nil {
@@ -423,12 +447,18 @@ func (s *Scanner) pollDevice(dev *DeviceState) {
 		// Ensure connection
 		dev.mu.Lock()
 		if dev.conn == nil {
+			dev.state = "connecting"
 			if err := connect(dev); err != nil {
 				dev.failures++
+				dev.state = "disconnected"
+				dev.lastError = err.Error()
+				dev.lastErrorAt = time.Now().UnixMilli()
 				dev.mu.Unlock()
 				s.log.Warn("modbus: connection failed", "device", dev.DeviceID, "error", err, "backoff", dev.backoffDuration())
 				continue
 			}
+			dev.state = "connected"
+			dev.lastError = ""
 			s.log.Info("modbus: connected", "device", dev.DeviceID)
 		}
 		blocks := make([]ReadBlock, len(dev.blocks))
@@ -454,6 +484,9 @@ func (s *Scanner) pollDevice(dev *DeviceState) {
 		if readErr != nil {
 			dev.mu.Lock()
 			dev.failures++
+			dev.state = "error"
+			dev.lastError = readErr.Error()
+			dev.lastErrorAt = time.Now().UnixMilli()
 			disconnect(dev)
 			dev.mu.Unlock()
 			s.log.Warn("modbus: read failed", "device", dev.DeviceID, "error", readErr, "backoff", dev.backoffDuration())
@@ -463,6 +496,9 @@ func (s *Scanner) pollDevice(dev *DeviceState) {
 		// Successful read — reset failure count
 		dev.mu.Lock()
 		dev.failures = 0
+		dev.state = "connected"
+		dev.lastReadAt = time.Now().UnixMilli()
+		dev.lastError = ""
 		dev.mu.Unlock()
 
 		// Publish changed values

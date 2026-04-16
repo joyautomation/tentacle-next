@@ -1,5 +1,5 @@
 // Package heartbeat provides a shared heartbeat publisher for all tentacle modules.
-// Every module publishes a heartbeat every 10s to the service_heartbeats KV bucket.
+// Every module publishes a heartbeat every 2s to the service_heartbeats KV bucket.
 package heartbeat
 
 import (
@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	interval = 10 * time.Second
+	interval = 2 * time.Second
 )
 
 // Start begins publishing heartbeats and returns a stop function.
@@ -51,7 +51,7 @@ func Start(b bus.Bus, moduleID, serviceType string, metadataFn func() map[string
 	// Publish immediately
 	publish()
 
-	// Publish every 10s
+	// Publish every interval
 	ticker := time.NewTicker(interval)
 	go func() {
 		for {

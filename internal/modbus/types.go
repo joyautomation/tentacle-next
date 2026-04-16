@@ -46,6 +46,12 @@ type DeviceState struct {
 	failures   int
 	lastValues map[string]interface{} // tagID -> last published value
 
+	// Communication status (guarded by mu).
+	state       string // "connected" | "connecting" | "disconnected" | "error"
+	lastReadAt  int64  // unix ms of most recent successful read
+	lastErrorAt int64  // unix ms of most recent error
+	lastError   string // most recent error message
+
 	stopChan chan struct{}
 	stopped  bool
 
