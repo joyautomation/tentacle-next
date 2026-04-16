@@ -91,6 +91,9 @@ if [ -n "$EXISTING" ]; then
     incus exec "$CONTAINER" -- systemctl stop tentacle 2>/dev/null || true
   else
     echo "==> Deleting existing container '$CONTAINER'..."
+    # Log out of Tailscale first so the hostname is freed on the tailnet
+    # (otherwise the next deploy gets tentacle-dist-1, -2, etc.)
+    incus exec "$CONTAINER" -- tailscale logout 2>/dev/null || true
     incus delete "$CONTAINER" --force 2>/dev/null || true
     EXISTING=""
   fi
