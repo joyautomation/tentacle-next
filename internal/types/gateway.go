@@ -19,6 +19,7 @@ type GatewayDeviceConfig struct {
 	AutoManaged           bool                     `json:"autoManaged,omitempty"` // true for module-created devices (network, gateway status, etc.)
 	Host                  string                   `json:"host,omitempty"`
 	Port                  *int                     `json:"port,omitempty"`
+	Slot                  *int                     `json:"slot,omitempty"`        // EtherNet/IP: chassis slot (default 0)
 	EndpointURL           string                   `json:"endpointUrl,omitempty"` // OPC UA
 	Version               string                   `json:"version,omitempty"`     // SNMP: "1", "2c", "3"
 	Community             string                   `json:"community,omitempty"`   // SNMP
@@ -103,6 +104,7 @@ type EthernetIPSubscribeRequest struct {
 	DeviceID     string                           `json:"deviceId"`
 	Host         string                           `json:"host"`
 	Port         int                              `json:"port,omitempty"`
+	Slot         int                              `json:"slot"`
 	Tags         []string                         `json:"tags"`
 	ScanRate     int                              `json:"scanRate,omitempty"`
 	CipTypes     map[string]string                `json:"cipTypes,omitempty"`

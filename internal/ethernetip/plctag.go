@@ -48,11 +48,29 @@ func (t *PlcTag) Close() {
 	}
 }
 
+// Abort cancels any in-progress read/write on the tag.
+// Safe to call from another goroutine while Read is blocking.
+func (t *PlcTag) Abort() {
+	if t == nil || t.handle < 0 {
+		return
+	}
+	C.plc_tag_abort(t.handle)
+}
+
 // Read reads the tag value from the PLC (synchronous).
 func (t *PlcTag) Read(timeout time.Duration) error {
 	rc := C.plc_tag_read(t.handle, C.int(timeout.Milliseconds()))
 	if rc != plctagStatusOK {
 		return fmt.Errorf("plc_tag_read failed: %s (rc=%d)", plctagError(int(rc)), rc)
+	}
+	return nil
+}
+
+// ReadStart kicks off an asynchronous read. Poll Status() for completion.
+func (t *PlcTag) ReadStart() error {
+	rc := C.plc_tag_read(t.handle, C.int(0))
+	if rc != plctagStatusOK && rc != plctagStatusPending {
+		return fmt.Errorf("plc_tag_read async start failed: %s (rc=%d)", plctagError(int(rc)), rc)
 	}
 	return nil
 }
@@ -176,14 +194,14 @@ func plctagError(rc int) string {
 }
 
 // buildTagAttrs builds the libplctag attribute string for a tag.
-func buildTagAttrs(gateway string, port int, tagName string, autoSyncMs int) string {
+func buildTagAttrs(gateway string, port int, slot int, tagName string, autoSyncMs int) string {
 	if port == 0 {
 		port = 44818
 	}
 	parts := []string{
 		"protocol=ab-eip",
 		fmt.Sprintf("gateway=%s", gateway),
-		"path=1,0",
+		fmt.Sprintf("path=1,%d", slot),
 		"plc=ControlLogix",
 		fmt.Sprintf("gateway_port=%d", port),
 		fmt.Sprintf("name=%s", tagName),
@@ -195,11 +213,11 @@ func buildTagAttrs(gateway string, port int, tagName string, autoSyncMs int) str
 }
 
 // buildListTagAttrs builds the attribute string for listing tags (@tags).
-func buildListTagAttrs(gateway string, port int) string {
-	return buildTagAttrs(gateway, port, "@tags", 0)
+func buildListTagAttrs(gateway string, port int, slot int) string {
+	return buildTagAttrs(gateway, port, slot, "@tags", 0)
 }
 
 // buildUdtAttrs builds the attribute string for reading a UDT template.
-func buildUdtAttrs(gateway string, port int, templateID uint16) string {
-	return buildTagAttrs(gateway, port, fmt.Sprintf("@udt/%d", templateID), 0)
+func buildUdtAttrs(gateway string, port int, slot int, templateID uint16) string {
+	return buildTagAttrs(gateway, port, slot, fmt.Sprintf("@udt/%d", templateID), 0)
 }

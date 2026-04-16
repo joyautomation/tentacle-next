@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -136,12 +137,30 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-sync module sources: discover interfaces and module status
 	// variables so they appear automatically in the Variables page.
-	configChanged := m.syncNetworkInterfaces(cfg)
-	for _, mt := range []string{"gateway", "mqtt"} {
-		if m.syncModuleStatus(cfg, gatewayID, mt) {
-			configChanged = true
-		}
+	// Run syncs concurrently — each makes a NATS request that blocks
+	// until the target module replies or the timeout expires.
+	type syncResult struct {
+		changed bool
 	}
+	var syncWg sync.WaitGroup
+	syncResults := make([]syncResult, 3)
+
+	syncWg.Add(3)
+	go func() {
+		defer syncWg.Done()
+		syncResults[0].changed = m.syncNetworkInterfaces(cfg)
+	}()
+	go func() {
+		defer syncWg.Done()
+		syncResults[1].changed = m.syncModuleStatus(cfg, gatewayID, "gateway")
+	}()
+	go func() {
+		defer syncWg.Done()
+		syncResults[2].changed = m.syncModuleStatus(cfg, gatewayID, "mqtt")
+	}()
+	syncWg.Wait()
+
+	configChanged := syncResults[0].changed || syncResults[1].changed || syncResults[2].changed
 	if configChanged {
 		if err := m.putGatewayConfig(cfg); err != nil {
 			m.log.Warn("api: failed to persist auto-sync", "error", err)

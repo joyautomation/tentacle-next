@@ -4,6 +4,10 @@
 # Dev builds use "all" which includes everything.
 STABLE_TAGS = stable,api,orchestrator,gateway,ethernetip,snmp,mqtt,network,gitops
 
+# Version injection via ldflags.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS = -X github.com/joyautomation/tentacle/internal/version.Version=$(VERSION)
+
 # Build SvelteKit SPA into internal/web/static/
 web-install:
 	cd web && NODE_ENV=development npm install
@@ -13,11 +17,11 @@ web-build: web-install
 
 # Default: build monolith with all modules (dev)
 build: web-build
-	go build -tags all,web -o bin/tentacle ./cmd/tentacle
+	go build -tags all,web -ldflags "$(LDFLAGS)" -o bin/tentacle ./cmd/tentacle
 
 # Release: build monolith with stable modules only
 build-release: web-build
-	go build -tags $(STABLE_TAGS),web -o bin/tentacle ./cmd/tentacle
+	go build -tags $(STABLE_TAGS),web -ldflags "$(LDFLAGS)" -o bin/tentacle ./cmd/tentacle
 
 # Build tentactl CLI (no build tags, lightweight)
 build-cli:
@@ -41,6 +45,7 @@ build-all: build build-cli
 	go build -tags web,api -o bin/tentacle-web ./cmd/tentacle-web
 	go build -tags profinet -o bin/tentacle-profinet ./cmd/tentacle-profinet
 	go build -tags profinetcontroller -o bin/tentacle-profinet-controller ./cmd/tentacle-profinet-controller
+	go build -tags telemetry -o bin/tentacle-telemetry ./cmd/tentacle-telemetry
 
 test:
 	go test ./...

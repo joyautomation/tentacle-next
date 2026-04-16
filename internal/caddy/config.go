@@ -1,4 +1,4 @@
-//go:build all
+//go:build caddy || all
 
 package caddy
 

@@ -40,6 +40,7 @@
 
   let sidebarOpen = $state(false);
   let mode = $state('unknown');
+  let appVersion = $state('');
   let services = $state<Service[]>([]);
   let availableModules = $state<ModuleRegistryInfo[]>([]);
   let desiredServices = $state<DesiredService[]>([]);
@@ -81,10 +82,16 @@
     // Initial fetch
     async function init() {
       try {
-        const modeResult = await api<{ mode: string }>('/mode');
+        const [modeResult, versionResult] = await Promise.all([
+          api<{ mode: string }>('/mode'),
+          api<{ version: string }>('/system/version'),
+        ]);
         if (modeResult.data) {
           mode = modeResult.data.mode;
           apiConnected = true;
+        }
+        if (versionResult.data) {
+          appVersion = versionResult.data.version;
         }
       } catch {
         // API unreachable — mode stays 'unknown'
@@ -133,6 +140,7 @@
   {services}
   {availableModules}
   {desiredServices}
+  {appVersion}
   bind:open={sidebarOpen}
 />
 
