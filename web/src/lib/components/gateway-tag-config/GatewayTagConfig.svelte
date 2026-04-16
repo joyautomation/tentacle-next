@@ -1474,6 +1474,8 @@
 
     return result;
   });
+
+  const browsableDevices = $derived(sideNavDevices.filter(d => !d.autoManaged));
 </script>
 
 <div class="tag-config">
@@ -1624,7 +1626,6 @@
               {/each}
             </select>
           </label>
-          {@const browsableDevices = sideNavDevices.filter(d => !d.autoManaged)}
           {#if browsableDevices.length > 0}
             <div class="tc-top-devices">
               <span class="tc-top-label-text">Devices</span>
