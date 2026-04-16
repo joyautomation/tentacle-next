@@ -1597,62 +1597,76 @@
             <span class="tc-top-label-text">Type</span>
             <select
               class="tc-tpl-select"
-            value={activeSection?.kind === 'template' ? `t::${activeSection.templateName}` : activeSection?.kind === 'atomic' ? `a::${activeSection.deviceId}` : ''}
-            onchange={(e) => {
-              const val = (e.target as HTMLSelectElement).value;
-              if (val.startsWith('t::')) {
-                activeSection = { kind: 'template', templateName: val.slice(3) };
-                activeTab = 'instances';
-              } else if (val.startsWith('a::')) {
-                activeSection = { kind: 'atomic', deviceId: val.slice(3) };
-              }
-            }}
-          >
-            {#if mergedTemplates.length > 0}
-              <optgroup label="Templates">
-                {#each mergedTemplates as tmpl}
-                  <option value={`t::${tmpl.name}`}>{dirtySidebarSections.has(`t::${tmpl.name}`) ? '● ' : ''}{tmpl.name} ({tmpl.totalInstanceCount}){tmpl.hasConflict ? ' ⚠' : ''}</option>
-                {/each}
-              </optgroup>
-            {/if}
-            {#each sideNavDevices as device}
-              {#if device.atomicCount > 0}
-                <optgroup label="{device.deviceId} ({device.protocol})">
-                  <option value={`a::${device.deviceId}`}>{dirtySidebarSections.has(`a::${device.deviceId}`) ? '● ' : ''}Atomic Tags ({device.atomicCount})</option>
+              value={activeSection?.kind === 'template' ? `t::${activeSection.templateName}` : activeSection?.kind === 'atomic' ? `a::${activeSection.deviceId}` : ''}
+              onchange={(e) => {
+                const val = (e.target as HTMLSelectElement).value;
+                if (val.startsWith('t::')) {
+                  activeSection = { kind: 'template', templateName: val.slice(3) };
+                  activeTab = 'instances';
+                } else if (val.startsWith('a::')) {
+                  activeSection = { kind: 'atomic', deviceId: val.slice(3) };
+                }
+              }}
+            >
+              {#if mergedTemplates.length > 0}
+                <optgroup label="Templates">
+                  {#each mergedTemplates as tmpl}
+                    <option value={`t::${tmpl.name}`}>{dirtySidebarSections.has(`t::${tmpl.name}`) ? '● ' : ''}{tmpl.name} ({tmpl.totalInstanceCount}){tmpl.hasConflict ? ' ⚠' : ''}</option>
+                  {/each}
                 </optgroup>
               {/if}
-            {/each}
+              {#each sideNavDevices as device}
+                {#if device.atomicCount > 0}
+                  <optgroup label="{device.deviceId} ({device.protocol})">
+                    <option value={`a::${device.deviceId}`}>{dirtySidebarSections.has(`a::${device.deviceId}`) ? '● ' : ''}Atomic Tags ({device.atomicCount})</option>
+                  </optgroup>
+                {/if}
+              {/each}
             </select>
           </label>
-          {#each sideNavDevices as device}
-            {#if !device.autoManaged}
-              {@const browseState = activeBrowseStates.get(device.deviceId)}
-              {@const isBusy = browseState?.status === 'browsing' || (liveProgress.has(device.deviceId) && liveProgress.get(device.deviceId)?.status === 'completed')}
-              {@const cache = browseCaches.find(c => c.deviceId === device.deviceId)}
-              {@const pct = isBusy && browseState && browseState.totalCount > 0 ? Math.round((browseState.discoveredCount / browseState.totalCount) * 100) : 0}
-              <span class="top-browse-item">
-                <span class="top-browse-label">{device.deviceId}</span>
-                {#if isBusy && browseState}
-                  <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
-                    <circle cx="10" cy="10" r="8" fill="none" stroke="var(--theme-border)" stroke-width="2.5" />
-                    <circle cx="10" cy="10" r="8" fill="none" stroke="var(--badge-teal-text)" stroke-width="2.5"
-                      stroke-dasharray={`${browseState.status === 'completed' ? 50.3 : pct * 0.503} ${browseState.status === 'completed' ? 0 : 50.3 - pct * 0.503}`}
-                      stroke-dashoffset="12.6" stroke-linecap="round"
-                      class:spinning={browseState.status === 'browsing' && browseState.totalCount === 0} />
-                  </svg>
-                  {#if browseState.status === 'browsing'}
-                    <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
-                      <XMark size="0.85rem" />
-                    </button>
-                  {/if}
-                {:else}
-                  <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
-                    <ArrowPath size="1rem" />
-                  </button>
-                {/if}
-              </span>
-            {/if}
-          {/each}
+          {@const browsableDevices = sideNavDevices.filter(d => !d.autoManaged)}
+          {#if browsableDevices.length > 0}
+            <div class="tc-top-devices">
+              <span class="tc-top-label-text">Devices</span>
+              <div class="tc-top-devices-list">
+                {#each browsableDevices as device}
+                  {@const browseState = activeBrowseStates.get(device.deviceId)}
+                  {@const isBusy = browseState?.status === 'browsing' || (liveProgress.has(device.deviceId) && liveProgress.get(device.deviceId)?.status === 'completed')}
+                  {@const cache = browseCaches.find(c => c.deviceId === device.deviceId)}
+                  {@const pct = isBusy && browseState && browseState.totalCount > 0 ? Math.round((browseState.discoveredCount / browseState.totalCount) * 100) : 0}
+                  <div class="top-browse-row">
+                    <span class="top-browse-name">{device.deviceId}</span>
+                    <span class="top-browse-proto">{device.protocol}</span>
+                    <span class="top-browse-actions">
+                      {#if isBusy && browseState}
+                        {#if browseState.totalCount > 0}
+                          <span class="top-browse-count">{browseState.discoveredCount}/{browseState.totalCount}</span>
+                        {:else if browseState.discoveredCount > 0}
+                          <span class="top-browse-count">{browseState.discoveredCount}</span>
+                        {/if}
+                        <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
+                          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--theme-border)" stroke-width="2.5" />
+                          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--badge-teal-text)" stroke-width="2.5"
+                            stroke-dasharray={`${browseState.status === 'completed' ? 50.3 : pct * 0.503} ${browseState.status === 'completed' ? 0 : 50.3 - pct * 0.503}`}
+                            stroke-dashoffset="12.6" stroke-linecap="round"
+                            class:spinning={browseState.status === 'browsing' && browseState.totalCount === 0} />
+                        </svg>
+                        {#if browseState.status === 'browsing'}
+                          <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
+                            <XMark size="0.85rem" />
+                          </button>
+                        {/if}
+                      {:else}
+                        <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
+                          <ArrowPath size="1rem" />
+                        </button>
+                      {/if}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
         </div>
 
         {#if activeSection?.kind === 'template' && activeTemplate}
@@ -1951,7 +1965,8 @@
 
   // ── Top bar (tablet/mobile) ──
   .tc-top-bar {
-    display: none; padding: 0.625rem 1rem; gap: 0.625rem; align-items: center; flex-wrap: wrap;
+    display: none; padding: 0.625rem 1rem; gap: 0.625rem;
+    flex-direction: column; align-items: stretch;
     background: var(--theme-surface); border-bottom: 1px solid var(--theme-border);
   }
 
@@ -1972,13 +1987,36 @@
     &:focus { border-color: var(--theme-primary); }
   }
 
-  .top-browse-item {
+  .tc-top-devices {
+    display: flex; flex-direction: column; gap: 0.375rem;
+  }
+  .tc-top-devices-list {
+    display: flex; flex-direction: column; gap: 0.25rem;
+    max-height: 8.5rem; overflow-y: auto;
+    border: 1px solid var(--theme-border); border-radius: var(--rounded-md);
+    background: color-mix(in srgb, var(--theme-surface) 80%, var(--theme-border));
+  }
+  .top-browse-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 0.625rem;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+    border-bottom: 1px solid var(--theme-border);
+    &:last-child { border-bottom: none; }
+  }
+  .top-browse-name {
+    flex: 1; min-width: 0; color: var(--theme-text); font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .top-browse-proto {
+    font-size: 0.5625rem; font-weight: 700; text-transform: uppercase;
+    padding: 0.05rem 0.3rem; border-radius: var(--rounded-sm);
+    background: var(--badge-teal-bg); color: var(--badge-teal-text); flex-shrink: 0;
+  }
+  .top-browse-actions {
     display: flex; align-items: center; gap: 0.375rem; flex-shrink: 0;
   }
-  .top-browse-label {
-    font-size: 0.6875rem; font-weight: 600; color: var(--theme-text-muted);
-    font-family: 'IBM Plex Mono', monospace; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; max-width: 8rem;
+  .top-browse-count {
+    font-size: 0.625rem; color: var(--theme-text-muted); white-space: nowrap;
   }
 
   // ── Header + tabs ──
