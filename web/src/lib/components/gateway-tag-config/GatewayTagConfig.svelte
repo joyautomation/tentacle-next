@@ -284,8 +284,7 @@
       }>(
         `/gateways/gateway/browse/${info.browseId}/progress`,
         (p) => {
-          const isTerminal = p.phase === 'completed' || p.phase === 'failed' || p.phase === 'cancelled' ||
-            (p.totalCount > 0 && p.discoveredCount >= p.totalCount);
+          const isTerminal = p.phase === 'completed' || p.phase === 'failed' || p.phase === 'cancelled';
           const updated = new Map(liveProgress);
           updated.set(deviceId, {
             deviceId, browseId: info.browseId, protocol: info.protocol,
