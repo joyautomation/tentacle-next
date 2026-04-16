@@ -146,22 +146,28 @@
 			<div class="inst-head" onclick={() => onToggleExpand(inst.id)}>
 				{#if dirtyInstanceKeys.has(publishKey)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->
-				<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="MQTT">
-					<input
-						type="checkbox"
-						checked={isPublished}
-						onchange={() => onTogglePublish(inst.deviceId, inst.tag)}
-					/>
-					<span class="toggle-track"></span>
-				</label>
-				<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="History">
-					<input
-						type="checkbox"
-						checked={checkedHistoryInstances.has(publishKey)}
-						onchange={() => onToggleHistoryPublish(inst.deviceId, inst.tag)}
-					/>
-					<span class="toggle-track"></span>
-				</label>
+				<div class="toggle-group">
+					<span class="toggle-label">MQTT</span>
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="MQTT">
+						<input
+							type="checkbox"
+							checked={isPublished}
+							onchange={() => onTogglePublish(inst.deviceId, inst.tag)}
+						/>
+						<span class="toggle-track"></span>
+					</label>
+				</div>
+				<div class="toggle-group">
+					<span class="toggle-label">HIST</span>
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="History">
+						<input
+							type="checkbox"
+							checked={checkedHistoryInstances.has(publishKey)}
+							onchange={() => onToggleHistoryPublish(inst.deviceId, inst.tag)}
+						/>
+						<span class="toggle-track"></span>
+					</label>
+				</div>
 				<span
 					class="inst-expand"
 					class:open={expanded}
@@ -359,6 +365,21 @@
 		&.open {
 			transform: rotate(90deg);
 		}
+	}
+	.toggle-group {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.125rem;
+		flex-shrink: 0;
+	}
+	.toggle-label {
+		font-size: 0.5rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--theme-text-muted);
+		line-height: 1;
 	}
 	.inst-name {
 		font-weight: 600;
