@@ -66,6 +66,15 @@ func (t *PlcTag) Read(timeout time.Duration) error {
 	return nil
 }
 
+// ReadStart kicks off an asynchronous read. Poll Status() for completion.
+func (t *PlcTag) ReadStart() error {
+	rc := C.plc_tag_read(t.handle, C.int(0))
+	if rc != plctagStatusOK && rc != plctagStatusPending {
+		return fmt.Errorf("plc_tag_read async start failed: %s (rc=%d)", plctagError(int(rc)), rc)
+	}
+	return nil
+}
+
 // Status returns the current status of the tag.
 func (t *PlcTag) Status() int {
 	return int(C.plc_tag_status(t.handle))

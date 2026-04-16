@@ -2,12 +2,18 @@
 
 package ethernetip
 
+/*
+#include <stdlib.h>
+#include <libplctag.h>
+*/
+import "C"
 import (
 	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/joyautomation/tentacle/types"
 )
@@ -17,32 +23,81 @@ const (
 	browseReadTimeout    = 30 * time.Second // timeout for reading tag data (large PLCs need time)
 )
 
-// readWithCancel performs a blocking tag.Read but aborts it if ctx is cancelled.
-// A goroutine watches ctx.Done() and calls tag.Abort(), which causes the
-// blocking C read to return with an error. We then return ctx.Err().
+// readWithCancel starts an async read and polls for completion, checking
+// ctx.Done() between polls. This avoids blocking in C code where
+// plc_tag_abort cannot reliably interrupt a synchronous plc_tag_read.
 func readWithCancel(ctx context.Context, tag *PlcTag, timeout time.Duration) error {
-	done := make(chan struct{})
-	go func() {
+	if err := tag.ReadStart(); err != nil {
+		return err
+	}
+
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
 		select {
 		case <-ctx.Done():
 			tag.Abort()
-		case <-done:
+			return ctx.Err()
+		case <-deadline:
+			tag.Abort()
+			return fmt.Errorf("read timed out after %v", timeout)
+		case <-ticker.C:
+			status := tag.Status()
+			if status == plctagStatusOK {
+				return nil
+			}
+			if status != plctagStatusPending {
+				return fmt.Errorf("read failed: %s (rc=%d)", plctagError(status), status)
+			}
 		}
-	}()
-
-	err := tag.Read(timeout)
-	close(done)
-
-	if err != nil && ctx.Err() != nil {
-		return ctx.Err()
 	}
-	return err
+}
+
+// createTagWithCancel creates a tag asynchronously, polling for completion
+// while checking ctx.Done(). This allows cancellation during the PLC
+// connection phase, not just during reads.
+func createTagWithCancel(ctx context.Context, attrs string, timeout time.Duration) (*PlcTag, error) {
+	cAttrs := C.CString(attrs)
+	defer C.free(unsafe.Pointer(cAttrs))
+
+	handle := C.plc_tag_create(cAttrs, C.int(0))
+	if handle < 0 {
+		return nil, fmt.Errorf("plc_tag_create failed: %s (rc=%d)", plctagError(int(handle)), handle)
+	}
+
+	tag := &PlcTag{handle: handle}
+
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			tag.Close()
+			return nil, ctx.Err()
+		case <-deadline:
+			tag.Close()
+			return nil, fmt.Errorf("tag creation timed out after %v", timeout)
+		case <-ticker.C:
+			status := tag.Status()
+			if status == plctagStatusOK {
+				return tag, nil
+			}
+			if status != plctagStatusPending {
+				tag.Close()
+				return nil, fmt.Errorf("tag creation failed: %s (rc=%d)", plctagError(status), status)
+			}
+		}
+	}
 }
 
 // listTags reads all controller-scoped tags from the PLC using @tags.
 func listTags(ctx context.Context, gateway string, port int, slot int) ([]TagEntry, error) {
 	attrs := buildListTagAttrs(gateway, port, slot)
-	tag, err := createTag(attrs, browseConnectTimeout)
+	tag, err := createTagWithCancel(ctx, attrs, browseConnectTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create @tags tag: %w", err)
 	}
@@ -113,7 +168,7 @@ func parseTagList(tag TagAccessor) ([]TagEntry, error) {
 // readUdtTemplate reads a UDT template definition using @udt/<id>.
 func readUdtTemplate(ctx context.Context, gateway string, port int, slot int, templateID uint16) (*UdtTemplate, error) {
 	attrs := buildUdtAttrs(gateway, port, slot, templateID)
-	tag, err := createTag(attrs, browseConnectTimeout)
+	tag, err := createTagWithCancel(ctx, attrs, browseConnectTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create @udt/%d tag: %w", templateID, err)
 	}
@@ -584,7 +639,7 @@ func filterReadable(ctx context.Context, candidates []candidateVar, gateway stri
 
 func testTagReadable(ctx context.Context, gateway string, port int, slot int, tagPath string) bool {
 	attrs := buildTagAttrs(gateway, port, slot, tagPath, 0)
-	tag, err := createTag(attrs, readableTestTimeout)
+	tag, err := createTagWithCancel(ctx, attrs, readableTestTimeout)
 	if err != nil {
 		return false
 	}
