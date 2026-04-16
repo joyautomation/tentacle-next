@@ -17,8 +17,30 @@ const (
 	browseReadTimeout    = 30 * time.Second // timeout for reading tag data (large PLCs need time)
 )
 
+// readWithCancel performs a blocking tag.Read but aborts it if ctx is cancelled.
+// A goroutine watches ctx.Done() and calls tag.Abort(), which causes the
+// blocking C read to return with an error. We then return ctx.Err().
+func readWithCancel(ctx context.Context, tag *PlcTag, timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			tag.Abort()
+		case <-done:
+		}
+	}()
+
+	err := tag.Read(timeout)
+	close(done)
+
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
 // listTags reads all controller-scoped tags from the PLC using @tags.
-func listTags(gateway string, port int, slot int) ([]TagEntry, error) {
+func listTags(ctx context.Context, gateway string, port int, slot int) ([]TagEntry, error) {
 	attrs := buildListTagAttrs(gateway, port, slot)
 	tag, err := createTag(attrs, browseConnectTimeout)
 	if err != nil {
@@ -26,7 +48,7 @@ func listTags(gateway string, port int, slot int) ([]TagEntry, error) {
 	}
 	defer tag.Close()
 
-	if err := tag.Read(browseReadTimeout); err != nil {
+	if err := readWithCancel(ctx, tag, browseReadTimeout); err != nil {
 		return nil, fmt.Errorf("failed to read @tags: %w", err)
 	}
 
@@ -89,7 +111,7 @@ func parseTagList(tag TagAccessor) ([]TagEntry, error) {
 }
 
 // readUdtTemplate reads a UDT template definition using @udt/<id>.
-func readUdtTemplate(gateway string, port int, slot int, templateID uint16) (*UdtTemplate, error) {
+func readUdtTemplate(ctx context.Context, gateway string, port int, slot int, templateID uint16) (*UdtTemplate, error) {
 	attrs := buildUdtAttrs(gateway, port, slot, templateID)
 	tag, err := createTag(attrs, browseConnectTimeout)
 	if err != nil {
@@ -97,7 +119,7 @@ func readUdtTemplate(gateway string, port int, slot int, templateID uint16) (*Ud
 	}
 	defer tag.Close()
 
-	if err := tag.Read(browseReadTimeout); err != nil {
+	if err := readWithCancel(ctx, tag, browseReadTimeout); err != nil {
 		return nil, fmt.Errorf("failed to read @udt/%d: %w", templateID, err)
 	}
 
@@ -247,7 +269,7 @@ func browseDevice(ctx context.Context, gateway string, port int, slot int, devic
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
-	tags, err := listTags(gateway, port, slot)
+	tags, err := listTags(ctx, gateway, port, slot)
 	if err != nil {
 		return nil, fmt.Errorf("tag listing failed: %w", err)
 	}
@@ -302,7 +324,7 @@ func browseDevice(ctx context.Context, gateway string, port int, slot int, devic
 			continue
 		}
 
-		tmpl, err := readUdtTemplate(gateway, port, slot, id)
+		tmpl, err := readUdtTemplate(ctx, gateway, port, slot, id)
 		if err != nil {
 			continue
 		}
@@ -521,7 +543,7 @@ func filterReadable(ctx context.Context, candidates []candidateVar, gateway stri
 				if ctx.Err() != nil {
 					return
 				}
-				readable := testTagReadable(gateway, port, slot, candidates[idx].path)
+				readable := testTagReadable(ctx, gateway, port, slot, candidates[idx].path)
 				results <- result{idx, readable}
 			}
 		}()
@@ -560,14 +582,14 @@ func filterReadable(ctx context.Context, candidates []candidateVar, gateway stri
 	return out
 }
 
-func testTagReadable(gateway string, port int, slot int, tagPath string) bool {
+func testTagReadable(ctx context.Context, gateway string, port int, slot int, tagPath string) bool {
 	attrs := buildTagAttrs(gateway, port, slot, tagPath, 0)
 	tag, err := createTag(attrs, readableTestTimeout)
 	if err != nil {
 		return false
 	}
 	defer tag.Close()
-	if err := tag.Read(readableTestTimeout); err != nil {
+	if err := readWithCancel(ctx, tag, readableTestTimeout); err != nil {
 		return false
 	}
 	return true
