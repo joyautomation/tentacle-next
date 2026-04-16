@@ -1621,6 +1621,35 @@
               {/if}
             {/each}
           </select>
+          {#each sideNavDevices as device}
+            {#if !device.autoManaged}
+              {@const browseState = activeBrowseStates.get(device.deviceId)}
+              {@const isBusy = browseState?.status === 'browsing' || (liveProgress.has(device.deviceId) && liveProgress.get(device.deviceId)?.status === 'completed')}
+              {@const cache = browseCaches.find(c => c.deviceId === device.deviceId)}
+              {@const pct = isBusy && browseState && browseState.totalCount > 0 ? Math.round((browseState.discoveredCount / browseState.totalCount) * 100) : 0}
+              <span class="top-browse-item">
+                <span class="top-browse-label">{device.deviceId}</span>
+                {#if isBusy && browseState}
+                  <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
+                    <circle cx="10" cy="10" r="8" fill="none" stroke="var(--theme-border)" stroke-width="2.5" />
+                    <circle cx="10" cy="10" r="8" fill="none" stroke="var(--badge-teal-text)" stroke-width="2.5"
+                      stroke-dasharray={`${browseState.status === 'completed' ? 50.3 : pct * 0.503} ${browseState.status === 'completed' ? 0 : 50.3 - pct * 0.503}`}
+                      stroke-dashoffset="12.6" stroke-linecap="round"
+                      class:spinning={browseState.status === 'browsing' && browseState.totalCount === 0} />
+                  </svg>
+                  {#if browseState.status === 'browsing'}
+                    <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
+                      <XMark size="0.85rem" />
+                    </button>
+                  {/if}
+                {:else}
+                  <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
+                    <ArrowPath size="1rem" />
+                  </button>
+                {/if}
+              </span>
+            {/if}
+          {/each}
         </div>
 
         {#if activeSection?.kind === 'template' && activeTemplate}
@@ -1919,7 +1948,7 @@
 
   // ── Top bar (tablet/mobile) ──
   .tc-top-bar {
-    display: none; padding: 0.625rem 1rem; gap: 0.625rem; align-items: center;
+    display: none; padding: 0.625rem 1rem; gap: 0.625rem; align-items: center; flex-wrap: wrap;
     background: var(--theme-surface); border-bottom: 1px solid var(--theme-border);
   }
 
@@ -1929,6 +1958,15 @@
     color: var(--theme-text); padding: 0.4rem 0.75rem; border-radius: var(--rounded-md);
     flex: 1; max-width: 320px; outline: none;
     &:focus { border-color: var(--theme-primary); }
+  }
+
+  .top-browse-item {
+    display: flex; align-items: center; gap: 0.375rem; flex-shrink: 0;
+  }
+  .top-browse-label {
+    font-size: 0.6875rem; font-weight: 600; color: var(--theme-text-muted);
+    font-family: 'IBM Plex Mono', monospace; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 8rem;
   }
 
   // ── Header + tabs ──
