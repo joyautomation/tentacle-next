@@ -60,13 +60,15 @@ func Export(b bus.Bus, opts ExportOptions) ([]any, error) {
 		}
 	}
 
-	// Nftables config.
+	// Nftables config — skip if module isn't running.
 	if includeAll || kindSet[KindNftables] {
-		nft, err := exportNftables(b)
-		if err != nil {
-			slog.Warn("export: skipping nftables", "error", err)
-		} else if nft != nil {
-			resources = append(resources, nft)
+		if isServiceRunning(b, "nftables") {
+			nft, err := exportNftables(b)
+			if err != nil {
+				slog.Warn("export: skipping nftables", "error", err)
+			} else if nft != nil {
+				resources = append(resources, nft)
+			}
 		}
 	}
 
@@ -80,13 +82,15 @@ func Export(b bus.Bus, opts ExportOptions) ([]any, error) {
 		}
 	}
 
-	// Network config.
+	// Network config — skip if module isn't running.
 	if includeAll || kindSet[KindNetwork] {
-		net, err := exportNetwork(b)
-		if err != nil {
-			slog.Warn("export: skipping network", "error", err)
-		} else if net != nil {
-			resources = append(resources, net)
+		if isServiceRunning(b, "network") {
+			net, err := exportNetwork(b)
+			if err != nil {
+				slog.Warn("export: skipping network", "error", err)
+			} else if net != nil {
+				resources = append(resources, net)
+			}
 		}
 	}
 
@@ -335,6 +339,28 @@ func exportPlcs(b bus.Bus) ([]any, error) {
 		})
 	}
 	return resources, nil
+}
+
+// isServiceRunning checks if a module with the given serviceType has a heartbeat.
+func isServiceRunning(b bus.Bus, serviceType string) bool {
+	keys, err := b.KVKeys(topics.BucketHeartbeats)
+	if err != nil {
+		return false
+	}
+	for _, key := range keys {
+		data, _, err := b.KVGet(topics.BucketHeartbeats, key)
+		if err != nil {
+			continue
+		}
+		var hb ttypes.ServiceHeartbeat
+		if json.Unmarshal(data, &hb) != nil {
+			continue
+		}
+		if hb.ServiceType == serviceType {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedMapKeys[V any](m map[string]V) []string {

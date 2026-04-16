@@ -17,6 +17,9 @@ import (
 // gateway device. Called during gateway config GET so interfaces appear
 // automatically in the Variables page.
 func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
+	if !m.isModuleRunning("network") {
+		return false
+	}
 	// Ask the network module for discovered interfaces.
 	resp, err := m.bus.Request(topics.Browse("network"), []byte("{}"), 500*time.Millisecond)
 	if err != nil {
@@ -144,6 +147,10 @@ func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
 // handleGetNetworkInterfaces returns the current network interface state.
 // GET /api/v1/network/interfaces
 func (m *Module) handleGetNetworkInterfaces(w http.ResponseWriter, r *http.Request) {
+	if !m.isModuleRunning("network") {
+		writeJSON(w, http.StatusOK, map[string]any{"interfaces": []any{}})
+		return
+	}
 	resp, err := m.bus.Request(topics.NetworkState, []byte("{}"), busTimeout)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get network interfaces: "+err.Error())

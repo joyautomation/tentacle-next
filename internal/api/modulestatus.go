@@ -16,6 +16,9 @@ import (
 // up any config variables that the module no longer reports.
 // Returns true if config was changed.
 func (m *Module) syncModuleStatus(cfg *itypes.GatewayConfigKV, gatewayID, moduleType string) bool {
+	if !m.isModuleRunning(moduleType) {
+		return false
+	}
 	resp, err := m.bus.Request(topics.StatusBrowse(moduleType), []byte("{}"), 500*time.Millisecond)
 	if err != nil {
 		return false // module not running or doesn't support status browse
