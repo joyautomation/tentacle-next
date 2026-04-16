@@ -1593,8 +1593,10 @@
       <div class="tc-main">
         <!-- Mobile/tablet selector -->
         <div class="tc-top-bar">
-          <select
-            class="tc-tpl-select"
+          <label class="tc-top-label">
+            <span class="tc-top-label-text">Type</span>
+            <select
+              class="tc-tpl-select"
             value={activeSection?.kind === 'template' ? `t::${activeSection.templateName}` : activeSection?.kind === 'atomic' ? `a::${activeSection.deviceId}` : ''}
             onchange={(e) => {
               const val = (e.target as HTMLSelectElement).value;
@@ -1620,7 +1622,8 @@
                 </optgroup>
               {/if}
             {/each}
-          </select>
+            </select>
+          </label>
           {#each sideNavDevices as device}
             {#if !device.autoManaged}
               {@const browseState = activeBrowseStates.get(device.deviceId)}
@@ -1952,11 +1955,20 @@
     background: var(--theme-surface); border-bottom: 1px solid var(--theme-border);
   }
 
+  .tc-top-label {
+    display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0;
+  }
+  .tc-top-label-text {
+    font-size: 0.6875rem; font-weight: 700; text-transform: uppercase;
+    color: var(--theme-text-muted); letter-spacing: 0.04em; flex-shrink: 0;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
   .tc-tpl-select {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.8125rem; font-weight: 600;
     background: var(--theme-input-bg); border: 1px solid var(--theme-border);
     color: var(--theme-text); padding: 0.4rem 0.75rem; border-radius: var(--rounded-md);
-    flex: 1; max-width: 320px; outline: none;
+    flex: 1; min-width: 0; outline: none;
     &:focus { border-color: var(--theme-primary); }
   }
 
@@ -2022,6 +2034,7 @@
     border-bottom: 1px solid var(--theme-border);
     background: var(--theme-surface);
     padding: 0 1.25rem;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
 
   .tc-tab {
@@ -2030,7 +2043,7 @@
     color: var(--theme-text-muted); cursor: pointer;
     border: none; background: none; font-family: inherit;
     border-bottom: 2px solid transparent; margin-bottom: -1px;
-    border-radius: 0; outline: none;
+    border-radius: 0; outline: none; white-space: nowrap; flex-shrink: 0;
     &:hover { color: var(--theme-text); }
     &.active { color: var(--theme-primary); border-bottom-color: var(--theme-primary); }
   }
@@ -2067,7 +2080,7 @@
   @media (max-width: 640px) {
     .tc-header { padding: 0.625rem 0.875rem; }
     .tc-tabs { padding: 0 0.875rem; }
-    .tc-tab { flex: 1; text-align: center; font-size: 0.75rem; padding: 0.625rem 0.5rem; }
+    .tc-tab { font-size: 0.75rem; padding: 0.625rem 0.5rem; }
     .save-bar { margin: 0 0.75rem; }
     .tc-subtitle { display: none; }
   }
