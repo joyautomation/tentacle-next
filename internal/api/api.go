@@ -227,6 +227,21 @@ func (m *Module) routes() http.Handler {
 		// PROFINET IO Controller
 		r.Get("/profinetcontroller/subscriptions", m.handleListPNControllerSubs)
 
+		// PLC
+		r.Get("/plcs/{plcId}/config", m.handleGetPlcConfig)
+		r.Put("/plcs/{plcId}/config", m.handlePutPlcConfig)
+		r.Get("/plcs/{plcId}/tasks", m.handleListPlcTasks)
+		r.Put("/plcs/{plcId}/tasks/{taskName}", m.handlePutPlcTask)
+		r.Delete("/plcs/{plcId}/tasks/{taskName}", m.handleDeletePlcTask)
+		r.Get("/plcs/{plcId}/variables", m.handleListPlcConfigVariables)
+		r.Put("/plcs/{plcId}/variables/{variableId}", m.handlePutPlcConfigVariable)
+		r.Delete("/plcs/{plcId}/variables/{variableId}", m.handleDeletePlcConfigVariable)
+		r.Get("/plcs/{plcId}/programs", m.handleListPlcPrograms)
+		r.Post("/plcs/{plcId}/programs/transpile", m.handleTranspilePlcProgram)
+		r.Get("/plcs/{plcId}/programs/{name}", m.handleGetPlcProgram)
+		r.Put("/plcs/{plcId}/programs/{name}", m.handlePutPlcProgram)
+		r.Delete("/plcs/{plcId}/programs/{name}", m.handleDeletePlcProgram)
+
 		// Network
 		r.Get("/network/interfaces", m.handleGetNetworkInterfaces)
 		r.Get("/network/config", m.handleGetNetworkConfig)
