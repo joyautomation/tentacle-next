@@ -15,6 +15,7 @@ Commands:
   init-image          Create/refresh golden image from tentacle-next-dev-1
   create <name>       Create worktree + dev container for a module/feature
   destroy <name>      Remove worktree + dev container
+  finish <name>       Merge to main, destroy worktree + container, delete branch
   list                Show all worktrees and container status
   sync <name|all>     Merge main into worktree branch(es)
   deploy <name>       Build and deploy to a specific worktree's container
@@ -25,6 +26,7 @@ Commands:
 
 Examples:
   worktree-dev.sh create plc
+  worktree-dev.sh finish plc       # merge feature/plc → main, cleanup
   worktree-dev.sh sync hmi         # merge main into feature/hmi
   worktree-dev.sh sync all         # merge main into all feature worktrees
   worktree-dev.sh deploy profinet
@@ -207,6 +209,51 @@ cmd_destroy() {
   echo "    Branch '$branch' was kept. Delete manually: git branch -D $branch"
 }
 
+cmd_finish() {
+  local name="$1"
+  local wt_path
+  wt_path=$(worktree_path "$name")
+  local branch
+  branch=$(branch_name "$name")
+
+  if [ ! -d "$wt_path" ]; then
+    echo "ERROR: Worktree not found at $wt_path"
+    exit 1
+  fi
+
+  # Check for uncommitted changes in the worktree
+  if ! git -C "$wt_path" diff --quiet || ! git -C "$wt_path" diff --cached --quiet; then
+    echo "ERROR: Worktree '$name' has uncommitted changes. Commit or stash first."
+    exit 1
+  fi
+  if [ -n "$(git -C "$wt_path" ls-files --others --exclude-standard)" ]; then
+    echo "WARNING: Worktree '$name' has untracked files (they will be left behind)."
+  fi
+
+  # Merge feature branch into main
+  echo "==> Merging '$branch' into main..."
+  git -C "$REPO_ROOT" checkout main
+  if ! git -C "$REPO_ROOT" merge "$branch" --no-ff -m "Merge $branch"; then
+    echo ""
+    echo "==> Merge conflict. Resolve in $REPO_ROOT, then re-run:"
+    echo "    worktree-dev.sh destroy $name"
+    echo "    git branch -d $branch"
+    exit 1
+  fi
+  echo "    Merge successful."
+
+  # Destroy worktree + container
+  cmd_destroy "$name"
+
+  # Delete the branch (it's merged)
+  echo "==> Deleting branch '$branch'..."
+  git -C "$REPO_ROOT" branch -d "$branch"
+
+  echo ""
+  echo "==> Finished '$name'. Feature merged to main, worktree and container removed."
+  echo "    Push when ready: git -C $REPO_ROOT push"
+}
+
 cmd_list() {
   echo "=== Git Worktrees ==="
   git -C "$REPO_ROOT" worktree list
@@ -358,6 +405,7 @@ case "${1:-}" in
   init-image) cmd_init_image ;;
   create)     cmd_create "${2:?Usage: worktree-dev.sh create <name>}" ;;
   destroy)    cmd_destroy "${2:?Usage: worktree-dev.sh destroy <name>}" ;;
+  finish)     cmd_finish "${2:?Usage: worktree-dev.sh finish <name>}" ;;
   list)       cmd_list ;;
   sync)       cmd_sync "${2:?Usage: worktree-dev.sh sync <name|all>}" ;;
   deploy)     cmd_deploy "${2:?Usage: worktree-dev.sh deploy <name>}" ;;
