@@ -119,9 +119,11 @@
     installing = false;
     if (installDone && !installFailed) {
       update('localInstalled', true);
-      await loadStatus();
       saltState.addNotification({ message: 'PostgreSQL + TimescaleDB installed', type: 'success' });
+      // Commit first (writes HISTORY_DB_PASSWORD etc. to KV), then re-check status so
+      // reachability reflects the credentials the module will actually use.
       if (onCommit) await runCommit();
+      await loadStatus();
     } else {
       installError = errMsg || installFailure || 'Installation failed';
     }
