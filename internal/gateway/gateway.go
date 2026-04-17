@@ -908,28 +908,42 @@ func (g *Gateway) setupCommandRoutingLocked() {
 		cmdTag := parts[2]
 
 		g.mu.RLock()
-		// Look up variable by sanitized tag (command subjects use tag, not config key)
-		var tv *TrackedVariable
+		defer g.mu.RUnlock()
+
+		// Try atomic variable lookup (bidirectional tags only)
 		for _, v := range g.variables {
 			if types.SanitizeForSubject(v.Config.Tag) == cmdTag && v.Config.Bidirectional {
-				tv = v
-				break
+				device, ok := g.config.Devices[v.Config.DeviceID]
+				if !ok {
+					return
+				}
+				cmdSubject := fmt.Sprintf("%s.command.%s", device.Protocol, v.Config.Tag)
+				_ = g.b.Publish(cmdSubject, data)
+				return
 			}
 		}
-		if tv == nil {
-			g.mu.RUnlock()
-			return
-		}
-		device, ok := g.config.Devices[tv.Config.DeviceID]
-		if !ok {
-			g.mu.RUnlock()
-			return
-		}
-		protocol := device.Protocol
-		g.mu.RUnlock()
 
-		cmdSubject := fmt.Sprintf("%s.command.%s", protocol, types.SanitizeForSubject(tv.Config.Tag))
-		_ = g.b.Publish(cmdSubject, data)
+		// Try UDT member command: cmdTag = "udtID/memberName"
+		if idx := strings.Index(cmdTag, "/"); idx >= 0 && g.config != nil {
+			udtID := cmdTag[:idx]
+			memberName := cmdTag[idx+1:]
+
+			udtVar, ok := g.config.UdtVariables[udtID]
+			if !ok {
+				return
+			}
+			memberTag, ok := udtVar.MemberTags[memberName]
+			if !ok {
+				g.log.Warn("gateway: DCMD for unknown UDT member", "udt", udtID, "member", memberName)
+				return
+			}
+			device, ok := g.config.Devices[udtVar.DeviceID]
+			if !ok {
+				return
+			}
+			cmdSubject := fmt.Sprintf("%s.command.%s", device.Protocol, memberTag)
+			_ = g.b.Publish(cmdSubject, data)
+		}
 	})
 	if err != nil {
 		g.log.Error("gateway: failed to subscribe to commands", "subject", subject, "error", err)
