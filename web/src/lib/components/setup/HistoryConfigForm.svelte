@@ -30,9 +30,16 @@
   interface Props {
     config: HistoryConfig;
     onchange: (config: HistoryConfig) => void;
+    /**
+     * When provided, the form shows commit buttons ("Install & Configure" in local mode
+     * calls this after install; "Save & Start" in external mode calls this directly).
+     * When absent, the form only collects values — a parent (e.g. setup wizard) handles
+     * writing env vars and enabling the module at its own apply step.
+     */
+    onCommit?: () => Promise<void>;
   }
 
-  let { config, onchange }: Props = $props();
+  let { config, onchange, onCommit }: Props = $props();
 
   let status = $state<Status | null>(null);
   let installing = $state(false);
@@ -40,6 +47,7 @@
   let installError = $state('');
   let testing = $state(false);
   let testResult = $state<{ success: boolean; error?: string; extensionAvailable?: boolean } | null>(null);
+  let committing = $state(false);
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
@@ -95,8 +103,20 @@
       update('localInstalled', true);
       await loadStatus();
       saltState.addNotification({ message: 'PostgreSQL + TimescaleDB installed', type: 'success' });
+      // In standalone mode, also write config and start the module immediately.
+      if (onCommit) await runCommit();
     } else {
       installError = result.data?.error ?? result.error?.error ?? 'Installation failed';
+    }
+  }
+
+  async function runCommit() {
+    if (!onCommit) return;
+    committing = true;
+    try {
+      await onCommit();
+    } finally {
+      committing = false;
     }
   }
 
@@ -295,9 +315,16 @@
         />
       </div>
 
-      <button class="btn secondary" onclick={testConnection} disabled={testing}>
-        {testing ? 'Testing...' : 'Test Connection'}
-      </button>
+      <div class="actions">
+        <button class="btn secondary" onclick={testConnection} disabled={testing}>
+          {testing ? 'Testing...' : 'Test Connection'}
+        </button>
+        {#if onCommit}
+          <button class="btn primary" onclick={runCommit} disabled={committing || !testResult?.success}>
+            {committing ? 'Saving...' : 'Save & Start'}
+          </button>
+        {/if}
+      </div>
 
       {#if testResult}
         <div class="test-result" class:success={testResult.success} class:fail={!testResult.success} transition:slide={{ duration: 200 }}>
@@ -477,6 +504,12 @@
         border-color: var(--theme-primary);
       }
     }
+  }
+
+  .actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
   }
 
   .btn {

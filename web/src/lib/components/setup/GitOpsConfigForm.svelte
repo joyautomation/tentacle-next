@@ -16,9 +16,26 @@
   interface Props {
     config: GitOpsConfig;
     onchange: (config: GitOpsConfig) => void;
+    /**
+     * When provided, the form shows a "Save & Start" button that calls this handler.
+     * When absent, the form only collects values — a parent (e.g. setup wizard) handles
+     * writing env vars and enabling the module at its own apply step.
+     */
+    onCommit?: () => Promise<void>;
   }
 
-  let { config, onchange }: Props = $props();
+  let { config, onchange, onCommit }: Props = $props();
+
+  let committing = $state(false);
+  async function runCommit() {
+    if (!onCommit) return;
+    committing = true;
+    try {
+      await onCommit();
+    } finally {
+      committing = false;
+    }
+  }
 
   // Git availability
   let gitInstalled = $state<boolean | null>(null); // null = loading
@@ -250,6 +267,14 @@
       </button>
     </div>
   </section>
+
+  {#if onCommit}
+    <div class="commit-row">
+      <button class="btn primary" onclick={runCommit} disabled={committing || !config.repoUrl}>
+        {committing ? 'Saving...' : 'Save & Start'}
+      </button>
+    </div>
+  {/if}
 </div>
 
 <style lang="scss">
@@ -516,5 +541,12 @@
     font-size: 0.75rem;
     color: var(--theme-text-muted);
     margin: 0.5rem 0;
+  }
+
+  .commit-row {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.5rem;
+    border-top: 1px solid color-mix(in srgb, var(--theme-border) 50%, transparent);
   }
 </style>
