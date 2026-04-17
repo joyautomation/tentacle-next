@@ -10,6 +10,7 @@
     ArrowDownTray,
   } from '@joyautomation/salt/icons';
   import GitOpsSetup from '$lib/components/GitOpsSetup.svelte';
+  import HistorySetup from '$lib/components/HistorySetup.svelte';
   import { getModuleName } from '$lib/constants/services';
   import { isMonolith } from '$lib/stores/mode';
   import { get } from 'svelte/store';
@@ -227,7 +228,21 @@
     <div class="section">
       <h2>{isInstalled ? 'Manage' : ($isMonolith ? 'Enable' : 'Install')}</h2>
 
-      {#if !isInstalled}
+      {#if data.moduleId === 'history' && $isMonolith}
+        <!-- History in monolith always goes through the DB setup wizard. -->
+        <HistorySetup />
+        {#if isInstalled}
+          <div class="install-controls">
+            <button
+              class="uninstall-btn"
+              onclick={uninstallModule}
+              disabled={installing}
+            >
+              {installing ? 'Disabling...' : 'Disable'}
+            </button>
+          </div>
+        {/if}
+      {:else if !isInstalled}
         <div class="install-controls">
           {#if !$isMonolith}
             <div class="version-select">

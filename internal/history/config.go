@@ -11,24 +11,47 @@ import (
 )
 
 // loadConfigFromEnv populates a HistoryConfig from environment variables.
+// Prefers HISTORY_DB_* (canonical) and falls back to TENTACLE_DB_* for backward compatibility.
 func loadConfigFromEnv() itypes.HistoryConfig {
 	cfg := itypes.HistoryConfig{
-		DBHost:        envOrDefault("TENTACLE_DB_HOST", "localhost"),
-		DBPort:        envIntOrDefault("TENTACLE_DB_PORT", 5432),
-		DBUser:        envOrDefault("TENTACLE_DB_USER", "postgres"),
-		DBPassword:    envOrDefault("TENTACLE_DB_PASSWORD", "postgres"),
-		DBName:        envOrDefault("TENTACLE_DB_NAME", "tentacle"),
+		DBHost:        firstEnv([]string{"HISTORY_DB_HOST", "TENTACLE_DB_HOST"}, "localhost"),
+		DBPort:        firstEnvInt([]string{"HISTORY_DB_PORT", "TENTACLE_DB_PORT"}, 5432),
+		DBUser:        firstEnv([]string{"HISTORY_DB_USER", "TENTACLE_DB_USER"}, "postgres"),
+		DBPassword:    firstEnv([]string{"HISTORY_DB_PASSWORD", "TENTACLE_DB_PASSWORD"}, "postgres"),
+		DBName:        firstEnv([]string{"HISTORY_DB_NAME", "TENTACLE_DB_NAME"}, "tentacle"),
 		DBSSLMode:     "disable",
 		GroupID:       envOrDefault("MQTT_GROUP_ID", "TentacleGroup"),
 		EnableHyper:   envBoolOrDefault("TENTACLE_HISTORIAN_ENABLED", true),
 		RetentionDays: envIntOrDefault("TENTACLE_RETENTION_DAYS", 30),
 	}
 
-	if envBoolOrDefault("TENTACLE_DB_SSL", false) {
+	if envBoolOrDefault("HISTORY_DB_SSL", envBoolOrDefault("TENTACLE_DB_SSL", false)) {
 		cfg.DBSSLMode = "require"
 	}
 
 	return cfg
+}
+
+// firstEnv returns the first non-empty env var value from keys, or default.
+func firstEnv(keys []string, defaultVal string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return defaultVal
+}
+
+// firstEnvInt returns the first parseable int env var value from keys, or default.
+func firstEnvInt(keys []string, defaultVal int) int {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				return n
+			}
+		}
+	}
+	return defaultVal
 }
 
 // connString builds a PostgreSQL connection string from the config.

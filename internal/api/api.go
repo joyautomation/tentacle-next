@@ -255,6 +255,11 @@ func (m *Module) routes() http.Handler {
 		r.Get("/history/usage", m.handleGetHistoryUsage)
 		r.Get("/history/enabled", m.handleGetHistoryEnabled)
 
+		// History DB setup (wizard support)
+		r.Get("/history/db-status", m.handleHistoryDBStatus)
+		r.Post("/history/db-test", m.handleHistoryDBTest)
+		r.Post("/history/db-install", m.handleHistoryDBInstall)
+
 		// GitOps setup
 		r.Get("/gitops/git-check", m.handleGitCheck)
 		r.Post("/gitops/git-install", m.handleGitInstall)

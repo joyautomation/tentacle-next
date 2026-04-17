@@ -43,24 +43,14 @@
 
   let status = $state<Status | null>(null);
   let installing = $state(false);
-  let installSteps = $state<Array<{ step: string; status: string; error?: string }>>([]);
+  let installSteps = $state<Array<{ id: number; step: string; status: string; error?: string }>>([]);
   let installError = $state('');
+  let installDone = $state(false);
+  let installFailed = $state(false);
+  let installFailure = $state('');
   let testing = $state(false);
   let testResult = $state<{ success: boolean; error?: string; extensionAvailable?: boolean } | null>(null);
   let committing = $state(false);
-
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  $effect(() => {
-    if (installing) {
-      if (!pollTimer) pollTimer = setInterval(loadStatus, 2000);
-    } else if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-    return () => {
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    };
-  });
 
   $effect(() => { loadStatus(); });
 
@@ -87,26 +77,69 @@
     installing = true;
     installError = '';
     installSteps = [];
-    const result = await apiPost<{ success: boolean; error?: string; steps?: Array<{step: string; status: string; error?: string}> }>(
-      '/history/db-install',
-      {
-        host: config.host,
-        port: parseInt(config.port, 10) || 5432,
-        user: config.user,
-        password: config.password,
-        dbname: config.dbname,
-      },
-    );
+    installDone = false;
+    installFailed = false;
+    installFailure = '';
+    let errMsg = '';
+    try {
+      const res = await fetch('/api/v1/history/db-install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: config.host,
+          port: parseInt(config.port, 10) || 5432,
+          user: config.user,
+          password: config.password,
+          dbname: config.dbname,
+        }),
+      });
+      if (!res.ok || !res.body) {
+        errMsg = `install request failed (HTTP ${res.status})`;
+      } else {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl = buf.indexOf('\n');
+          while (nl !== -1) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            nl = buf.indexOf('\n');
+            if (!line) continue;
+            handleInstallEvent(JSON.parse(line));
+          }
+        }
+      }
+    } catch (e) {
+      errMsg = e instanceof Error ? e.message : String(e);
+    }
     installing = false;
-    if (result.data?.steps) installSteps = result.data.steps;
-    if (result.data?.success) {
+    if (installDone && !installFailed) {
       update('localInstalled', true);
       await loadStatus();
       saltState.addNotification({ message: 'PostgreSQL + TimescaleDB installed', type: 'success' });
-      // In standalone mode, also write config and start the module immediately.
       if (onCommit) await runCommit();
     } else {
-      installError = result.data?.error ?? result.error?.error ?? 'Installation failed';
+      installError = errMsg || installFailure || 'Installation failed';
+    }
+  }
+
+  function handleInstallEvent(ev: { type: string; id?: number; step?: string; status?: string; error?: string; success?: boolean }) {
+    if (ev.type === 'step' && typeof ev.id === 'number' && ev.step && ev.status) {
+      const existing = installSteps.findIndex((s) => s.id === ev.id);
+      const entry = { id: ev.id, step: ev.step, status: ev.status, error: ev.error };
+      if (existing >= 0) {
+        installSteps[existing] = entry;
+      } else {
+        installSteps = [...installSteps, entry];
+      }
+    } else if (ev.type === 'done') {
+      installDone = true;
+      installFailed = !ev.success;
+      if (ev.error) installFailure = ev.error;
     }
   }
 
@@ -231,13 +264,21 @@
 
       {#if installSteps.length > 0}
         <div class="install-log" transition:slide={{ duration: 200 }}>
-          {#each installSteps as step}
-            <div class="step-line" class:ok={step.status === 'ok'} class:failed={step.status === 'failed'} class:warning={step.status === 'warning'}>
+          {#each installSteps as step (step.id)}
+            <div
+              class="step-line"
+              class:ok={step.status === 'ok'}
+              class:failed={step.status === 'failed'}
+              class:warning={step.status === 'warning'}
+              class:running={step.status === 'running'}
+            >
               <span class="step-status">
                 {#if step.status === 'ok'}
                   <CheckCircle size="0.875rem" />
                 {:else if step.status === 'failed'}
                   <XCircle size="0.875rem" />
+                {:else if step.status === 'running'}
+                  <span class="spinner" aria-hidden="true"></span>
                 {:else}
                   ·
                 {/if}
@@ -585,6 +626,7 @@
     &.ok { color: var(--badge-green-text); }
     &.failed { color: var(--color-red-500, #ef4444); }
     &.warning { color: var(--badge-amber-text); }
+    &.running { color: var(--theme-text); }
 
     .step-status {
       flex-shrink: 0;
@@ -592,6 +634,15 @@
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+
+    .spinner {
+      width: 0.75rem;
+      height: 0.75rem;
+      border: 2px solid var(--theme-border);
+      border-top-color: var(--theme-primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
     }
 
     .step-text {
@@ -602,6 +653,10 @@
       font-style: italic;
       opacity: 0.85;
     }
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 
   .error-box {
