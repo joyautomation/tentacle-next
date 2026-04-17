@@ -71,6 +71,19 @@
     );
   });
 
+  // Modules in desired_services but NOT running (no heartbeat) — failed or starting.
+  // These need sidebar entries so users can reach the module page to fix config.
+  const pendingModules = $derived(() => {
+    const runningModuleIds = new Set(services.map((s) => s.moduleId));
+    const registryById = new Map(availableModules.map((m) => [m.moduleId, m]));
+    return desiredServices
+      .filter((d) => !runningModuleIds.has(d.moduleId))
+      .map((d) => ({
+        moduleId: d.moduleId,
+        info: registryById.get(d.moduleId),
+      }));
+  });
+
   type ModuleRole = 'client' | 'server' | 'data';
 
   const MODULE_ROLES: Record<string, ModuleRole> = {
@@ -321,6 +334,30 @@
                 {/if}
               </span>
             {/if}
+          </a>
+        </li>
+      {/each}
+    {/if}
+
+    {#if pendingModules().length > 0}
+      <li class="sidebar-section-label">Not Running</li>
+      {#each pendingModules() as pending}
+        {@const Icon = getModuleIcon(pending.moduleId)}
+        <li>
+          <a
+            href="/modules/{pending.moduleId}"
+            class="sidebar-item"
+            class:active={$page.url.pathname.startsWith('/modules/' + pending.moduleId)}
+            onclick={close}
+          >
+            <Icon size="1.25rem" />
+            <span>{getModuleName(pending.moduleId)}</span>
+            <span class="sidebar-item-badges">
+              {#if pending.info?.experimental}
+                <span class="experimental-badge">exp</span>
+              {/if}
+              <span class="disabled-badge">down</span>
+            </span>
           </a>
         </li>
       {/each}
@@ -749,6 +786,10 @@
     letter-spacing: normal;
     color: var(--theme-text-muted);
     opacity: 0.7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .reset-btn {
