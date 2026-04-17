@@ -1,46 +1,45 @@
-<script lang="ts" module>
-  export type HistoryMode = 'local' | 'external';
-  export interface HistoryConfig {
-    mode: HistoryMode;
-    host: string;
-    port: string;
-    user: string;
-    password: string;
-    dbname: string;
-    localInstalled: boolean;
-  }
-</script>
-
 <script lang="ts">
-  import { api, apiPost } from '$lib/api/client';
+  import { api, apiPost, apiPut } from '$lib/api/client';
+  import { invalidateAll } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { slide } from 'svelte/transition';
   import { CheckCircle, XCircle } from '@joyautomation/salt/icons';
 
-  interface Status {
-    params: { host: string; port: number; user: string; password: string; dbname: string };
+  type Mode = 'local' | 'external';
+  type DBParams = { host: string; port: number; user: string; password: string; dbname: string };
+
+  type Status = {
+    params: DBParams;
     pgBinaryInstalled: boolean;
     timescaleInstalled: boolean;
     canInstallLocally: boolean;
     reachable: boolean;
     extensionAvailable: boolean;
     extensionCreated: boolean;
-  }
-
-  interface Props {
-    config: HistoryConfig;
-    onchange: (config: HistoryConfig) => void;
-  }
-
-  let { config, onchange }: Props = $props();
+    error?: string;
+  };
 
   let status = $state<Status | null>(null);
+  let mode = $state<Mode>('local');
+
+  let params = $state<DBParams>({
+    host: 'localhost',
+    port: 5432,
+    user: 'postgres',
+    password: 'postgres',
+    dbname: 'tentacle',
+  });
+
   let installing = $state(false);
   let installSteps = $state<Array<{ step: string; status: string; error?: string }>>([]);
   let installError = $state('');
+
   let testing = $state(false);
   let testResult = $state<{ success: boolean; error?: string; extensionAvailable?: boolean } | null>(null);
 
+  let saving = $state(false);
+
+  // Poll status after changes so the page updates when the module starts.
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
     if (installing) {
@@ -60,19 +59,17 @@
     const result = await api<Status>('/history/db-status');
     if (result.data) {
       status = result.data;
-      // Auto-flip to external mode if we can't install locally.
-      if (!result.data.canInstallLocally && config.mode === 'local') {
-        update('mode', 'external');
+      // Seed form with saved config on first load.
+      if (!testing && !installing && result.data.params) {
+        params = { ...result.data.params };
       }
-      // Mark local as already installed if PG + timescale are present and reachable.
-      if (result.data.pgBinaryInstalled && result.data.timescaleInstalled && result.data.reachable) {
-        update('localInstalled', true);
+      // Pick a sensible default mode: if not reachable and we can install, go local.
+      if (!result.data.reachable && result.data.canInstallLocally && mode === 'local') {
+        // keep local
+      } else if (result.data.reachable) {
+        mode = 'external';
       }
     }
-  }
-
-  function update<K extends keyof HistoryConfig>(field: K, value: HistoryConfig[K]) {
-    onchange({ ...config, [field]: value });
   }
 
   async function installLocally() {
@@ -81,20 +78,12 @@
     installSteps = [];
     const result = await apiPost<{ success: boolean; error?: string; steps?: Array<{step: string; status: string; error?: string}> }>(
       '/history/db-install',
-      {
-        host: config.host,
-        port: parseInt(config.port, 10) || 5432,
-        user: config.user,
-        password: config.password,
-        dbname: config.dbname,
-      },
+      params,
     );
     installing = false;
     if (result.data?.steps) installSteps = result.data.steps;
     if (result.data?.success) {
-      update('localInstalled', true);
-      await loadStatus();
-      saltState.addNotification({ message: 'PostgreSQL + TimescaleDB installed', type: 'success' });
+      await saveConfigAndStart();
     } else {
       installError = result.data?.error ?? result.error?.error ?? 'Installation failed';
     }
@@ -105,13 +94,7 @@
     testResult = null;
     const result = await apiPost<{ success: boolean; error?: string; extensionAvailable?: boolean }>(
       '/history/db-test',
-      {
-        host: config.host,
-        port: parseInt(config.port, 10) || 5432,
-        user: config.user,
-        password: config.password,
-        dbname: config.dbname,
-      },
+      params,
     );
     testing = false;
     if (result.data) {
@@ -120,15 +103,51 @@
       testResult = { success: false, error: result.error.error };
     }
   }
+
+  async function saveConfigAndStart() {
+    saving = true;
+    const configs: [string, string][] = [
+      ['HISTORY_DB_HOST', params.host],
+      ['HISTORY_DB_PORT', String(params.port)],
+      ['HISTORY_DB_USER', params.user],
+      ['HISTORY_DB_PASSWORD', params.password],
+      ['HISTORY_DB_NAME', params.dbname],
+    ];
+    const errors: string[] = [];
+    for (const [envVar, value] of configs) {
+      const result = await apiPut(`/config/history/${envVar}`, { value });
+      if (result.error) errors.push(`${envVar}: ${result.error.error}`);
+    }
+    // Enable the module (idempotent — PUT on the desired-services key).
+    const enable = await apiPut('/orchestrator/desired-services/history', {
+      version: 'latest',
+      running: true,
+    });
+    if (enable.error) errors.push(`enable module: ${enable.error.error}`);
+
+    saving = false;
+    if (errors.length > 0) {
+      saltState.addNotification({ message: errors.join('; '), type: 'error' });
+    } else {
+      saltState.addNotification({ message: 'History configuration saved — module starting', type: 'success' });
+      await invalidateAll();
+      await loadStatus();
+    }
+  }
 </script>
 
-<div class="history-form">
+<div class="wizard">
+  <p class="intro">
+    The history module stores PLC data in PostgreSQL with TimescaleDB.
+    Install locally for a self-contained setup, or point at an existing database.
+  </p>
+
   <div class="mode-switch">
     <button
       type="button"
       class="mode-btn"
-      class:active={config.mode === 'local'}
-      onclick={() => update('mode', 'local')}
+      class:active={mode === 'local'}
+      onclick={() => { mode = 'local'; }}
       disabled={status ? !status.canInstallLocally : false}
     >
       Install Locally
@@ -139,19 +158,19 @@
     <button
       type="button"
       class="mode-btn"
-      class:active={config.mode === 'external'}
-      onclick={() => update('mode', 'external')}
+      class:active={mode === 'external'}
+      onclick={() => { mode = 'external'; }}
     >
       Use Existing Database
     </button>
   </div>
 
-  {#if config.mode === 'local'}
-    <section class="form-section" transition:slide={{ duration: 200 }}>
+  {#if mode === 'local'}
+    <div class="section" transition:slide={{ duration: 200 }}>
       <h3>Install PostgreSQL + TimescaleDB</h3>
       <p class="section-desc">
-        Install PostgreSQL and TimescaleDB on this device using apt, create a database,
-        and configure the history module to use it.
+        This will install PostgreSQL and TimescaleDB on this device using apt,
+        create a database, and configure the history module to use it.
       </p>
 
       {#if status}
@@ -178,36 +197,20 @@
       {/if}
 
       <div class="form-field">
-        <label for="hist-local-dbname">Database name</label>
-        <input
-          id="hist-local-dbname"
-          type="text"
-          value={config.dbname}
-          oninput={(e) => update('dbname', e.currentTarget.value)}
-        />
+        <label for="local-dbname">Database name</label>
+        <input id="local-dbname" type="text" bind:value={params.dbname} />
       </div>
       <div class="form-field">
-        <label for="hist-local-pass">postgres user password</label>
+        <label for="local-pass">postgres user password</label>
         <p class="field-desc">Used for both the OS-level postgres role and the historian connection.</p>
-        <input
-          id="hist-local-pass"
-          type="text"
-          value={config.password}
-          oninput={(e) => update('password', e.currentTarget.value)}
-        />
+        <input id="local-pass" type="text" bind:value={params.password} />
       </div>
 
-      <button
-        class="btn primary"
-        onclick={installLocally}
-        disabled={installing || !status?.canInstallLocally || config.localInstalled}
-      >
-        {#if config.localInstalled}
-          Installed
-        {:else}
+      <div class="actions">
+        <button class="btn primary" onclick={installLocally} disabled={installing || !status?.canInstallLocally}>
           {installing ? 'Installing...' : 'Install & Configure'}
-        {/if}
-      </button>
+        </button>
+      </div>
 
       {#if installSteps.length > 0}
         <div class="install-log" transition:slide={{ duration: 200 }}>
@@ -234,9 +237,9 @@
       {#if installError}
         <div class="error-box" transition:slide={{ duration: 200 }}>{installError}</div>
       {/if}
-    </section>
+    </div>
   {:else}
-    <section class="form-section" transition:slide={{ duration: 200 }}>
+    <div class="section" transition:slide={{ duration: 200 }}>
       <h3>Connect to Existing Database</h3>
       <p class="section-desc">
         Enter PostgreSQL connection details. The database must have the
@@ -245,59 +248,30 @@
 
       <div class="form-row">
         <div class="form-field" style="flex: 2;">
-          <label for="hist-ext-host">Host</label>
-          <input
-            id="hist-ext-host"
-            type="text"
-            value={config.host}
-            oninput={(e) => update('host', e.currentTarget.value)}
-          />
+          <label for="ext-host">Host</label>
+          <input id="ext-host" type="text" bind:value={params.host} />
         </div>
         <div class="form-field" style="flex: 1;">
-          <label for="hist-ext-port">Port</label>
-          <input
-            id="hist-ext-port"
-            type="text"
-            value={config.port}
-            oninput={(e) => update('port', e.currentTarget.value)}
-          />
+          <label for="ext-port">Port</label>
+          <input id="ext-port" type="number" bind:value={params.port} />
         </div>
       </div>
 
       <div class="form-row">
         <div class="form-field">
-          <label for="hist-ext-user">User</label>
-          <input
-            id="hist-ext-user"
-            type="text"
-            value={config.user}
-            oninput={(e) => update('user', e.currentTarget.value)}
-          />
+          <label for="ext-user">User</label>
+          <input id="ext-user" type="text" bind:value={params.user} />
         </div>
         <div class="form-field">
-          <label for="hist-ext-pass">Password</label>
-          <input
-            id="hist-ext-pass"
-            type="password"
-            value={config.password}
-            oninput={(e) => update('password', e.currentTarget.value)}
-          />
+          <label for="ext-pass">Password</label>
+          <input id="ext-pass" type="password" bind:value={params.password} />
         </div>
       </div>
 
       <div class="form-field">
-        <label for="hist-ext-db">Database name</label>
-        <input
-          id="hist-ext-db"
-          type="text"
-          value={config.dbname}
-          oninput={(e) => update('dbname', e.currentTarget.value)}
-        />
+        <label for="ext-db">Database name</label>
+        <input id="ext-db" type="text" bind:value={params.dbname} />
       </div>
-
-      <button class="btn secondary" onclick={testConnection} disabled={testing}>
-        {testing ? 'Testing...' : 'Test Connection'}
-      </button>
 
       {#if testResult}
         <div class="test-result" class:success={testResult.success} class:fail={!testResult.success} transition:slide={{ duration: 200 }}>
@@ -317,20 +291,35 @@
           {/if}
         </div>
       {/if}
-    </section>
+
+      <div class="actions">
+        <button class="btn secondary" onclick={testConnection} disabled={testing}>
+          {testing ? 'Testing...' : 'Test Connection'}
+        </button>
+        <button class="btn primary" onclick={saveConfigAndStart} disabled={saving || !testResult?.success}>
+          {saving ? 'Saving...' : 'Save & Start'}
+        </button>
+      </div>
+    </div>
   {/if}
 </div>
 
 <style lang="scss">
-  .history-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+  .wizard {
+    margin-top: 0.5rem;
+  }
+
+  .intro {
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    margin: 0 0 1rem;
+    line-height: 1.5;
   }
 
   .mode-switch {
     display: flex;
     gap: 0.5rem;
+    margin-bottom: 1.25rem;
     border-bottom: 1px solid var(--theme-border);
   }
 
@@ -369,12 +358,12 @@
     }
   }
 
-  .form-section {
+  .section {
     h3 {
       font-size: 1rem;
       font-weight: 600;
       color: var(--theme-text);
-      margin: 0 0 0.25rem;
+      margin: 0 0 0.375rem;
     }
   }
 
@@ -461,7 +450,8 @@
     }
 
     input[type='text'],
-    input[type='password'] {
+    input[type='password'],
+    input[type='number'] {
       width: 100%;
       padding: 0.5rem 0.75rem;
       font-size: 0.875rem;
@@ -477,6 +467,12 @@
         border-color: var(--theme-primary);
       }
     }
+  }
+
+  .actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
   }
 
   .btn {
@@ -514,7 +510,7 @@
     padding: 0.625rem 0.75rem;
     border-radius: var(--rounded-md);
     font-size: 0.8125rem;
-    margin-top: 0.75rem;
+    margin: 0.75rem 0;
 
     &.success {
       background: var(--badge-green-bg);
