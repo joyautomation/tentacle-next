@@ -94,8 +94,14 @@ func createTagWithCancel(ctx context.Context, attrs string, timeout time.Duratio
 	}
 }
 
+// TagListResult holds the parsed @tags response.
+type TagListResult struct {
+	Tags     []TagEntry
+	Programs []string // program names found (e.g., "MainProgram")
+}
+
 // listTags reads all controller-scoped tags from the PLC using @tags.
-func listTags(ctx context.Context, gateway string, port int, slot int) ([]TagEntry, error) {
+func listTags(ctx context.Context, gateway string, port int, slot int) (*TagListResult, error) {
 	attrs := buildListTagAttrs(gateway, port, slot)
 	tag, err := createTagWithCancel(ctx, attrs, browseConnectTimeout)
 	if err != nil {
@@ -110,11 +116,34 @@ func listTags(ctx context.Context, gateway string, port int, slot int) ([]TagEnt
 	return parseTagList(tag)
 }
 
+// listProgramTags reads tags scoped to a specific program.
+func listProgramTags(ctx context.Context, gateway string, port int, slot int, programName string) ([]TagEntry, error) {
+	tagPath := fmt.Sprintf("Program:%s.@tags", programName)
+	attrs := buildTagAttrs(gateway, port, slot, tagPath, 0)
+	tag, err := createTagWithCancel(ctx, attrs, browseConnectTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tags for Program:%s: %w", programName, err)
+	}
+	defer tag.Close()
+
+	if err := readWithCancel(ctx, tag, browseReadTimeout); err != nil {
+		return nil, fmt.Errorf("failed to read Program:%s.@tags: %w", programName, err)
+	}
+
+	result, err := parseTagList(tag)
+	if err != nil {
+		return nil, err
+	}
+	return result.Tags, nil
+}
+
 // parseTagList parses the raw @tags response buffer into TagEntry structs.
-func parseTagList(tag TagAccessor) ([]TagEntry, error) {
+// Program containers (0x1000 set, "Program:" prefix) are collected separately.
+func parseTagList(tag TagAccessor) (*TagListResult, error) {
 	size := tag.Size()
 	offset := 0
 	var tags []TagEntry
+	var programs []string
 
 	for offset < size {
 		if offset+22 > size {
@@ -149,8 +178,10 @@ func parseTagList(tag TagAccessor) ([]TagEntry, error) {
 		name := string(nameBytes)
 		offset += strLen
 
-		// Skip system tags and program-scoped containers
 		if symbolType&0x1000 != 0 {
+			if strings.HasPrefix(name, "Program:") {
+				programs = append(programs, strings.TrimPrefix(name, "Program:"))
+			}
 			continue
 		}
 
@@ -162,7 +193,7 @@ func parseTagList(tag TagAccessor) ([]TagEntry, error) {
 		})
 	}
 
-	return tags, nil
+	return &TagListResult{Tags: tags, Programs: programs}, nil
 }
 
 // readUdtTemplate reads a UDT template definition using @udt/<id>.
@@ -324,13 +355,37 @@ func browseDevice(ctx context.Context, gateway string, port int, slot int, devic
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
-	tags, err := listTags(ctx, gateway, port, slot)
+	result, err := listTags(ctx, gateway, port, slot)
 	if err != nil {
 		return nil, fmt.Errorf("tag listing failed: %w", err)
 	}
+	tags := result.Tags
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
+	}
+
+	// Enumerate program-scoped tags
+	for _, progName := range result.Programs {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		publishProgress(types.BrowseProgressMessage{
+			BrowseID:  browseID,
+			ModuleID:  moduleID,
+			DeviceID:  deviceID,
+			Phase:     "discovering",
+			Message:   fmt.Sprintf("Listing tags in Program:%s...", progName),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		})
+		progTags, err := listProgramTags(ctx, gateway, port, slot, progName)
+		if err != nil {
+			continue
+		}
+		for i := range progTags {
+			progTags[i].Name = "Program:" + progName + "." + progTags[i].Name
+		}
+		tags = append(tags, progTags...)
 	}
 
 	publishProgress(types.BrowseProgressMessage{
@@ -339,7 +394,7 @@ func browseDevice(ctx context.Context, gateway string, port int, slot int, devic
 		DeviceID:  deviceID,
 		Phase:     "discovering",
 		TotalCount: len(tags),
-		Message:   fmt.Sprintf("Found %d tags", len(tags)),
+		Message:   fmt.Sprintf("Found %d tags (%d programs)", len(tags), len(result.Programs)),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 
@@ -500,7 +555,7 @@ func browseDevice(ctx context.Context, gateway string, port int, slot int, devic
 		}
 	}
 
-	result := &BrowseResult{
+	browseResult := &BrowseResult{
 		Variables:  variables,
 		Udts:       udts,
 		StructTags: structTags,
@@ -517,7 +572,7 @@ func browseDevice(ctx context.Context, gateway string, port int, slot int, devic
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 	})
 
-	return result, nil
+	return browseResult, nil
 }
 
 type candidateVar struct {
