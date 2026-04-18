@@ -328,7 +328,7 @@ func (m *Module) handlePutPlcProgram(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("language must be one of ladder, st, starlark (got %q)", prog.Language))
 		return
 	}
-	if prog.Source == "" {
+	if prog.Source == "" && prog.Language != "st" {
 		writeError(w, http.StatusBadRequest, "source is required")
 		return
 	}

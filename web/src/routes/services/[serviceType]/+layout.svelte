@@ -22,6 +22,7 @@
     if (path.endsWith('/modules')) return 'modules';
     if (path.endsWith('/history')) return 'history';
     if (path.endsWith('/tasks')) return 'tasks';
+    if (path.endsWith('/programs')) return 'programs';
     return 'default';
   });
 </script>
@@ -48,6 +49,9 @@
       </a>
       <a href="/services/{serviceType}/tasks" class="tab" class:active={currentTab() === 'tasks'}>
         Tasks
+      </a>
+      <a href="/services/{serviceType}/programs" class="tab" class:active={currentTab() === 'programs'}>
+        Programs
       </a>
       <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
         Logs
