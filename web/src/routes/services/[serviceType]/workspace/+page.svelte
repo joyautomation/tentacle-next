@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { Pane, Splitpanes } from 'svelte-splitpanes';
 	import { createWorkspaceLayout } from '$lib/plc/workspace-layout.svelte';
-	import { workspaceSelection } from '$lib/plc/workspace-state.svelte';
+	import { workspaceSelection, workspaceTabs } from '$lib/plc/workspace-state.svelte';
 	import Navigator from '$lib/plc/workspace/Navigator.svelte';
 	import Inspector from '$lib/plc/workspace/Inspector.svelte';
-	import ProgramEditor from '$lib/plc/workspace/ProgramEditor.svelte';
+	import EditorTabs from '$lib/plc/workspace/EditorTabs.svelte';
 	import LogViewer from '$lib/components/LogViewer.svelte';
 	import type { WorkspaceLoadData } from './+page';
 
@@ -15,6 +15,19 @@
 	const selection = $derived(workspaceSelection.current);
 
 	const variableNames = $derived(Object.keys(data.variables).sort());
+
+	const programsByName = $derived.by(() => {
+		const map: Record<string, string> = {};
+		for (const p of data.programs) map[p.name] = p.language;
+		return map;
+	});
+
+	$effect(() => {
+		if (selection?.kind !== 'program') return;
+		const lang = programsByName[selection.id];
+		if (!lang) return;
+		workspaceTabs.open({ name: selection.id, language: lang });
+	});
 
 	function toggleLeft() {
 		layout.leftOpen = !layout.leftOpen;
@@ -125,10 +138,8 @@
 						<section class="panel">
 							<header class="panel-header">Editor</header>
 							<div class="panel-body no-pad">
-								{#if selection?.kind === 'program'}
-									{#key selection.id}
-										<ProgramEditor name={selection.id} {variableNames} />
-									{/key}
+								{#if workspaceTabs.list.length > 0}
+									<EditorTabs {variableNames} />
 								{:else if selection?.kind === 'task'}
 									<div class="placeholder-card">
 										<div class="label">Task</div>

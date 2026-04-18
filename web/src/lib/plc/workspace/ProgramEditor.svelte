@@ -16,9 +16,10 @@
 	type Props = {
 		name: string;
 		variableNames: string[];
+		onDirtyChange?: (dirty: boolean) => void;
 	};
 
-	let { name, variableNames }: Props = $props();
+	let { name, variableNames, onDirtyChange }: Props = $props();
 
 	let loading = $state(false);
 	let saving = $state(false);
@@ -32,6 +33,10 @@
 	const dirty = $derived(
 		draftSource !== serverSource || draftStSource !== serverStSource
 	);
+
+	$effect(() => {
+		onDirtyChange?.(dirty);
+	});
 
 	const editLanguage = $derived.by<'python' | 'starlark' | 'st'>(() => {
 		if (language === 'st') return 'st';
