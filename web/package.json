@@ -21,7 +21,8 @@
     "@fontsource/righteous": "^5.0.0",
     "@fontsource/space-grotesk": "^5.0.0",
     "@joyautomation/salt": "^0.1.5",
-    "codemirror": "^6.0.2"
+    "codemirror": "^6.0.2",
+    "svelte-splitpanes": "^8.0.12"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",

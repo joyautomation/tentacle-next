@@ -23,6 +23,7 @@
     if (path.endsWith('/history')) return 'history';
     if (path.endsWith('/tasks')) return 'tasks';
     if (path.endsWith('/programs')) return 'programs';
+    if (path.endsWith('/workspace')) return 'workspace';
     return 'default';
   });
 </script>
@@ -43,6 +44,9 @@
     {#if serviceType === 'plc'}
       <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
         Config
+      </a>
+      <a href="/services/{serviceType}/workspace" class="tab" class:active={currentTab() === 'workspace'}>
+        Workspace
       </a>
       <a href="/services/{serviceType}/info" class="tab" class:active={currentTab() === 'info'}>
         Variables
