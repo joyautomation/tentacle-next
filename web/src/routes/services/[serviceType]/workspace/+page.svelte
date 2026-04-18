@@ -5,6 +5,7 @@
 	import Navigator from '$lib/plc/workspace/Navigator.svelte';
 	import Inspector from '$lib/plc/workspace/Inspector.svelte';
 	import EditorTabs from '$lib/plc/workspace/EditorTabs.svelte';
+	import CreateDialog from '$lib/plc/workspace/CreateDialog.svelte';
 	import LogViewer from '$lib/components/LogViewer.svelte';
 	import type { WorkspaceLoadData } from './+page';
 
@@ -28,6 +29,8 @@
 		if (!lang) return;
 		workspaceTabs.open({ name: selection.id, language: lang });
 	});
+
+	let createKind = $state<'variable' | 'task' | 'program' | null>(null);
 
 	function toggleLeft() {
 		layout.leftOpen = !layout.leftOpen;
@@ -129,6 +132,7 @@
 										variables={data.variables}
 										tasks={data.tasks}
 										programs={data.programs}
+										onCreate={(kind) => (createKind = kind)}
 									/>
 								</div>
 							</section>
@@ -198,6 +202,14 @@
 		</Splitpanes>
 	</div>
 </div>
+
+{#if createKind}
+	<CreateDialog
+		kind={createKind}
+		programs={data.programs}
+		onClose={() => (createKind = null)}
+	/>
+{/if}
 
 <style lang="scss">
 	.workspace {

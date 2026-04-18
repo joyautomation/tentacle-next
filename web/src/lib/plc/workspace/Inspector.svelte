@@ -74,18 +74,6 @@
 		return programs.find((p) => p.name === selection.id) ?? null;
 	});
 
-	const watchRows = $derived.by(() => {
-		if (selection) return [];
-		void version;
-		return Object.keys(variables)
-			.sort()
-			.slice(0, 50)
-			.map((name) => ({
-				name,
-				config: variables[name],
-				live: liveMap.get(name) ?? null
-			}));
-	});
 
 	function formatValue(val: unknown): string {
 		if (val === null || val === undefined) return '—';
@@ -243,23 +231,11 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="section">
-			<div class="label">Watch</div>
-			<div class="hint">{Object.keys(variables).length} variables · showing first {watchRows.length}</div>
-		</div>
-		<div class="watch-list">
-			{#each watchRows as row (row.name)}
-				<button
-					type="button"
-					class="watch-row"
-					onclick={() => workspaceSelection.select('variable', row.name)}
-				>
-					<span class="w-name">{row.name}</span>
-					<span class="w-value" class:good={row.live?.quality?.toLowerCase() === 'good'}>
-						{row.live ? formatValue(row.live.value) : '—'}
-					</span>
-				</button>
-			{/each}
+		<div class="empty">
+			<div class="empty-title">Nothing selected</div>
+			<div class="empty-hint">
+				Pick a variable, task, or program from the Navigator to see details here.
+			</div>
 		</div>
 	{/if}
 </div>
@@ -381,50 +357,22 @@
 		}
 	}
 
-	.watch-list {
+	.empty {
+		padding: 1rem 0.875rem;
 		display: flex;
 		flex-direction: column;
+		gap: 0.375rem;
 	}
 
-	.watch-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem;
-		padding: 0.3125rem 0.75rem;
-		background: transparent;
-		border: none;
-		border-bottom: 1px solid var(--theme-border);
-		cursor: pointer;
-		text-align: left;
+	.empty-title {
+		font-size: 0.8125rem;
+		color: var(--theme-text);
+	}
+
+	.empty-hint {
+		color: var(--theme-text-muted);
 		font-size: 0.75rem;
-
-		&:hover {
-			background: var(--theme-surface);
-		}
-
-		.w-name {
-			flex: 1;
-			font-family: var(--font-mono, monospace);
-			color: var(--theme-text);
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-		}
-
-		.w-value {
-			flex-shrink: 0;
-			font-family: var(--font-mono, monospace);
-			color: var(--theme-text-muted);
-			max-width: 8rem;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-
-			&.good {
-				color: var(--theme-text);
-			}
-		}
+		line-height: 1.45;
 	}
 
 	.hint {

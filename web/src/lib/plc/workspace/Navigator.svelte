@@ -7,9 +7,10 @@
 		variables: Record<string, PlcVariableConfig>;
 		tasks: Record<string, PlcTaskConfig>;
 		programs: ProgramListItem[];
+		onCreate?: (kind: 'variable' | 'task' | 'program') => void;
 	};
 
-	let { variables, tasks, programs }: Props = $props();
+	let { variables, tasks, programs, onCreate }: Props = $props();
 
 	let sections = $state({
 		variables: true,
@@ -78,16 +79,27 @@
 
 	<div class="sections">
 		<section class="section">
-			<button
-				type="button"
-				class="section-header"
-				onclick={() => toggle('variables')}
-				aria-expanded={sections.variables}
-			>
-				<span class="chevron" class:open={sections.variables}>▸</span>
-				<span class="label">Variables</span>
-				<span class="count">{variableEntries.length}</span>
-			</button>
+			<div class="section-header-row">
+				<button
+					type="button"
+					class="section-header"
+					onclick={() => toggle('variables')}
+					aria-expanded={sections.variables}
+				>
+					<span class="chevron" class:open={sections.variables}>▸</span>
+					<span class="label">Variables</span>
+					<span class="count">{variableEntries.length}</span>
+				</button>
+				<button
+					type="button"
+					class="add-btn"
+					onclick={() => onCreate?.('variable')}
+					title="New variable"
+					aria-label="New variable"
+				>
+					+
+				</button>
+			</div>
 			{#if sections.variables}
 				<ul class="items" transition:slide={{ duration: 150 }}>
 					{#each variableEntries as [name, cfg] (name)}
@@ -115,16 +127,27 @@
 		</section>
 
 		<section class="section">
-			<button
-				type="button"
-				class="section-header"
-				onclick={() => toggle('tasks')}
-				aria-expanded={sections.tasks}
-			>
-				<span class="chevron" class:open={sections.tasks}>▸</span>
-				<span class="label">Tasks</span>
-				<span class="count">{taskEntries.length}</span>
-			</button>
+			<div class="section-header-row">
+				<button
+					type="button"
+					class="section-header"
+					onclick={() => toggle('tasks')}
+					aria-expanded={sections.tasks}
+				>
+					<span class="chevron" class:open={sections.tasks}>▸</span>
+					<span class="label">Tasks</span>
+					<span class="count">{taskEntries.length}</span>
+				</button>
+				<button
+					type="button"
+					class="add-btn"
+					onclick={() => onCreate?.('task')}
+					title="New task"
+					aria-label="New task"
+				>
+					+
+				</button>
+			</div>
 			{#if sections.tasks}
 				<ul class="items" transition:slide={{ duration: 150 }}>
 					{#each taskEntries as task (task.name)}
@@ -151,16 +174,27 @@
 		</section>
 
 		<section class="section">
-			<button
-				type="button"
-				class="section-header"
-				onclick={() => toggle('programs')}
-				aria-expanded={sections.programs}
-			>
-				<span class="chevron" class:open={sections.programs}>▸</span>
-				<span class="label">Programs</span>
-				<span class="count">{programEntries.length}</span>
-			</button>
+			<div class="section-header-row">
+				<button
+					type="button"
+					class="section-header"
+					onclick={() => toggle('programs')}
+					aria-expanded={sections.programs}
+				>
+					<span class="chevron" class:open={sections.programs}>▸</span>
+					<span class="label">Programs</span>
+					<span class="count">{programEntries.length}</span>
+				</button>
+				<button
+					type="button"
+					class="add-btn"
+					onclick={() => onCreate?.('program')}
+					title="New program"
+					aria-label="New program"
+				>
+					+
+				</button>
+			</div>
 			{#if sections.programs}
 				<ul class="items" transition:slide={{ duration: 150 }}>
 					{#each programEntries as program (program.name)}
@@ -223,11 +257,17 @@
 		border-bottom: 1px solid var(--theme-border);
 	}
 
+	.section-header-row {
+		display: flex;
+		align-items: stretch;
+	}
+
 	.section-header {
 		display: flex;
 		align-items: center;
 		gap: 0.375rem;
-		width: 100%;
+		flex: 1;
+		min-width: 0;
 		padding: 0.375rem 0.5rem;
 		background: transparent;
 		border: none;
@@ -241,6 +281,34 @@
 
 		&:hover {
 			background: var(--theme-surface);
+		}
+	}
+
+	.add-btn {
+		flex-shrink: 0;
+		width: 1.75rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		background: transparent;
+		border: none;
+		color: var(--theme-text-muted);
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+		opacity: 0.4;
+		transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+
+		&:hover {
+			opacity: 1;
+			color: var(--theme-text);
+			background: var(--theme-surface);
+		}
+
+		&:focus-visible {
+			opacity: 1;
+			outline: 2px solid var(--theme-primary);
+			outline-offset: -2px;
 		}
 	}
 
