@@ -3,8 +3,11 @@
 package plc
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	"go.starlark.net/starlark"
@@ -19,6 +22,13 @@ func (e *Engine) makeBuiltins() starlark.StringDict {
 		"get_bool": starlark.NewBuiltin("get_bool", e.builtinGetBool),
 		"get_str":  starlark.NewBuiltin("get_str", e.builtinGetStr),
 		"set_var":  starlark.NewBuiltin("set_var", e.builtinSetVar),
+
+		// Logging — all output flows to slog, visible on the Logs tab
+		"log":       starlark.NewBuiltin("log", e.makeLogBuiltin(slog.LevelInfo)),
+		"log_debug": starlark.NewBuiltin("log_debug", e.makeLogBuiltin(slog.LevelDebug)),
+		"log_info":  starlark.NewBuiltin("log_info", e.makeLogBuiltin(slog.LevelInfo)),
+		"log_warn":  starlark.NewBuiltin("log_warn", e.makeLogBuiltin(slog.LevelWarn)),
+		"log_error": starlark.NewBuiltin("log_error", e.makeLogBuiltin(slog.LevelError)),
 
 		// Math
 		"abs":   starlark.NewBuiltin("abs", builtinAbs),
@@ -90,6 +100,29 @@ func (e *Engine) builtinSetVar(thread *starlark.Thread, fn *starlark.Builtin, ar
 		return nil, fmt.Errorf("set_var: unknown variable %q", name)
 	}
 	return starlark.None, nil
+}
+
+// ─── Logging Built-ins ──────────────────────────────────────────────────────
+
+// makeLogBuiltin returns a Starlark function that emits to slog at the given level.
+// Args are stringified and joined with spaces (Python print-style).
+func (e *Engine) makeLogBuiltin(level slog.Level) func(*starlark.Thread, *starlark.Builtin, starlark.Tuple, []starlark.Tuple) (starlark.Value, error) {
+	return func(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		if e.log == nil {
+			return starlark.None, nil
+		}
+		parts := make([]string, 0, len(args))
+		for _, a := range args {
+			if s, ok := a.(starlark.String); ok {
+				parts = append(parts, string(s))
+			} else {
+				parts = append(parts, a.String())
+			}
+		}
+		msg := strings.Join(parts, " ")
+		e.log.Log(context.Background(), level, msg, "program", thread.Name)
+		return starlark.None, nil
+	}
 }
 
 // ─── Math Built-ins ─────────────────────────────────────────────────────────
