@@ -7,6 +7,7 @@ export const SERVICE_NAMES: Record<string, string> = {
   gateway: 'Gateway',
   gitops: 'GitOps',
   graphql: 'GraphQL',
+  history: 'History',
   mqtt: 'MQTT',
   nats: 'NATS',
   network: 'Network',

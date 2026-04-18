@@ -21,7 +21,7 @@
 
   let { services, apiConnected, monolith = false }: Props = $props();
 
-  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
+  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'history' | 'database' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
 
   type NodeDatum = {
     id: string;
@@ -58,6 +58,7 @@
       case 'nats':
       case 'bus': return 'var(--color-purple-500, #a855f7)';
       case 'device': return 'var(--color-amber-500, #f59e0b)';
+      case 'database': return 'var(--color-sky-500, #0ea5e9)';
       default: return 'var(--color-teal-500, #14b8a6)';
     }
   }
@@ -75,9 +76,20 @@
       case 'mqtt':
       case 'plc':
       case 'snmp': return 35;
+      case 'database': return 28;
       case 'device': return 25;
       default: return 30;
     }
+  }
+
+  /** Parse a numeric metadata field that may arrive as number or string. */
+  function metaNum(v: unknown): number {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+    return 0;
   }
 
   function formatUptime(startedAt: number): string {
@@ -171,6 +183,26 @@
           } catch { /* ignore malformed devices metadata */ }
         }
 
+        // Add a database node downstream of history — shown whenever history is up.
+        // Active-flow detection below decides whether the edges animate.
+        if (service.serviceType === 'history') {
+          const dbNodeId = `history-db-${service.moduleId}`;
+          if (!nodes.some(n => n.id === dbNodeId)) {
+            const lastFlush = metaNum(service.metadata?.lastFlushTime);
+            const flushedRecently = lastFlush > 0 && Date.now() - lastFlush < 60_000;
+            nodes.push({
+              id: dbNodeId,
+              name: 'History DB',
+              type: 'database',
+              subtitle: flushedRecently ? 'Writing' : (lastFlush > 0 ? 'Idle' : 'No writes yet'),
+              connected: serviceEnabled,
+              enabled: serviceEnabled,
+              depth: 2,
+            });
+            links.push({ source: nodeId, target: dbNodeId });
+          }
+        }
+
         // Add device nodes downstream of SNMP
         if (service.serviceType === 'snmp' && service.metadata?.devices) {
           try {
@@ -216,6 +248,19 @@
       links.push({ source: 'web', target: caddyNode.id });
     }
 
+    // Build a lookup of history services so we can check last-flush activity per link.
+    const historyServiceByNodeId = new Map<string, Service>();
+    for (const s of services) {
+      if (s.serviceType === 'history') {
+        historyServiceByNodeId.set(`history-${s.moduleId}`, s);
+      }
+    }
+    const historyIsFlowing = (svc: Service | undefined) => {
+      if (!svc) return false;
+      const lastFlush = metaNum(svc.metadata?.lastFlushTime);
+      return lastFlush > 0 && Date.now() - lastFlush < 60_000;
+    };
+
     // Mark data-flow links as active and set flow direction
     // EtherNet/IP: data flows from device → EIP → NATS (inbound to NATS)
     // MQTT: data flows from NATS → MQTT (outbound from NATS)
@@ -225,7 +270,22 @@
       const tgtId = typeof l.target === 'string' ? l.target : (l.target as NodeDatum).id;
       const src = nodes.find(n => n.id === srcId);
       const tgt = nodes.find(n => n.id === tgtId);
-      if (src?.connected && tgt?.connected && src?.enabled && tgt?.enabled &&
+      if (!src || !tgt) continue;
+
+      // History edges (bus→history and history→database): animate only when the
+      // module has actually flushed a batch to the DB recently.
+      if (src.type === 'history' || tgt.type === 'history' || src.type === 'database' || tgt.type === 'database') {
+        const historyNodeId = src.type === 'history' ? src.id : (tgt.type === 'history' ? tgt.id : null);
+        const svc = historyNodeId ? historyServiceByNodeId.get(historyNodeId) : undefined;
+        if (src.connected && tgt.connected && src.enabled && tgt.enabled && historyIsFlowing(svc)) {
+          l.active = true;
+          // bus→history→database all flow source→target
+          l.flowDirection = 1;
+        }
+        continue;
+      }
+
+      if (src.connected && tgt.connected && src.enabled && tgt.enabled &&
           (dataFlowTypes.has(src.type) || dataFlowTypes.has(tgt.type))) {
         l.active = true;
         // Determine flow direction based on service types
@@ -465,6 +525,9 @@
         const tgt = nodes.find(n => n.id === tgtId);
         const src = nodes.find(n => n.id === srcId);
         if (tgt?.type === 'mqtt' || src?.type === 'mqtt') return 'var(--color-amber-400, #fbbf24)';
+        if (tgt?.type === 'history' || src?.type === 'history' || tgt?.type === 'database' || src?.type === 'database') {
+          return 'var(--color-orange-500, #f97316)';
+        }
         return 'var(--color-sky-400, #38bdf8)';
       })
       .attr('stroke-width', 2)
@@ -536,6 +599,8 @@
           case 'network': return 'NET';
           case 'nftables': return 'NAT';
           case 'snmp': return 'SNMP';
+          case 'history': return 'HIST';
+          case 'database': return 'DB';
           case 'device': return 'DEV';
           default: return d.name.slice(0, 4).toUpperCase();
         }
@@ -579,7 +644,7 @@
         d.fx = null;
         d.fy = null;
         // Navigate on click (not drag) — skip non-navigable nodes
-        const skipTypes = new Set(['device', 'web', 'nats', 'bus']);
+        const skipTypes = new Set(['device', 'database', 'web', 'nats', 'bus']);
         if (!dragMoved && !skipTypes.has(d.type)) {
           goto(`/services/${d.type}`);
         }
