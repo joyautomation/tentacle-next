@@ -48,3 +48,10 @@ export interface PlcConfig {
   tasks: Record<string, PlcTaskConfig>;
   updatedAt: number;
 }
+
+export interface ProgramListItem {
+  name: string;
+  language: string;
+  updatedAt: number;
+  updatedBy?: string;
+}

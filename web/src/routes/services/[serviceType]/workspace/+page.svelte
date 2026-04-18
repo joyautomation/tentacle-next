@@ -1,8 +1,19 @@
 <script lang="ts">
 	import { Pane, Splitpanes } from 'svelte-splitpanes';
 	import { createWorkspaceLayout } from '$lib/plc/workspace-layout.svelte';
+	import { workspaceSelection } from '$lib/plc/workspace-state.svelte';
+	import Navigator from '$lib/plc/workspace/Navigator.svelte';
+	import type { WorkspaceLoadData } from './+page';
+
+	let { data }: { data: WorkspaceLoadData } = $props();
 
 	const layout = createWorkspaceLayout();
+
+	const selectionLabel = $derived.by(() => {
+		const s = workspaceSelection.current;
+		if (!s) return 'Nothing selected';
+		return `${s.kind}: ${s.id}`;
+	});
 
 	function toggleLeft() {
 		layout.leftOpen = !layout.leftOpen;
@@ -99,8 +110,12 @@
 						<Pane size={layout.leftSize} minSize={10}>
 							<section class="panel">
 								<header class="panel-header">Navigator</header>
-								<div class="panel-body placeholder">
-									Variables · Tasks · Programs list goes here.
+								<div class="panel-body no-pad">
+									<Navigator
+										variables={data.variables}
+										tasks={data.tasks}
+										programs={data.programs}
+									/>
 								</div>
 							</section>
 						</Pane>
@@ -109,7 +124,9 @@
 						<section class="panel">
 							<header class="panel-header">Editor</header>
 							<div class="panel-body placeholder">
-								Editor tabs + active editor (code / ladder / task form) go here.
+								{selectionLabel}
+								<br />
+								<span class="hint">Editor surface coming in next iteration.</span>
 							</div>
 						</section>
 					</Pane>
@@ -118,7 +135,9 @@
 							<section class="panel">
 								<header class="panel-header">Inspector</header>
 								<div class="panel-body placeholder">
-									Live values + config for the selected item go here.
+									{selectionLabel}
+									<br />
+									<span class="hint">Live values and config details coming next.</span>
 								</div>
 							</section>
 						</Pane>
@@ -226,11 +245,20 @@
 		min-height: 0;
 		overflow: auto;
 		padding: 0.75rem;
+
+		&.no-pad {
+			padding: 0;
+		}
 	}
 
 	.placeholder {
 		color: var(--theme-text-muted);
 		font-size: 0.875rem;
+	}
+
+	.hint {
+		color: var(--theme-text-muted);
+		font-size: 0.75rem;
 		font-style: italic;
 	}
 
