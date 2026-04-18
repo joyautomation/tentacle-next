@@ -293,6 +293,7 @@
   .tasks-page {
     padding: 1.5rem;
     max-width: 900px;
+    overflow-x: hidden;
   }
 
   .error-box {
@@ -450,6 +451,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .task-desc {

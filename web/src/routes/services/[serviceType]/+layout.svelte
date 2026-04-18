@@ -226,6 +226,7 @@
     display: flex;
     flex-direction: column;
     min-height: calc(100vh - var(--header-height));
+    overflow-x: hidden;
   }
 
   .service-nav {
@@ -264,10 +265,14 @@
     padding: 0 2rem;
     border-bottom: 1px solid var(--theme-border);
     background: var(--theme-surface);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .tab {
     padding: 0.875rem 1.25rem;
+    white-space: nowrap;
+    flex-shrink: 0;
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--theme-text-muted);
@@ -283,6 +288,19 @@
     &.active {
       color: var(--theme-primary);
       border-bottom-color: var(--theme-primary);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .service-tabs {
+      padding: 0 1rem;
+    }
+    .tab {
+      padding: 0.75rem 0.75rem;
+      font-size: 0.8125rem;
+    }
+    .service-nav {
+      padding: 0.75rem 1rem;
     }
   }
 </style>

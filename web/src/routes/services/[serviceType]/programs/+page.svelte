@@ -9,6 +9,7 @@
   import { slide } from 'svelte/transition';
   import { ChevronRight } from '@joyautomation/salt/icons';
   import { LadderEditor } from '$lib/components/ladder/index.js';
+  import CodeEditor from '$lib/components/CodeEditor.svelte';
   import { goToTsProgram, tsToGoProgram } from '$lib/utils/ladder-convert';
 
   interface PlcProgramKV {
@@ -319,12 +320,13 @@
           {#if expandedProgram === prog.name}
             <div class="prog-editor" transition:slide>
               {#if prog.language === 'starlark'}
-                <textarea
-                  class="code-editor"
-                  bind:value={editSource}
-                  spellcheck="false"
-                  rows="20"
-                ></textarea>
+                <div class="editor-pad">
+                  <CodeEditor
+                    value={editSource}
+                    language="starlark"
+                    onchange={(v) => (editSource = v)}
+                  />
+                </div>
                 <div class="editor-actions">
                   <button class="save-btn" disabled={saving} onclick={() => saveProgram(prog)}>
                     {saving ? 'Saving...' : 'Save'}
@@ -332,13 +334,13 @@
                 </div>
 
               {:else if prog.language === 'st'}
-                <textarea
-                  class="code-editor"
-                  bind:value={editStSource}
-                  spellcheck="false"
-                  rows="20"
-                  placeholder="PROGRAM Main&#10;VAR&#10;  x : INT;&#10;END_VAR&#10;  x := 42;&#10;END_PROGRAM"
-                ></textarea>
+                <div class="editor-pad">
+                  <CodeEditor
+                    value={editStSource}
+                    language="st"
+                    onchange={(v) => (editStSource = v)}
+                  />
+                </div>
                 <div class="editor-actions">
                   <button
                     class="transpile-btn"
@@ -369,7 +371,11 @@
                         {/each}
                       </div>
                     {/if}
-                    <pre class="transpile-code">{transpileResult.starlark}</pre>
+                    <CodeEditor
+                      value={transpileResult.starlark}
+                      language="starlark"
+                      readonly={true}
+                    />
                   </div>
                 {/if}
 
@@ -419,6 +425,7 @@
 <style>
   .programs-page {
     padding: 1.5rem;
+    overflow-x: hidden;
   }
 
   .error-box {
@@ -582,6 +589,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .lang-badge {
@@ -632,27 +640,8 @@
     background: var(--theme-background);
   }
 
-  .code-editor {
-    display: block;
-    width: 100%;
-    min-height: 300px;
-    padding: 1rem;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.8125rem;
-    line-height: 1.5;
-    color: var(--theme-text);
-    background: var(--theme-surface);
-    border: none;
-    border-bottom: 1px solid var(--theme-border);
-    resize: vertical;
-    tab-size: 4;
-    white-space: pre;
-    overflow-x: auto;
-
-    &:focus {
-      outline: none;
-      box-shadow: inset 0 0 0 2px var(--theme-primary);
-    }
+  .editor-pad {
+    padding: 0.75rem;
   }
 
   .editor-actions {
@@ -706,19 +695,6 @@
     border-radius: var(--rounded);
     background: var(--theme-background);
     color: var(--theme-text);
-  }
-
-  .transpile-code {
-    margin: 0;
-    padding: 0.75rem;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.75rem;
-    line-height: 1.5;
-    background: var(--theme-background);
-    border-radius: var(--rounded);
-    color: var(--theme-text);
-    overflow-x: auto;
-    white-space: pre;
   }
 
   .ladder-container {
