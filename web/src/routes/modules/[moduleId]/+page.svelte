@@ -11,6 +11,7 @@
   } from '@joyautomation/salt/icons';
   import GitOpsSetup from '$lib/components/GitOpsSetup.svelte';
   import HistorySetup from '$lib/components/HistorySetup.svelte';
+  import HistoryTrends from '$lib/components/HistoryTrends.svelte';
   import { getModuleName } from '$lib/constants/services';
   import { isMonolith } from '$lib/stores/mode';
   import { get } from 'svelte/store';
@@ -319,6 +320,13 @@
         </div>
       {/if}
     </div>
+
+    {#if data.moduleId === 'history' && isInstalled && isRunning}
+      <div class="section trends-section">
+        <h2>Trends</h2>
+        <HistoryTrends />
+      </div>
+    {/if}
   {:else if !data.error}
     <div class="info-box">
       <p>Module "{data.moduleId}" not found in the orchestrator registry.</p>
@@ -330,6 +338,14 @@
   .module-page {
     padding: 2rem;
     max-width: 800px;
+  }
+
+  .module-page:has(.trends-section) {
+    max-width: 1400px;
+  }
+
+  .trends-section {
+    margin-top: 1.5rem;
   }
 
   .module-header {

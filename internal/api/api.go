@@ -254,6 +254,8 @@ func (m *Module) routes() http.Handler {
 		r.Get("/history", m.handleQueryHistory)
 		r.Get("/history/usage", m.handleGetHistoryUsage)
 		r.Get("/history/enabled", m.handleGetHistoryEnabled)
+		r.Get("/history/metrics", m.handleListHistoryMetrics)
+		r.Get("/history/stream", m.handleStreamHistory)
 
 		// History DB setup (wizard support)
 		r.Get("/history/db-status", m.handleHistoryDBStatus)

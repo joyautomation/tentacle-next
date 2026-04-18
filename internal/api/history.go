@@ -118,6 +118,31 @@ func (m *Module) handleGetHistoryUsage(w http.ResponseWriter, r *http.Request) {
 	w.Write(resp)
 }
 
+// handleListHistoryMetrics returns the set of distinct (group, node, device, metric)
+// keys currently in the history table.
+// GET /api/v1/history/metrics
+func (m *Module) handleListHistoryMetrics(w http.ResponseWriter, r *http.Request) {
+	req := map[string]interface{}{
+		"requestId": newRequestID(),
+		"timestamp": time.Now().UnixMilli(),
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to marshal request: "+err.Error())
+		return
+	}
+
+	resp, err := m.bus.Request(topics.HistoryMetrics, payload, busTimeout)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "history module unavailable: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+}
+
 // handleGetHistoryEnabled checks whether the history module is running.
 // GET /api/v1/history/enabled
 func (m *Module) handleGetHistoryEnabled(w http.ResponseWriter, r *http.Request) {

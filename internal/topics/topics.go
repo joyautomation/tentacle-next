@@ -76,6 +76,7 @@ const (
 	HistoryQuery   = "history.query"
 	HistoryUsage   = "history.usage"
 	HistoryEnabled = "history.enabled"
+	HistoryMetrics = "history.metrics"
 )
 
 // PROFINET IO Device.
