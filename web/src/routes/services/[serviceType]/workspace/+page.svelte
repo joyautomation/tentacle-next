@@ -5,6 +5,7 @@
 	import Navigator from '$lib/plc/workspace/Navigator.svelte';
 	import Inspector from '$lib/plc/workspace/Inspector.svelte';
 	import ProgramEditor from '$lib/plc/workspace/ProgramEditor.svelte';
+	import LogViewer from '$lib/components/LogViewer.svelte';
 	import type { WorkspaceLoadData } from './+page';
 
 	let { data }: { data: WorkspaceLoadData } = $props();
@@ -176,8 +177,10 @@
 			{#if layout.bottomOpen}
 				<Pane size={layout.bottomSize} minSize={8}>
 					<section class="panel">
-						<header class="panel-header">Output</header>
-						<div class="panel-body placeholder">Logs · Transpile output · Problems.</div>
+						<header class="panel-header">Output · Logs</header>
+						<div class="panel-body logs">
+							<LogViewer serviceType={data.serviceType} initialLogs={data.initialLogs} />
+						</div>
 					</section>
 				</Pane>
 			{/if}
@@ -278,11 +281,12 @@
 		&.no-pad {
 			padding: 0;
 		}
-	}
 
-	.placeholder {
-		color: var(--theme-text-muted);
-		font-size: 0.875rem;
+		&.logs {
+			padding: 0.5rem 0.75rem;
+			display: flex;
+			flex-direction: column;
+		}
 	}
 
 	.placeholder-card {
