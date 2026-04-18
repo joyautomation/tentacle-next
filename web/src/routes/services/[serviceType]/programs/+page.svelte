@@ -325,6 +325,7 @@
                     value={editSource}
                     language="starlark"
                     onchange={(v) => (editSource = v)}
+                    variableNames={data.variableNames}
                   />
                 </div>
                 <div class="editor-actions">
@@ -339,6 +340,7 @@
                     value={editStSource}
                     language="st"
                     onchange={(v) => (editStSource = v)}
+                    variableNames={data.variableNames}
                   />
                 </div>
                 <div class="editor-actions">

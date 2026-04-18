@@ -9,6 +9,7 @@
   import { python } from '@codemirror/lang-python';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { structuredText } from '$lib/lang/structured-text';
+  import { createVarCompletion } from '$lib/editor/var-completion';
   import { getEffectiveTheme } from '../../routes/theme.svelte';
 
   interface Props {
@@ -16,14 +17,16 @@
     language?: 'python' | 'starlark' | 'st';
     readonly?: boolean;
     onchange?: (value: string) => void;
+    variableNames?: string[];
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [] }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
   let themeCompartment = new Compartment();
   let readonlyCompartment = new Compartment();
+  let autocompleteCompartment = new Compartment();
   let updating = false;
 
   function getThemeExtension() {
@@ -34,6 +37,13 @@
   function getLanguageExtension() {
     if (language === 'st') return structuredText();
     return python();
+  }
+
+  function getAutocompleteExtension() {
+    if (variableNames.length > 0) {
+      return autocompletion({ override: [createVarCompletion(variableNames)] });
+    }
+    return autocompletion();
   }
 
   onMount(() => {
@@ -51,7 +61,6 @@
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         bracketMatching(),
         closeBrackets(),
-        autocompletion(),
         rectangularSelection(),
         crosshairCursor(),
         highlightActiveLine(),
@@ -68,6 +77,7 @@
         getLanguageExtension(),
         themeCompartment.of(getThemeExtension()),
         readonlyCompartment.of(EditorState.readOnly.of(readonly)),
+        autocompleteCompartment.of(getAutocompleteExtension()),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !updating) {
             onchange?.(update.state.doc.toString());
@@ -135,6 +145,14 @@
     if (!view) return;
     view.dispatch({
       effects: readonlyCompartment.reconfigure(EditorState.readOnly.of(readonly)),
+    });
+  });
+
+  $effect(() => {
+    if (!view) return;
+    void variableNames;
+    view.dispatch({
+      effects: autocompleteCompartment.reconfigure(getAutocompleteExtension()),
     });
   });
 

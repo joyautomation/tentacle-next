@@ -1,6 +1,7 @@
 import type { PageLoad } from './$types';
 import { api } from '$lib/api/client';
 import type { Variable, GatewayConfig, BrowseCache, GatewayBrowseState } from '$lib/types/gateway';
+import type { PlcConfig } from '$lib/types/plc';
 
 export const load: PageLoad = async ({ params }) => {
   const { serviceType } = params;
@@ -11,14 +12,13 @@ export const load: PageLoad = async ({ params }) => {
       const result = await api<GatewayConfig>('/gateways/gateway');
 
       if (result.error) {
-        return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], error: result.error.error };
+        return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], plcConfig: null, error: result.error.error };
       }
 
       const config = result.data ?? null;
 
       // Fetch browse caches and browse states in parallel
       const [browseCaches, browseStates] = await Promise.all([
-        // Browse cache for each device
         (async () => {
           const caches: BrowseCache[] = [];
           if (config?.devices) {
@@ -36,7 +36,6 @@ export const load: PageLoad = async ({ params }) => {
           }
           return caches;
         })(),
-        // Active browse states
         (async () => {
           try {
             const statesResult = await api<GatewayBrowseState[]>('/gateways/browse-states');
@@ -53,6 +52,7 @@ export const load: PageLoad = async ({ params }) => {
         gatewayConfig: config,
         browseCaches,
         browseStates,
+        plcConfig: null,
         error: null,
       };
     } catch (e) {
@@ -62,46 +62,61 @@ export const load: PageLoad = async ({ params }) => {
         gatewayConfig: null,
         browseCaches: [] as BrowseCache[],
         browseStates: [] as GatewayBrowseState[],
+        plcConfig: null,
         error: e instanceof Error ? e.message : 'Failed to fetch gateway config',
       };
     }
   }
 
-  // Only PLC uses this page for variables
-  if (serviceType !== 'plc') {
-    return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], error: null };
-  }
+  // PLC: load live variables + gateway config + browse caches for variable import
+  if (serviceType === 'plc') {
+    try {
+      const [variablesResult, plcConfigResult, gatewayResult, browseStatesResult] = await Promise.all([
+        api<Variable[]>('/variables'),
+        api<PlcConfig>('/plcs/plc/config'),
+        api<GatewayConfig>('/gateways/gateway'),
+        api<GatewayBrowseState[]>('/gateways/browse-states'),
+      ]);
 
-  try {
-    const result = await api<Variable[]>('/variables');
+      const gatewayConfig = gatewayResult.data ?? null;
 
-    if (result.error) {
+      // Fetch browse caches for each gateway device
+      const browseCaches: BrowseCache[] = [];
+      if (gatewayConfig?.devices) {
+        const cacheResults = await Promise.allSettled(
+          gatewayConfig.devices.map(async (device) => {
+            const cacheResult = await api<BrowseCache>(`/gateways/gateway/browse-cache/${device.deviceId}`);
+            return cacheResult.data ?? null;
+          })
+        );
+        for (const r of cacheResults) {
+          if (r.status === 'fulfilled' && r.value) {
+            browseCaches.push(r.value);
+          }
+        }
+      }
+
+      return {
+        variables: variablesResult.data ?? [],
+        serviceType,
+        gatewayConfig,
+        browseCaches,
+        browseStates: browseStatesResult.data ?? [],
+        plcConfig: plcConfigResult.data ?? null,
+        error: variablesResult.error?.error ?? null,
+      };
+    } catch (e) {
       return {
         variables: [],
         serviceType,
         gatewayConfig: null,
         browseCaches: [] as BrowseCache[],
         browseStates: [] as GatewayBrowseState[],
-        error: result.error.error,
+        plcConfig: null,
+        error: e instanceof Error ? e.message : 'Failed to fetch PLC data',
       };
     }
-
-    return {
-      variables: result.data ?? [],
-      serviceType,
-      gatewayConfig: null,
-      browseCaches: [] as BrowseCache[],
-      browseStates: [] as GatewayBrowseState[],
-      error: null,
-    };
-  } catch (e) {
-    return {
-      variables: [],
-      serviceType,
-      gatewayConfig: null,
-      browseCaches: [] as BrowseCache[],
-      browseStates: [] as GatewayBrowseState[],
-      error: e instanceof Error ? e.message : 'Failed to fetch variables',
-    };
   }
+
+  return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], plcConfig: null, error: null };
 };

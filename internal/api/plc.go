@@ -348,3 +348,109 @@ func (m *Module) handleDeletePlcProgram(w http.ResponseWriter, r *http.Request) 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// ─── PLC Browse Import ─────────────────────────────────────────────────────
+
+type plcImportItem struct {
+	VariableID     string      `json:"variableId"`
+	DeviceID       string      `json:"deviceId"`
+	Tag            string      `json:"tag"`
+	Datatype       string      `json:"datatype"`
+	Protocol       string      `json:"protocol"`
+	CipType        string      `json:"cipType,omitempty"`
+	Direction      string      `json:"direction"`
+	Default        interface{} `json:"default"`
+	FunctionCode   *int        `json:"functionCode,omitempty"`
+	ModbusDatatype string      `json:"modbusDatatype,omitempty"`
+	ByteOrder      string      `json:"byteOrder,omitempty"`
+	Address        *int        `json:"address,omitempty"`
+}
+
+type plcImportRequest struct {
+	GatewayID string           `json:"gatewayId"`
+	Imports   []plcImportItem  `json:"imports"`
+}
+
+func (m *Module) handleBatchImportPlcVariables(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+
+	var req plcImportRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
+		return
+	}
+	if len(req.Imports) == 0 {
+		writeError(w, http.StatusBadRequest, "imports is required and must not be empty")
+		return
+	}
+	if req.GatewayID == "" {
+		req.GatewayID = "gateway"
+	}
+
+	gwCfg, err := m.getGatewayConfig(req.GatewayID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("read gateway config: %v", err))
+		return
+	}
+
+	cfg, err := m.getPlcConfig(plcID)
+	if err != nil {
+		cfg = &itypes.PlcConfigKV{PlcID: plcID}
+	}
+	ensurePlcMaps(cfg)
+
+	for _, imp := range req.Imports {
+		if imp.VariableID == "" || imp.DeviceID == "" || imp.Tag == "" || imp.Protocol == "" {
+			writeError(w, http.StatusBadRequest, "each import requires variableId, deviceId, tag, and protocol")
+			return
+		}
+		if imp.Datatype == "" {
+			imp.Datatype = "number"
+		}
+		if imp.Direction == "" {
+			imp.Direction = "input"
+		}
+
+		if _, exists := cfg.Devices[imp.DeviceID]; !exists {
+			if gwDev, ok := gwCfg.Devices[imp.DeviceID]; ok {
+				cfg.Devices[imp.DeviceID] = itypes.PlcDeviceConfigKV{
+					Protocol:    gwDev.Protocol,
+					Host:        gwDev.Host,
+					Port:        gwDev.Port,
+					Slot:        gwDev.Slot,
+					EndpointURL: gwDev.EndpointURL,
+					Version:     gwDev.Version,
+					Community:   gwDev.Community,
+					UnitID:      gwDev.UnitID,
+					ScanRate:    gwDev.ScanRate,
+				}
+			} else {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("device %q not found in gateway config", imp.DeviceID))
+				return
+			}
+		}
+
+		cfg.Variables[imp.VariableID] = itypes.PlcVariableConfigKV{
+			ID:       imp.VariableID,
+			Datatype: imp.Datatype,
+			Default:  imp.Default,
+			Direction: imp.Direction,
+			Source: &itypes.PlcVariableSourceKV{
+				Protocol:       imp.Protocol,
+				DeviceID:       imp.DeviceID,
+				Tag:            imp.Tag,
+				CipType:        imp.CipType,
+				FunctionCode:   imp.FunctionCode,
+				ModbusDatatype: imp.ModbusDatatype,
+				ByteOrder:      imp.ByteOrder,
+				Address:        imp.Address,
+			},
+		}
+	}
+
+	if err := m.putPlcConfig(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("save plc config: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
