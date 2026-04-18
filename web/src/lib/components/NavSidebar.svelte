@@ -51,9 +51,10 @@
     desiredServices: DesiredService[];
     open: boolean;
     appVersion?: string;
+    mode?: string;
   }
 
-  let { services, availableModules = [], desiredServices = [], open = $bindable(false), appVersion = '' }: Props = $props();
+  let { services, availableModules = [], desiredServices = [], open = $bindable(false), appVersion = '', mode = 'unknown' }: Props = $props();
 
   const uniqueServices = $derived(
     [...new Map(services.map((s) => [s.serviceType, s])).values()]
@@ -442,6 +443,20 @@
 
   <div class="sidebar-footer">
     <span class="sidebar-section-label">System {#if appVersion}<span class="version-label">{appVersion}</span>{/if}</span>
+    <div class="sidebar-item runtime-item" title="Deployment mode: {mode}">
+      <ServerStack size="1.25rem" />
+      <span>Runtime</span>
+      <span class="sidebar-item-badges">
+        <span
+          class="mode-badge"
+          class:mode-dev={mode === 'dev'}
+          class:mode-systemd={mode === 'systemd'}
+          class:mode-docker={mode === 'docker'}
+          class:mode-kubernetes={mode === 'kubernetes'}
+          class:mode-unknown={mode === 'unknown'}
+        >{mode}</span>
+      </span>
+    </div>
     <a href="/system" class="sidebar-item footer-btn" onclick={close}>
       <ComputerDesktop size="1.25rem" />
       <span>Updates</span>
@@ -754,6 +769,55 @@
     color: var(--theme-text-muted);
     opacity: 0.5;
     transition: opacity 0.15s, color 0.15s;
+  }
+
+  .runtime-item {
+    cursor: default;
+
+    &:hover {
+      background: none;
+      color: var(--theme-text-muted);
+    }
+  }
+
+  .mode-badge {
+    font-size: 0.625rem;
+    font-weight: 600;
+    padding: 0.125rem 0.4375rem;
+    border-radius: var(--rounded-full);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid transparent;
+
+    &.mode-dev {
+      background: var(--badge-amber-bg);
+      color: var(--badge-amber-text);
+      border-color: var(--badge-amber-border);
+    }
+
+    &.mode-systemd {
+      background: var(--badge-sky-bg);
+      color: var(--badge-sky-text);
+      border-color: var(--badge-sky-border);
+    }
+
+    &.mode-docker {
+      background: var(--badge-blue-bg);
+      color: var(--badge-blue-text);
+      border-color: var(--badge-blue-border);
+    }
+
+    &.mode-kubernetes {
+      background: var(--badge-purple-bg);
+      color: var(--badge-purple-text);
+      border-color: var(--badge-purple-border);
+    }
+
+    &.mode-unknown {
+      background: var(--badge-muted-bg);
+      color: var(--badge-muted-text);
+      border-color: var(--badge-muted-border);
+    }
   }
 
   .sidebar-item:hover .available-badge {
