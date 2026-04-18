@@ -1,0 +1,435 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import type { Variable } from '$lib/types/gateway';
+	import type { PlcVariableConfig, PlcTaskConfig, ProgramListItem } from '$lib/types/plc';
+	import { subscribe } from '$lib/api/subscribe';
+	import { workspaceSelection } from '../workspace-state.svelte';
+
+	type Props = {
+		variables: Record<string, PlcVariableConfig>;
+		tasks: Record<string, PlcTaskConfig>;
+		programs: ProgramListItem[];
+	};
+
+	let { variables, tasks, programs }: Props = $props();
+
+	let liveMap = $state<Map<string, Variable>>(new Map());
+	let version = $state(0);
+	let now = $state(Date.now());
+	let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function scheduleFlush() {
+		if (!flushTimer) {
+			flushTimer = setTimeout(() => {
+				flushTimer = null;
+				version++;
+			}, 300);
+		}
+	}
+
+	onMount(() => {
+		const tick = setInterval(() => {
+			now = Date.now();
+		}, 1000);
+
+		const unsub = subscribe<Variable[]>('/variables/stream/batch', (batch) => {
+			if (!batch) return;
+			for (const v of batch) {
+				const existing = liveMap.get(v.variableId);
+				liveMap.set(v.variableId, {
+					...(existing ?? ({} as Variable)),
+					...v,
+					lastUpdated: v.timestamp ?? v.lastUpdated ?? existing?.lastUpdated ?? Date.now()
+				});
+			}
+			scheduleFlush();
+		});
+
+		return () => {
+			clearInterval(tick);
+			if (flushTimer) clearTimeout(flushTimer);
+			unsub();
+		};
+	});
+
+	const selection = $derived(workspaceSelection.current);
+
+	const selectedVariable = $derived.by(() => {
+		if (selection?.kind !== 'variable') return null;
+		void version;
+		return {
+			name: selection.id,
+			config: variables[selection.id],
+			live: liveMap.get(selection.id) ?? null
+		};
+	});
+
+	const selectedTask = $derived.by(() => {
+		if (selection?.kind !== 'task') return null;
+		return tasks[selection.id] ?? null;
+	});
+
+	const selectedProgram = $derived.by(() => {
+		if (selection?.kind !== 'program') return null;
+		return programs.find((p) => p.name === selection.id) ?? null;
+	});
+
+	const watchRows = $derived.by(() => {
+		if (selection) return [];
+		void version;
+		return Object.keys(variables)
+			.sort()
+			.slice(0, 50)
+			.map((name) => ({
+				name,
+				config: variables[name],
+				live: liveMap.get(name) ?? null
+			}));
+	});
+
+	function formatValue(val: unknown): string {
+		if (val === null || val === undefined) return '—';
+		if (typeof val === 'number') {
+			return Number.isInteger(val) ? String(val) : val.toFixed(3);
+		}
+		if (typeof val === 'boolean') return val ? 'true' : 'false';
+		if (typeof val === 'string') return val;
+		try {
+			return JSON.stringify(val);
+		} catch {
+			return String(val);
+		}
+	}
+
+	function formatAge(ts: unknown): string {
+		void now;
+		if (ts == null) return '';
+		const tsMs =
+			typeof ts === 'number'
+				? ts < 1e12
+					? ts * 1000
+					: ts
+				: typeof ts === 'string'
+					? new Date(ts).getTime()
+					: NaN;
+		if (!Number.isFinite(tsMs)) return '';
+		const diff = now - tsMs;
+		if (diff < 1000) return 'now';
+		if (diff < 60_000) return `${Math.floor(diff / 1000)}s`;
+		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+		return `${Math.floor(diff / 86_400_000)}d`;
+	}
+
+	function formatTimestamp(ts: number): string {
+		if (!ts) return '—';
+		return new Date(ts * 1000).toLocaleString();
+	}
+
+	function qualityClass(q: string | undefined): string {
+		if (!q) return 'unknown';
+		return q.toLowerCase();
+	}
+</script>
+
+<div class="inspector">
+	{#if selectedVariable}
+		{@const v = selectedVariable}
+		<div class="section">
+			<div class="label">Variable</div>
+			<div class="title">{v.name}</div>
+		</div>
+		<div class="value-block">
+			<div class="value-big" class:good={v.live?.quality?.toLowerCase() === 'good'}>
+				{v.live ? formatValue(v.live.value) : '—'}
+			</div>
+			<div class="value-meta">
+				<span class={`quality ${qualityClass(v.live?.quality)}`}>
+					{v.live?.quality ?? 'no data'}
+				</span>
+				{#if v.live?.lastUpdated}
+					<span class="age">{formatAge(v.live.lastUpdated)} ago</span>
+				{/if}
+			</div>
+		</div>
+		{#if v.config}
+			<div class="section">
+				<div class="field">
+					<span class="k">Datatype</span>
+					<span class="val">{v.config.datatype}</span>
+				</div>
+				<div class="field">
+					<span class="k">Direction</span>
+					<span class="val">{v.config.direction}</span>
+				</div>
+				{#if v.config.description}
+					<div class="field">
+						<span class="k">Description</span>
+						<span class="val">{v.config.description}</span>
+					</div>
+				{/if}
+				{#if v.config.default !== undefined && v.config.default !== null}
+					<div class="field">
+						<span class="k">Default</span>
+						<span class="val">{formatValue(v.config.default)}</span>
+					</div>
+				{/if}
+				{#if v.config.source}
+					<div class="field">
+						<span class="k">Source</span>
+						<span class="val">{v.config.source.protocol} · {v.config.source.deviceId}</span>
+					</div>
+					<div class="field">
+						<span class="k">Tag</span>
+						<span class="val">{v.config.source.tag}</span>
+					</div>
+				{/if}
+				{#if v.config.deadband}
+					<div class="field">
+						<span class="k">Deadband</span>
+						<span class="val">{v.config.deadband.value}</span>
+					</div>
+				{/if}
+			</div>
+		{:else}
+			<div class="section hint">No config found for this variable.</div>
+		{/if}
+	{:else if selectedTask}
+		<div class="section">
+			<div class="label">Task</div>
+			<div class="title">{selectedTask.name}</div>
+		</div>
+		<div class="section">
+			{#if selectedTask.description}
+				<div class="field">
+					<span class="k">Description</span>
+					<span class="val">{selectedTask.description}</span>
+				</div>
+			{/if}
+			<div class="field">
+				<span class="k">Scan rate</span>
+				<span class="val">{selectedTask.scanRateMs} ms</span>
+			</div>
+			<div class="field">
+				<span class="k">Program</span>
+				<span class="val">{selectedTask.programRef || '—'}</span>
+			</div>
+			<div class="field">
+				<span class="k">Enabled</span>
+				<span class="val" class:muted={!selectedTask.enabled}>
+					{selectedTask.enabled ? 'yes' : 'no'}
+				</span>
+			</div>
+		</div>
+	{:else if selectedProgram}
+		<div class="section">
+			<div class="label">Program</div>
+			<div class="title">{selectedProgram.name}</div>
+		</div>
+		<div class="section">
+			<div class="field">
+				<span class="k">Language</span>
+				<span class="val">{selectedProgram.language}</span>
+			</div>
+			<div class="field">
+				<span class="k">Updated</span>
+				<span class="val">{formatTimestamp(selectedProgram.updatedAt)}</span>
+			</div>
+			{#if selectedProgram.updatedBy}
+				<div class="field">
+					<span class="k">By</span>
+					<span class="val">{selectedProgram.updatedBy}</span>
+				</div>
+			{/if}
+		</div>
+	{:else}
+		<div class="section">
+			<div class="label">Watch</div>
+			<div class="hint">{Object.keys(variables).length} variables · showing first {watchRows.length}</div>
+		</div>
+		<div class="watch-list">
+			{#each watchRows as row (row.name)}
+				<button
+					type="button"
+					class="watch-row"
+					onclick={() => workspaceSelection.select('variable', row.name)}
+				>
+					<span class="w-name">{row.name}</span>
+					<span class="w-value" class:good={row.live?.quality?.toLowerCase() === 'good'}>
+						{row.live ? formatValue(row.live.value) : '—'}
+					</span>
+				</button>
+			{/each}
+		</div>
+	{/if}
+</div>
+
+<style lang="scss">
+	.inspector {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		min-height: 0;
+		overflow-y: auto;
+	}
+
+	.section {
+		padding: 0.625rem 0.75rem;
+		border-bottom: 1px solid var(--theme-border);
+
+		&.hint {
+			color: var(--theme-text-muted);
+			font-size: 0.75rem;
+			font-style: italic;
+		}
+	}
+
+	.label {
+		font-size: 0.6875rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--theme-text-muted);
+		margin-bottom: 0.25rem;
+	}
+
+	.title {
+		font-family: var(--font-mono, monospace);
+		font-size: 0.9375rem;
+		font-weight: 600;
+		color: var(--theme-text);
+		word-break: break-all;
+	}
+
+	.value-block {
+		padding: 0.75rem;
+		border-bottom: 1px solid var(--theme-border);
+		background: var(--theme-surface);
+	}
+
+	.value-big {
+		font-family: var(--font-mono, monospace);
+		font-size: 1.5rem;
+		font-weight: 600;
+		color: var(--theme-text-muted);
+		word-break: break-all;
+
+		&.good {
+			color: var(--theme-text);
+		}
+	}
+
+	.value-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.375rem;
+		font-size: 0.75rem;
+	}
+
+	.quality {
+		padding: 0.0625rem 0.375rem;
+		border-radius: 0.1875rem;
+		text-transform: uppercase;
+		font-size: 0.625rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+
+		&.good {
+			color: var(--theme-success, #2a7);
+			background: color-mix(in srgb, var(--theme-success, #2a7) 14%, transparent);
+		}
+
+		&.bad {
+			color: var(--theme-danger, #c33);
+			background: color-mix(in srgb, var(--theme-danger, #c33) 14%, transparent);
+		}
+
+		&.unknown {
+			color: var(--theme-text-muted);
+			background: var(--theme-surface);
+		}
+	}
+
+	.age {
+		color: var(--theme-text-muted);
+	}
+
+	.field {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		padding: 0.1875rem 0;
+		font-size: 0.8125rem;
+
+		.k {
+			flex-shrink: 0;
+			min-width: 5rem;
+			color: var(--theme-text-muted);
+			font-size: 0.75rem;
+		}
+
+		.val {
+			color: var(--theme-text);
+			word-break: break-word;
+			font-family: var(--font-mono, monospace);
+			font-size: 0.8125rem;
+
+			&.muted {
+				color: var(--theme-text-muted);
+			}
+		}
+	}
+
+	.watch-list {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.watch-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.3125rem 0.75rem;
+		background: transparent;
+		border: none;
+		border-bottom: 1px solid var(--theme-border);
+		cursor: pointer;
+		text-align: left;
+		font-size: 0.75rem;
+
+		&:hover {
+			background: var(--theme-surface);
+		}
+
+		.w-name {
+			flex: 1;
+			font-family: var(--font-mono, monospace);
+			color: var(--theme-text);
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.w-value {
+			flex-shrink: 0;
+			font-family: var(--font-mono, monospace);
+			color: var(--theme-text-muted);
+			max-width: 8rem;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+
+			&.good {
+				color: var(--theme-text);
+			}
+		}
+	}
+
+	.hint {
+		color: var(--theme-text-muted);
+		font-size: 0.75rem;
+		font-style: italic;
+	}
+</style>

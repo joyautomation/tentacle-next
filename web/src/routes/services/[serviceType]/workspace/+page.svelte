@@ -3,6 +3,7 @@
 	import { createWorkspaceLayout } from '$lib/plc/workspace-layout.svelte';
 	import { workspaceSelection } from '$lib/plc/workspace-state.svelte';
 	import Navigator from '$lib/plc/workspace/Navigator.svelte';
+	import Inspector from '$lib/plc/workspace/Inspector.svelte';
 	import ProgramEditor from '$lib/plc/workspace/ProgramEditor.svelte';
 	import type { WorkspaceLoadData } from './+page';
 
@@ -160,15 +161,12 @@
 						<Pane size={layout.rightSize} minSize={10}>
 							<section class="panel">
 								<header class="panel-header">Inspector</header>
-								<div class="panel-body placeholder">
-									{#if selection}
-										<div class="label">{selection.kind}</div>
-										<div class="title">{selection.id}</div>
-									{:else}
-										Nothing selected
-									{/if}
-									<br />
-									<span class="hint">Live values and config details coming next.</span>
+								<div class="panel-body no-pad">
+									<Inspector
+										variables={data.variables}
+										tasks={data.tasks}
+										programs={data.programs}
+									/>
 								</div>
 							</section>
 						</Pane>
