@@ -18,9 +18,10 @@
     readonly?: boolean;
     onchange?: (value: string) => void;
     variableNames?: string[];
+    enableVariableDrop?: boolean;
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [] }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
@@ -44,6 +45,51 @@
       return autocompletion({ override: [createVarCompletion(variableNames)] });
     }
     return autocompletion();
+  }
+
+  const VARIABLE_MIME = 'application/x-plc-variable';
+
+  function formatVariableInsert(name: string, datatype: string | undefined): string {
+    if (language === 'st') return name;
+    const numericTypes = new Set(['int', 'int16', 'int32', 'uint16', 'uint32', 'float', 'float32', 'float64', 'double', 'number']);
+    if (datatype && numericTypes.has(datatype.toLowerCase())) {
+      return `get_num("${name}")`;
+    }
+    if (datatype?.toLowerCase() === 'bool' || datatype?.toLowerCase() === 'boolean') {
+      return `get_bool("${name}")`;
+    }
+    return `get_var("${name}")`;
+  }
+
+  function getDropExtension() {
+    return EditorView.domEventHandlers({
+      dragover(event) {
+        if (event.dataTransfer?.types.includes(VARIABLE_MIME)) {
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        }
+        return false;
+      },
+      drop(event, view) {
+        const raw = event.dataTransfer?.getData(VARIABLE_MIME);
+        if (!raw) return false;
+        event.preventDefault();
+        try {
+          const payload = JSON.parse(raw) as { name: string; datatype?: string };
+          if (!payload.name) return false;
+          const insert = formatVariableInsert(payload.name, payload.datatype);
+          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head;
+          view.dispatch({
+            changes: { from: pos, to: pos, insert },
+            selection: { anchor: pos + insert.length }
+          });
+          view.focus();
+        } catch {
+          /* ignore malformed payload */
+        }
+        return true;
+      }
+    });
   }
 
   onMount(() => {
@@ -78,6 +124,7 @@
         themeCompartment.of(getThemeExtension()),
         readonlyCompartment.of(EditorState.readOnly.of(readonly)),
         autocompleteCompartment.of(getAutocompleteExtension()),
+        ...(enableVariableDrop ? [getDropExtension()] : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !updating) {
             onchange?.(update.state.doc.toString());

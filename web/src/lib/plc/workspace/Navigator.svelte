@@ -53,6 +53,16 @@
 		if (dir === 'sink') return '←';
 		return '·';
 	}
+
+	const VARIABLE_MIME = 'application/x-plc-variable';
+
+	function onVariableDragStart(e: DragEvent, name: string, datatype: string) {
+		if (!e.dataTransfer) return;
+		const payload = JSON.stringify({ name, datatype });
+		e.dataTransfer.setData(VARIABLE_MIME, payload);
+		e.dataTransfer.setData('text/plain', name);
+		e.dataTransfer.effectAllowed = 'copy';
+	}
 </script>
 
 <div class="navigator">
@@ -84,11 +94,14 @@
 						<li>
 							<button
 								type="button"
-								class="item"
+								class="item draggable"
 								class:selected={workspaceSelection.isSelected('variable', name)}
 								onclick={() => workspaceSelection.select('variable', name)}
-								title="{cfg.datatype} · {cfg.direction}"
+								draggable="true"
+								ondragstart={(e) => onVariableDragStart(e, name, cfg.datatype)}
+								title="{cfg.datatype} · {cfg.direction} · drag into editor to insert"
 							>
+								<span class="grip" aria-hidden="true">⋮⋮</span>
 								<span class="badge type">{cfg.datatype.slice(0, 4)}</span>
 								<span class="name">{name}</span>
 								<span class="meta">{directionLabel(cfg.direction)}</span>
@@ -266,7 +279,7 @@
 		align-items: center;
 		gap: 0.375rem;
 		width: 100%;
-		padding: 0.25rem 0.5rem 0.25rem 1rem;
+		padding: 0.25rem 0.5rem 0.25rem 0.625rem;
 		background: transparent;
 		border: none;
 		cursor: pointer;
@@ -276,12 +289,34 @@
 
 		&:hover {
 			background: var(--theme-surface);
+
+			.grip {
+				opacity: 0.5;
+			}
 		}
 
 		&.selected {
 			background: color-mix(in srgb, var(--theme-primary) 18%, transparent);
 			color: var(--theme-text);
 		}
+
+		&.draggable {
+			cursor: grab;
+
+			&:active {
+				cursor: grabbing;
+			}
+		}
+	}
+
+	.grip {
+		width: 0.75rem;
+		flex-shrink: 0;
+		color: var(--theme-text-muted);
+		font-size: 0.625rem;
+		letter-spacing: -0.1em;
+		opacity: 0;
+		transition: opacity 0.12s ease;
 	}
 
 	.name {

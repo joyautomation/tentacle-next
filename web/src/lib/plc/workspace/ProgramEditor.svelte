@@ -146,6 +146,7 @@
 					language={editLanguage}
 					onchange={onEditorChange}
 					{variableNames}
+					enableVariableDrop
 				/>
 			</div>
 		{/if}
