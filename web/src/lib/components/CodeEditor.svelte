@@ -8,6 +8,7 @@
   import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
   import { python } from '@codemirror/lang-python';
   import { oneDark } from '@codemirror/theme-one-dark';
+  import { structuredText } from '$lib/lang/structured-text';
   import { getEffectiveTheme } from '../../routes/theme.svelte';
 
   interface Props {
@@ -31,6 +32,7 @@
   }
 
   function getLanguageExtension() {
+    if (language === 'st') return structuredText();
     return python();
   }
 
