@@ -3,17 +3,16 @@
 	import { createWorkspaceLayout } from '$lib/plc/workspace-layout.svelte';
 	import { workspaceSelection } from '$lib/plc/workspace-state.svelte';
 	import Navigator from '$lib/plc/workspace/Navigator.svelte';
+	import ProgramEditor from '$lib/plc/workspace/ProgramEditor.svelte';
 	import type { WorkspaceLoadData } from './+page';
 
 	let { data }: { data: WorkspaceLoadData } = $props();
 
 	const layout = createWorkspaceLayout();
 
-	const selectionLabel = $derived.by(() => {
-		const s = workspaceSelection.current;
-		if (!s) return 'Nothing selected';
-		return `${s.kind}: ${s.id}`;
-	});
+	const selection = $derived(workspaceSelection.current);
+
+	const variableNames = $derived(Object.keys(data.variables).sort());
 
 	function toggleLeft() {
 		layout.leftOpen = !layout.leftOpen;
@@ -123,10 +122,37 @@
 					<Pane minSize={20}>
 						<section class="panel">
 							<header class="panel-header">Editor</header>
-							<div class="panel-body placeholder">
-								{selectionLabel}
-								<br />
-								<span class="hint">Editor surface coming in next iteration.</span>
+							<div class="panel-body no-pad">
+								{#if selection?.kind === 'program'}
+									{#key selection.id}
+										<ProgramEditor name={selection.id} {variableNames} />
+									{/key}
+								{:else if selection?.kind === 'task'}
+									<div class="placeholder-card">
+										<div class="label">Task</div>
+										<div class="title">{selection.id}</div>
+										<div class="hint">
+											Task editing in the workspace is not yet wired up.
+											<a href="/services/plc/tasks">Open in the Tasks tab</a>.
+										</div>
+									</div>
+								{:else if selection?.kind === 'variable'}
+									<div class="placeholder-card">
+										<div class="label">Variable</div>
+										<div class="title">{selection.id}</div>
+										<div class="hint">
+											Variable config editing will appear in the Inspector soon.
+											For now, use the <a href="/services/plc/info">Variables tab</a>.
+										</div>
+									</div>
+								{:else}
+									<div class="placeholder-card muted">
+										<div class="title">Nothing selected</div>
+										<div class="hint">
+											Pick a program from the Navigator to open it here.
+										</div>
+									</div>
+								{/if}
 							</div>
 						</section>
 					</Pane>
@@ -135,7 +161,12 @@
 							<section class="panel">
 								<header class="panel-header">Inspector</header>
 								<div class="panel-body placeholder">
-									{selectionLabel}
+									{#if selection}
+										<div class="label">{selection.kind}</div>
+										<div class="title">{selection.id}</div>
+									{:else}
+										Nothing selected
+									{/if}
 									<br />
 									<span class="hint">Live values and config details coming next.</span>
 								</div>
@@ -256,10 +287,56 @@
 		font-size: 0.875rem;
 	}
 
+	.placeholder-card {
+		padding: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+
+		&.muted {
+			color: var(--theme-text-muted);
+		}
+
+		.label {
+			font-size: 0.6875rem;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.04em;
+			color: var(--theme-text-muted);
+		}
+
+		.title {
+			font-size: 1rem;
+			font-weight: 600;
+			font-family: var(--font-mono, monospace);
+			color: var(--theme-text);
+		}
+	}
+
 	.hint {
 		color: var(--theme-text-muted);
 		font-size: 0.75rem;
 		font-style: italic;
+
+		a {
+			color: var(--theme-primary);
+		}
+	}
+
+	.label {
+		font-size: 0.6875rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--theme-text-muted);
+	}
+
+	.title {
+		font-size: 1rem;
+		font-weight: 600;
+		font-family: var(--font-mono, monospace);
+		color: var(--theme-text);
+		margin-bottom: 0.25rem;
 	}
 
 	:global(.splitpanes.plc-workspace .splitpanes__splitter) {
