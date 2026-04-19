@@ -212,12 +212,17 @@
 {/if}
 
 <style lang="scss">
+	:global(.service-layout:has(> .workspace)) {
+		height: calc(100vh - var(--header-height));
+		min-height: 0;
+		overflow: hidden;
+	}
+
 	.workspace {
 		display: flex;
 		flex-direction: column;
 		flex: 1;
 		min-height: 0;
-		height: calc(100vh - var(--header-height) - 6.5rem);
 	}
 
 	.toolbar {
