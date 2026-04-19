@@ -14,6 +14,7 @@
   import { plcLsp } from '$lib/editor/plc-lsp';
   import { rainbowBrackets } from '$lib/editor/rainbow-brackets';
   import { inlineValues, setInlineValuesEffect, type LiveValueMap } from '$lib/editor/inline-values';
+  import { multicursor } from '$lib/editor/multicursor';
   import { lintGutter } from '@codemirror/lint';
   import { getEffectiveTheme } from '../../routes/theme.svelte';
 
@@ -157,6 +158,7 @@
           indentWithTab,
         ]),
         getLanguageExtension(),
+        multicursor(),
         rainbowBrackets(),
         themeCompartment.of(getThemeExtension()),
         readonlyCompartment.of(EditorState.readOnly.of(readonly)),
