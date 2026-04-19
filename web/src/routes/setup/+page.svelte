@@ -2,6 +2,7 @@
   import type { PageData } from './$types';
   import type { MqttConfig } from '$lib/components/setup/MqttConfigForm.svelte';
   import type { GitOpsConfig } from '$lib/components/setup/GitOpsConfigForm.svelte';
+  import type { HistoryConfig } from '$lib/components/setup/HistoryConfigForm.svelte';
   import WizardStepper from '$lib/components/setup/WizardStepper.svelte';
   import ArchitectureCard from '$lib/components/setup/ArchitectureCard.svelte';
   import SparkplugDiagram from '$lib/components/setup/SparkplugDiagram.svelte';
@@ -10,6 +11,7 @@
   import MqttConfigForm from '$lib/components/setup/MqttConfigForm.svelte';
   import AddOnSelector from '$lib/components/setup/AddOnSelector.svelte';
   import GitOpsConfigForm from '$lib/components/setup/GitOpsConfigForm.svelte';
+  import HistoryConfigForm from '$lib/components/setup/HistoryConfigForm.svelte';
   import ReviewPanel from '$lib/components/setup/ReviewPanel.svelte';
 
   let { data }: { data: PageData } = $props();
@@ -27,7 +29,7 @@
   });
 
   // Step IDs used by archetypes
-  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'review';
+  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'history-config' | 'review';
 
   const STEP_LABELS: Record<StepId, string> = {
     'architecture': 'Architecture',
@@ -35,10 +37,12 @@
     'mqtt-config': 'MQTT Config',
     'add-ons': 'Add-ons',
     'gitops-config': 'GitOps',
+    'history-config': 'History',
     'review': 'Review',
   };
 
-  // Base steps per archetype (gitops-config is inserted dynamically when gitops add-on is selected)
+  // Base steps per archetype. Addon-specific config steps (gitops-config, history-config)
+  // are inserted dynamically based on add-on selection.
   const ARCHETYPE_STEPS: Record<string, StepId[]> = {
     'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'add-ons', 'review'],
     'nat-gateway': ['architecture', 'add-ons', 'review'],
@@ -46,7 +50,7 @@
 
   // Add-on modules that are NOT already core to each archetype
   const ARCHETYPE_ADDONS: Record<string, Set<string>> = {
-    'sparkplug-gateway': new Set(['caddy', 'network', 'gitops']),
+    'sparkplug-gateway': new Set(['caddy', 'network', 'gitops', 'history']),
     'nat-gateway': new Set(['caddy', 'gitops']),
   };
 
@@ -105,7 +109,36 @@
     return config;
   }
 
-  const ADDON_MODULE_IDS = new Set(['network', 'gitops']);
+  const HISTORY_FIELD_MAP: Record<string, keyof HistoryConfig> = {
+    HISTORY_DB_HOST: 'host',
+    HISTORY_DB_PORT: 'port',
+    HISTORY_DB_USER: 'user',
+    HISTORY_DB_PASSWORD: 'password',
+    HISTORY_DB_NAME: 'dbname',
+  };
+
+  function initHistoryConfig(): HistoryConfig {
+    const config: HistoryConfig = {
+      mode: 'local',
+      host: 'localhost',
+      port: '5432',
+      user: 'postgres',
+      password: 'postgres',
+      dbname: 'tentacle',
+      localInstalled: false,
+    };
+    for (const entry of data.historyConfig ?? []) {
+      const field = HISTORY_FIELD_MAP[entry.envVar];
+      if (field) (config[field] as string) = entry.value;
+    }
+    // If existing config points somewhere other than localhost, assume external mode.
+    if (config.host && config.host !== 'localhost' && config.host !== '127.0.0.1') {
+      config.mode = 'external';
+    }
+    return config;
+  }
+
+  const ADDON_MODULE_IDS = new Set(['network', 'gitops', 'history']);
 
   function initProtocols(): Set<string> {
     const desiredIds = new Set((data.desiredServices ?? []).map(d => d.moduleId));
@@ -132,15 +165,19 @@
   let selectedAddOns = $state<Set<string>>(initAddOns());
   let mqttConfig = $state<MqttConfig>(initMqttConfig());
   let gitopsConfig = $state<GitOpsConfig>(initGitOpsConfig());
+  let historyConfig = $state<HistoryConfig>(initHistoryConfig());
 
-  // Dynamic steps based on selected archetype + add-on selection
+  // Dynamic steps based on selected archetype + add-on selection.
+  // Add-on config steps are inserted before the review step, in a stable order.
   const activeSteps = $derived.by<StepId[]>(() => {
     const base: StepId[] = selectedArchetype ? ARCHETYPE_STEPS[selectedArchetype] : ['architecture'];
-    if (!selectedAddOns.has('gitops')) return base;
-    // Insert gitops-config before review
     const reviewIdx = base.indexOf('review');
     if (reviewIdx === -1) return base;
-    return [...base.slice(0, reviewIdx), 'gitops-config' as StepId, ...base.slice(reviewIdx)];
+    const inserts: StepId[] = [];
+    if (selectedAddOns.has('gitops')) inserts.push('gitops-config');
+    if (selectedAddOns.has('history')) inserts.push('history-config');
+    if (inserts.length === 0) return base;
+    return [...base.slice(0, reviewIdx), ...inserts, ...base.slice(reviewIdx)];
   });
   const stepLabels = $derived(activeSteps.map(id => STEP_LABELS[id]));
   const currentStepId = $derived<StepId>(activeSteps[currentStep] ?? 'architecture');
@@ -156,6 +193,8 @@
                      mqttConfig.MQTT_EDGE_NODE.trim() !== '';
       case 'add-ons': return true;
       case 'gitops-config': return gitopsConfig.repoUrl.trim() !== '';
+      case 'history-config': return historyConfig.dbname.trim() !== '' &&
+                   (historyConfig.mode === 'local' || historyConfig.host.trim() !== '');
       case 'review': return true;
       default: return false;
     }
@@ -276,6 +315,16 @@
         onchange={(c) => { gitopsConfig = c; }}
       />
 
+    {:else if currentStepId === 'history-config'}
+      <div class="step-intro">
+        <h2>Configure History</h2>
+        <p>Set up the edge historian database — install locally or connect to an existing one.</p>
+      </div>
+      <HistoryConfigForm
+        config={historyConfig}
+        onchange={(c) => { historyConfig = c; }}
+      />
+
     {:else if currentStepId === 'review'}
       <ReviewPanel
         archetype={selectedArchetype ?? 'sparkplug-gateway'}
@@ -283,6 +332,7 @@
         {selectedAddOns}
         {mqttConfig}
         {gitopsConfig}
+        {historyConfig}
       />
     {/if}
   </div>

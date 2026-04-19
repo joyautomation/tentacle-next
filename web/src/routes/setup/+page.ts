@@ -25,11 +25,12 @@ interface ModuleInfo {
 }
 
 export const load: PageLoad = async () => {
-  const [desiredResult, statusResult, mqttConfigResult, gitopsConfigResult, modulesResult] = await Promise.all([
+  const [desiredResult, statusResult, mqttConfigResult, gitopsConfigResult, historyConfigResult, modulesResult] = await Promise.all([
     api<DesiredService[]>('/orchestrator/desired-services'),
     api<ServiceStatus[]>('/orchestrator/service-statuses'),
     api<ConfigEntry[]>('/config/mqtt'),
     api<ConfigEntry[]>('/config/gitops'),
+    api<ConfigEntry[]>('/config/history'),
     api<ModuleInfo[]>('/orchestrator/modules'),
   ]);
 
@@ -38,6 +39,7 @@ export const load: PageLoad = async () => {
     serviceStatuses: statusResult.data ?? [],
     mqttConfig: mqttConfigResult.data ?? [],
     gitopsConfig: gitopsConfigResult.data ?? [],
+    historyConfig: historyConfigResult.data ?? [],
     modules: modulesResult.data ?? [],
   };
 };

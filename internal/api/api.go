@@ -37,10 +37,12 @@ type Module struct {
 	log      *slog.Logger
 	mode     string
 
-	// Service log ring buffer for GET queries.
-	logsMu sync.RWMutex
-	logBuf []ttypes.ServiceLogEntry
-	logSub bus.Subscription
+	// Per-serviceType log ring buffers for GET queries.
+	// Each service gets its own bucket so chatty services (e.g. history DEBUG
+	// spam) can't evict entries from quieter ones.
+	logsMu  sync.RWMutex
+	logBufs map[string][]ttypes.ServiceLogEntry
+	logSub  bus.Subscription
 
 	// Browse state tracking (in-memory).
 	browseMu     sync.RWMutex
@@ -89,7 +91,7 @@ func New(moduleID string) *Module {
 		moduleID:     moduleID,
 		port:         port,
 		log:          slog.Default(),
-		logBuf:       make([]ttypes.ServiceLogEntry, 0, 1000),
+		logBufs:      make(map[string][]ttypes.ServiceLogEntry),
 		mode:         mode,
 		browseCache:  make(map[string]json.RawMessage),
 		browseStates: make(map[string]*BrowseState),
@@ -113,17 +115,18 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.log.Warn("failed to start traffic collector", "error", err)
 	}
 
-	// Buffer service logs for the GET endpoint.
+	// Buffer service logs for the GET endpoint — per-serviceType, 200 each.
 	if sub, err := b.Subscribe("service.logs.>", func(_ string, data []byte, _ bus.ReplyFunc) {
 		var entry ttypes.ServiceLogEntry
 		if json.Unmarshal(data, &entry) != nil {
 			return
 		}
 		m.logsMu.Lock()
-		if len(m.logBuf) >= 1000 {
-			m.logBuf = m.logBuf[1:]
+		buf := m.logBufs[entry.ServiceType]
+		if len(buf) >= 200 {
+			buf = buf[1:]
 		}
-		m.logBuf = append(m.logBuf, entry)
+		m.logBufs[entry.ServiceType] = append(buf, entry)
 		m.logsMu.Unlock()
 	}); err == nil {
 		m.logSub = sub
@@ -273,6 +276,13 @@ func (m *Module) routes() http.Handler {
 		r.Get("/history", m.handleQueryHistory)
 		r.Get("/history/usage", m.handleGetHistoryUsage)
 		r.Get("/history/enabled", m.handleGetHistoryEnabled)
+		r.Get("/history/metrics", m.handleListHistoryMetrics)
+		r.Get("/history/stream", m.handleStreamHistory)
+
+		// History DB setup (wizard support)
+		r.Get("/history/db-status", m.handleHistoryDBStatus)
+		r.Post("/history/db-test", m.handleHistoryDBTest)
+		r.Post("/history/db-install", m.handleHistoryDBInstall)
 
 		// GitOps setup
 		r.Get("/gitops/git-check", m.handleGitCheck)

@@ -131,3 +131,13 @@ type HistoryEnabledResponse struct {
 	Enabled   bool   `json:"enabled"`
 	Timestamp int64  `json:"timestamp"`
 }
+
+// HistoryMetricsResponse is the reply to history.metrics — the set of
+// distinct (group, node, device, metric) keys present in the history table.
+type HistoryMetricsResponse struct {
+	RequestID string             `json:"requestId"`
+	Success   bool               `json:"success"`
+	Error     string             `json:"error,omitempty"`
+	Metrics   []HistoryMetricRef `json:"metrics,omitempty"`
+	Timestamp int64              `json:"timestamp"`
+}

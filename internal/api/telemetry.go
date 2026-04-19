@@ -143,14 +143,16 @@ func (m *Module) getRecentLogsForModule(moduleID string) []map[string]interface{
 	defer m.logsMu.RUnlock()
 
 	var result []map[string]interface{}
-	for _, entry := range m.logBuf {
-		if entry.ModuleID == moduleID || moduleID == "" {
-			result = append(result, map[string]interface{}{
-				"timestamp": entry.Timestamp,
-				"level":     entry.Level,
-				"message":   entry.Message,
-				"module":    entry.ModuleID,
-			})
+	for _, buf := range m.logBufs {
+		for _, entry := range buf {
+			if entry.ModuleID == moduleID || moduleID == "" {
+				result = append(result, map[string]interface{}{
+					"timestamp": entry.Timestamp,
+					"level":     entry.Level,
+					"message":   entry.Message,
+					"module":    entry.ModuleID,
+				})
+			}
 		}
 	}
 

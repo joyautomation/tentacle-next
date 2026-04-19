@@ -11,6 +11,13 @@ import (
 // enableHypertables converts the history and history_properties tables to
 // TimescaleDB hypertables. Returns false if TimescaleDB is not installed.
 func enableHypertables(db *sql.DB, log *slog.Logger) bool {
+	// Try to create the extension if it's available but not yet enabled on the db.
+	// Harmless if already present; fails only if the package isn't installed at the OS level.
+	if _, err := db.Exec(`CREATE EXTENSION IF NOT EXISTS timescaledb`); err != nil {
+		log.Warn("history: could not create timescaledb extension (package may not be installed)", "error", err)
+		return false
+	}
+
 	_, err := db.Exec(`SELECT create_hypertable('history', 'timestamp', if_not_exists => TRUE)`)
 	if err != nil {
 		log.Warn("history: could not create hypertable (TimescaleDB may not be installed)", "error", err)

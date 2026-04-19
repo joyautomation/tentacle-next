@@ -1,14 +1,17 @@
 <script lang="ts">
   import type { MqttConfig } from './MqttConfigForm.svelte';
   import type { GitOpsConfig } from './GitOpsConfigForm.svelte';
+  import type { HistoryConfig } from './HistoryConfigForm.svelte';
   import { goto } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { apiPut, api } from '$lib/api/client';
   import { getServiceName } from '$lib/constants/services';
 
   const ADDON_NAMES: Record<string, string> = {
+    caddy: 'Caddy',
     network: 'Network',
     gitops: 'GitOps',
+    history: 'History',
   };
 
   interface Props {
@@ -17,9 +20,10 @@
     selectedAddOns: Set<string>;
     mqttConfig: MqttConfig;
     gitopsConfig?: GitOpsConfig;
+    historyConfig?: HistoryConfig;
   }
 
-  let { archetype, selectedProtocols, selectedAddOns, mqttConfig, gitopsConfig }: Props = $props();
+  let { archetype, selectedProtocols, selectedAddOns, mqttConfig, gitopsConfig, historyConfig }: Props = $props();
 
   const ARCHETYPE_NAMES: Record<string, string> = {
     'sparkplug-gateway': 'Sparkplug Gateway',
@@ -57,6 +61,28 @@
     ];
     for (const [envVar, value] of configs) {
       const result = await apiPut(`/config/gitops/${envVar}`, { value });
+      if (result.error) {
+        updateStep(idx, 'error', `Failed to set ${envVar}: ${result.error.error}`);
+        return false;
+      }
+    }
+    updateStep(idx, 'done');
+    return true;
+  }
+
+  async function saveHistoryConfig(): Promise<boolean> {
+    if (!selectedAddOns.has('history') || !historyConfig) return true;
+    const idx = steps.length;
+    steps.push({ label: 'Writing History configuration', status: 'running' });
+    const configs: [string, string][] = [
+      ['HISTORY_DB_HOST', historyConfig.host],
+      ['HISTORY_DB_PORT', historyConfig.port],
+      ['HISTORY_DB_USER', historyConfig.user],
+      ['HISTORY_DB_PASSWORD', historyConfig.password],
+      ['HISTORY_DB_NAME', historyConfig.dbname],
+    ];
+    for (const [envVar, value] of configs) {
+      const result = await apiPut(`/config/history/${envVar}`, { value });
       if (result.error) {
         updateStep(idx, 'error', `Failed to set ${envVar}: ${result.error.error}`);
         return false;
@@ -148,8 +174,9 @@
     if (!await enableModule('gateway', 'Enabling Gateway')) return false;
     if (!await enableModule('mqtt', 'Enabling MQTT bridge')) return false;
 
-    // Write GitOps config before enabling the module
+    // Write add-on configs before enabling their modules
     if (!await saveGitOpsConfig()) return false;
+    if (!await saveHistoryConfig()) return false;
 
     // Enable add-ons
     for (const addon of selectedAddOns) {
@@ -165,8 +192,9 @@
     if (!await enableModule('network', 'Enabling Network Manager')) return false;
     if (!await enableModule('nftables', 'Enabling Firewall (nftables)')) return false;
 
-    // Write GitOps config before enabling the module
+    // Write add-on configs before enabling their modules
     if (!await saveGitOpsConfig()) return false;
+    if (!await saveHistoryConfig()) return false;
 
     // Enable add-ons
     for (const addon of selectedAddOns) {
@@ -272,6 +300,16 @@
         <div class="summary-row">
           <span class="summary-label">GitOps Branch</span>
           <span class="summary-value mono">{gitopsConfig.branch}</span>
+        </div>
+      {/if}
+
+      {#if selectedAddOns.has('history') && historyConfig}
+        <div class="summary-row">
+          <span class="summary-label">History DB</span>
+          <span class="summary-value mono">
+            {historyConfig.mode === 'local' ? 'Local install' : `${historyConfig.host}:${historyConfig.port}`}
+            &middot; {historyConfig.dbname}
+          </span>
         </div>
       {/if}
     </section>

@@ -51,9 +51,10 @@
     desiredServices: DesiredService[];
     open: boolean;
     appVersion?: string;
+    mode?: string;
   }
 
-  let { services, availableModules = [], desiredServices = [], open = $bindable(false), appVersion = '' }: Props = $props();
+  let { services, availableModules = [], desiredServices = [], open = $bindable(false), appVersion = '', mode = 'unknown' }: Props = $props();
 
   const uniqueServices = $derived(
     [...new Map(services.map((s) => [s.serviceType, s])).values()]
@@ -69,6 +70,19 @@
     return availableModules.filter(
       (m) => m.category === 'optional' && !runningModuleIds.has(m.moduleId) && !desiredModuleIds.has(m.moduleId)
     );
+  });
+
+  // Modules in desired_services but NOT running (no heartbeat) — failed or starting.
+  // These need sidebar entries so users can reach the module page to fix config.
+  const pendingModules = $derived(() => {
+    const runningModuleIds = new Set(services.map((s) => s.moduleId));
+    const registryById = new Map(availableModules.map((m) => [m.moduleId, m]));
+    return desiredServices
+      .filter((d) => !runningModuleIds.has(d.moduleId))
+      .map((d) => ({
+        moduleId: d.moduleId,
+        info: registryById.get(d.moduleId),
+      }));
   });
 
   type ModuleRole = 'client' | 'server' | 'data';
@@ -326,6 +340,30 @@
       {/each}
     {/if}
 
+    {#if pendingModules().length > 0}
+      <li class="sidebar-section-label">Not Running</li>
+      {#each pendingModules() as pending}
+        {@const Icon = getModuleIcon(pending.moduleId)}
+        <li>
+          <a
+            href="/modules/{pending.moduleId}"
+            class="sidebar-item"
+            class:active={$page.url.pathname.startsWith('/modules/' + pending.moduleId)}
+            onclick={close}
+          >
+            <Icon size="1.25rem" />
+            <span>{getModuleName(pending.moduleId)}</span>
+            <span class="sidebar-item-badges">
+              {#if pending.info?.experimental}
+                <span class="experimental-badge">exp</span>
+              {/if}
+              <span class="disabled-badge">down</span>
+            </span>
+          </a>
+        </li>
+      {/each}
+    {/if}
+
   </ul>
 
   {#if uninstalledModules().length > 0}
@@ -405,6 +443,20 @@
 
   <div class="sidebar-footer">
     <span class="sidebar-section-label">System {#if appVersion}<span class="version-label">{appVersion}</span>{/if}</span>
+    <div class="sidebar-item runtime-item" title="Deployment mode: {mode}">
+      <ServerStack size="1.25rem" />
+      <span>Runtime</span>
+      <span class="sidebar-item-badges">
+        <span
+          class="mode-badge"
+          class:mode-dev={mode === 'dev'}
+          class:mode-systemd={mode === 'systemd'}
+          class:mode-docker={mode === 'docker'}
+          class:mode-kubernetes={mode === 'kubernetes'}
+          class:mode-unknown={mode === 'unknown'}
+        >{mode}</span>
+      </span>
+    </div>
     <a href="/system" class="sidebar-item footer-btn" onclick={close}>
       <ComputerDesktop size="1.25rem" />
       <span>Updates</span>
@@ -719,6 +771,55 @@
     transition: opacity 0.15s, color 0.15s;
   }
 
+  .runtime-item {
+    cursor: default;
+
+    &:hover {
+      background: none;
+      color: var(--theme-text-muted);
+    }
+  }
+
+  .mode-badge {
+    font-size: 0.625rem;
+    font-weight: 600;
+    padding: 0.125rem 0.4375rem;
+    border-radius: var(--rounded-full);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid transparent;
+
+    &.mode-dev {
+      background: var(--badge-amber-bg);
+      color: var(--badge-amber-text);
+      border-color: var(--badge-amber-border);
+    }
+
+    &.mode-systemd {
+      background: var(--badge-sky-bg);
+      color: var(--badge-sky-text);
+      border-color: var(--badge-sky-border);
+    }
+
+    &.mode-docker {
+      background: var(--badge-blue-bg);
+      color: var(--badge-blue-text);
+      border-color: var(--badge-blue-border);
+    }
+
+    &.mode-kubernetes {
+      background: var(--badge-purple-bg);
+      color: var(--badge-purple-text);
+      border-color: var(--badge-purple-border);
+    }
+
+    &.mode-unknown {
+      background: var(--badge-muted-bg);
+      color: var(--badge-muted-text);
+      border-color: var(--badge-muted-border);
+    }
+  }
+
   .sidebar-item:hover .available-badge {
     opacity: 1;
     color: var(--theme-primary);
@@ -749,6 +850,10 @@
     letter-spacing: normal;
     color: var(--theme-text-muted);
     opacity: 0.7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .reset-btn {

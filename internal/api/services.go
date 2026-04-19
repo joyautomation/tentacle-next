@@ -152,21 +152,17 @@ func (m *Module) handleGetServiceLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.logsMu.RLock()
-	// Filter by serviceType.
-	filtered := make([]ttypes.ServiceLogEntry, 0)
-	for _, entry := range m.logBuf {
-		if entry.ServiceType == serviceType {
-			filtered = append(filtered, entry)
-		}
-	}
+	buf := m.logBufs[serviceType]
+	out := make([]ttypes.ServiceLogEntry, len(buf))
+	copy(out, buf)
 	m.logsMu.RUnlock()
 
 	// Apply limit from the end (most recent).
-	if len(filtered) > limit {
-		filtered = filtered[len(filtered)-limit:]
+	if len(out) > limit {
+		out = out[len(out)-limit:]
 	}
 
-	writeJSON(w, http.StatusOK, filtered)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleStreamServiceLogs streams log entries for a service type via SSE.
