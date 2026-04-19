@@ -10,16 +10,30 @@ export type ProgramTab = {
 	language: string;
 };
 
+export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
+
+export type WorkspaceDiagnostic = {
+	severity: DiagnosticSeverity;
+	message: string;
+	startLine: number;
+	startCol: number;
+	endLine: number;
+	endCol: number;
+	source?: string;
+};
+
 const state = $state<{
 	selection: Selection;
 	tabs: ProgramTab[];
 	activeTab: string | null;
 	dirty: Record<string, boolean>;
+	diagnostics: Record<string, WorkspaceDiagnostic[]>;
 }>({
 	selection: null,
 	tabs: [],
 	activeTab: null,
-	dirty: {}
+	dirty: {},
+	diagnostics: {}
 });
 
 export const workspaceSelection = {
@@ -78,5 +92,33 @@ export const workspaceTabs = {
 	},
 	clearDirty(name: string) {
 		delete state.dirty[name];
+	}
+};
+
+export const workspaceDiagnostics = {
+	get byUri() {
+		return state.diagnostics;
+	},
+	get total() {
+		let n = 0;
+		for (const uri in state.diagnostics) n += state.diagnostics[uri].length;
+		return n;
+	},
+	get errorCount() {
+		let n = 0;
+		for (const uri in state.diagnostics) {
+			for (const d of state.diagnostics[uri]) if (d.severity === 'error') n++;
+		}
+		return n;
+	},
+	set(uri: string, diags: WorkspaceDiagnostic[]) {
+		if (diags.length === 0) {
+			delete state.diagnostics[uri];
+		} else {
+			state.diagnostics[uri] = diags;
+		}
+	},
+	clear(uri: string) {
+		delete state.diagnostics[uri];
 	}
 };

@@ -3,6 +3,14 @@
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
+	import { workspaceDiagnostics, type DiagnosticSeverity } from '$lib/plc/workspace-state.svelte';
+
+	function lspSeverityToDiagnosticSeverity(sev: number | undefined): DiagnosticSeverity {
+		if (sev === 2) return 'warning';
+		if (sev === 3) return 'info';
+		if (sev === 4) return 'hint';
+		return 'error';
+	}
 
 	interface PlcProgramKV {
 		name: string;
@@ -151,6 +159,20 @@
 					enableLint
 					useLSP
 					lspUri={`tentacle-plc://programs/${encodeURIComponent(name)}.${editLanguage === 'st' ? 'st' : 'star'}`}
+					onDiagnostics={(uri, diags) => {
+						workspaceDiagnostics.set(
+							uri,
+							diags.map((d) => ({
+								severity: lspSeverityToDiagnosticSeverity(d.severity),
+								message: d.message,
+								startLine: d.range.start.line,
+								startCol: d.range.start.character,
+								endLine: d.range.end.line,
+								endCol: d.range.end.character,
+								source: d.source
+							}))
+						);
+					}}
 				/>
 			</div>
 		{/if}

@@ -25,6 +25,8 @@ export interface PlcLspOptions {
 	url?: string;
 	/** Debounce delay (ms) for sending didChange. Defaults to 250. */
 	changeDelay?: number;
+	/** Side-channel callback: fires on every publishDiagnostics with the raw LSP payload. */
+	onDiagnostics?: (uri: string, diagnostics: LspDiagnostic[]) => void;
 }
 
 interface LspPosition {
@@ -98,6 +100,8 @@ export function plcLsp(opts: PlcLspOptions) {
 			} else if (this.ws) {
 				this.ws.close();
 			}
+			// Drop any diagnostics we published for this URI — the view is gone.
+			opts.onDiagnostics?.(opts.uri, []);
 		}
 
 		private connect() {
@@ -156,6 +160,7 @@ export function plcLsp(opts: PlcLspOptions) {
 
 		private applyDiagnostics(params: PublishDiagnosticsParams) {
 			if (params.uri !== opts.uri) return;
+			opts.onDiagnostics?.(params.uri, params.diagnostics);
 			const doc = this.view.state.doc;
 			const diagnostics: Diagnostic[] = params.diagnostics.map((d) => {
 				const from = this.posFromLsp(d.range.start);

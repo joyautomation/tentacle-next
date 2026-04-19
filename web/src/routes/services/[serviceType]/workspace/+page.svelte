@@ -6,7 +6,7 @@
 	import Inspector from '$lib/plc/workspace/Inspector.svelte';
 	import EditorTabs from '$lib/plc/workspace/EditorTabs.svelte';
 	import CreateDialog from '$lib/plc/workspace/CreateDialog.svelte';
-	import LogViewer from '$lib/components/LogViewer.svelte';
+	import OutputPanel from '$lib/plc/workspace/OutputPanel.svelte';
 	import type { WorkspaceLoadData } from './+page';
 
 	let { data }: { data: WorkspaceLoadData } = $props();
@@ -191,12 +191,7 @@
 			</Pane>
 			{#if layout.bottomOpen}
 				<Pane size={layout.bottomSize} minSize={8}>
-					<section class="panel">
-						<header class="panel-header">Output · Logs</header>
-						<div class="panel-body logs">
-							<LogViewer serviceType={data.serviceType} initialLogs={data.initialLogs} />
-						</div>
-					</section>
+					<OutputPanel serviceType={data.serviceType} initialLogs={data.initialLogs} />
 				</Pane>
 			{/if}
 		</Splitpanes>

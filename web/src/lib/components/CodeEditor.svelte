@@ -28,9 +28,11 @@
     useLSP?: boolean;
     /** Stable document URI for the LSP session. Required when useLSP is true. */
     lspUri?: string;
+    /** Side-channel: receive every publishDiagnostics payload (for a Problems panel). */
+    onDiagnostics?: (uri: string, diagnostics: Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; severity?: number; message: string; source?: string }>) => void;
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false, useLSP = false, lspUri }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false, useLSP = false, lspUri, onDiagnostics }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
@@ -148,6 +150,7 @@
               plcLsp({
                 uri: lspUri,
                 language: () => (language === 'python' ? 'starlark' : language) as 'starlark' | 'st',
+                onDiagnostics,
               }),
             ]
           : []),
