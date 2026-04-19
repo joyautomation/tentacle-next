@@ -8,7 +8,7 @@
  */
 
 import { EditorView, keymap, type Command } from '@codemirror/view';
-import { EditorSelection } from '@codemirror/state';
+import { EditorSelection, Prec } from '@codemirror/state';
 
 function addCursorVertical(view: EditorView, dir: -1 | 1): boolean {
 	const state = view.state;
@@ -45,9 +45,13 @@ const clickAddsSelection = EditorView.clickAddsSelectionRange.of(
 export function multicursor() {
 	return [
 		clickAddsSelection,
-		keymap.of([
-			{ key: 'Mod-Alt-ArrowUp', run: addCursorAbove, preventDefault: true },
-			{ key: 'Mod-Alt-ArrowDown', run: addCursorBelow, preventDefault: true }
-		])
+		// High precedence so we shadow the default Mod-Shift-ArrowUp/Down
+		// binding (selectDocStart/End) with add-cursor, matching VSCode.
+		Prec.high(
+			keymap.of([
+				{ key: 'Mod-Shift-ArrowUp', run: addCursorAbove, preventDefault: true },
+				{ key: 'Mod-Shift-ArrowDown', run: addCursorBelow, preventDefault: true }
+			])
+		)
 	];
 }
