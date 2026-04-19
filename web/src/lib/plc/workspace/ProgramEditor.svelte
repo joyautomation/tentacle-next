@@ -147,6 +147,7 @@
 					onchange={onEditorChange}
 					{variableNames}
 					enableVariableDrop
+					flush
 				/>
 			</div>
 		{/if}
@@ -239,13 +240,15 @@
 	.ed-body {
 		flex: 1;
 		min-height: 0;
-		overflow: auto;
-		padding: 0.5rem;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.editor-wrap {
-		height: 100%;
-		min-height: 320px;
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.status {

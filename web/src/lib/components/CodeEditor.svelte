@@ -19,9 +19,10 @@
     onchange?: (value: string) => void;
     variableNames?: string[];
     enableVariableDrop?: boolean;
+    flush?: boolean;
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
@@ -133,13 +134,14 @@
         EditorView.theme({
           '&': {
             fontSize: '13px',
-            border: '1px solid var(--theme-border)',
-            borderRadius: 'var(--rounded-lg)',
+            height: flush ? '100%' : 'auto',
+            border: flush ? 'none' : '1px solid var(--theme-border)',
+            borderRadius: flush ? '0' : 'var(--rounded-lg)',
             overflow: 'hidden',
           },
           '&.cm-focused': {
             outline: 'none',
-            boxShadow: 'inset 0 0 0 2px var(--theme-primary)',
+            boxShadow: flush ? 'none' : 'inset 0 0 0 2px var(--theme-primary)',
           },
           '.cm-scroller': {
             fontFamily: "'IBM Plex Mono', monospace",
@@ -149,7 +151,7 @@
             borderRight: '1px solid var(--theme-border)',
           },
           '.cm-content': {
-            minHeight: '300px',
+            minHeight: flush ? '0' : '300px',
           },
         }),
       ],
@@ -214,5 +216,13 @@
 <style>
   .code-editor-wrapper {
     width: 100%;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .code-editor-wrapper :global(.cm-editor) {
+    flex: 1;
+    min-height: 0;
   }
 </style>
