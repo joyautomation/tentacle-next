@@ -34,18 +34,24 @@ func analyzeStarlark(source string) []Diagnostic {
 	if source == "" {
 		return nil
 	}
+	var parserDiags []Diagnostic
 	_, err := syntax.Parse("program.star", source, 0)
-	if err == nil {
-		return nil
+	if err != nil {
+		var se syntax.Error
+		if errors.As(err, &se) {
+			line := int(se.Pos.Line)
+			msg, startCol, endCol := humanize(se.Msg, source, line)
+			parserDiags = []Diagnostic{rangeDiag(line, startCol, line, endCol, msg)}
+		} else {
+			msg, startCol, endCol := humanize(err.Error(), source, 1)
+			parserDiags = []Diagnostic{rangeDiag(1, startCol, 1, endCol, msg)}
+		}
 	}
-	var se syntax.Error
-	if errors.As(err, &se) {
-		line := int(se.Pos.Line)
-		msg, startCol, endCol := humanize(se.Msg, source, line)
-		return []Diagnostic{rangeDiag(line, startCol, line, endCol, msg)}
-	}
-	msg, startCol, endCol := humanize(err.Error(), source, 1)
-	return []Diagnostic{rangeDiag(1, startCol, 1, endCol, msg)}
+	// Pre-pass runs whether or not the parser errored. If the source is
+	// clean but has, say, a trailing unclosed bracket, the parser may have
+	// already flagged it — mergePrepassDiagnostics dedupes by line.
+	pre := prepassStarlark(source)
+	return mergePrepassDiagnostics(parserDiags, pre)
 }
 
 // st parser errors are formatted as "line N: message"; extract the line.
