@@ -40,9 +40,12 @@ func analyzeStarlark(source string) []Diagnostic {
 	}
 	var se syntax.Error
 	if errors.As(err, &se) {
-		return []Diagnostic{parseDiag(int(se.Pos.Line), int(se.Pos.Col), se.Msg)}
+		line := int(se.Pos.Line)
+		msg, startCol, endCol := humanize(se.Msg, source, line)
+		return []Diagnostic{rangeDiag(line, startCol, line, endCol, msg)}
 	}
-	return []Diagnostic{parseDiag(1, 1, err.Error())}
+	msg, startCol, endCol := humanize(err.Error(), source, 1)
+	return []Diagnostic{rangeDiag(1, startCol, 1, endCol, msg)}
 }
 
 // st parser errors are formatted as "line N: message"; extract the line.
@@ -64,23 +67,31 @@ func analyzeST(source string) []Diagnostic {
 			msg = m[2]
 		}
 	}
-	return []Diagnostic{parseDiag(line, 1, msg)}
+	humanMsg, startCol, endCol := humanize(msg, source, line)
+	return []Diagnostic{rangeDiag(line, startCol, line, endCol, humanMsg)}
 }
 
-// parseDiag converts 1-based (line, col) from the parsers into an LSP-native
-// 0-based range covering the single offending position. We have no end column
-// from the parsers, so we collapse the range to a caret; the editor widens
-// it to a full-word squiggle by default.
-func parseDiag(line, col int, message string) Diagnostic {
-	if line < 1 {
-		line = 1
+// rangeDiag builds an error Diagnostic covering the given 1-based span.
+// Range is converted to LSP's 0-based convention here. If the end position
+// is at or before the start, the caller is expected to widen separately.
+func rangeDiag(startLine, startCol, endLine, endCol int, message string) Diagnostic {
+	if startLine < 1 {
+		startLine = 1
 	}
-	if col < 1 {
-		col = 1
+	if startCol < 1 {
+		startCol = 1
 	}
-	start := Position{Line: line - 1, Character: col - 1}
+	if endLine < startLine {
+		endLine = startLine
+	}
+	if endLine == startLine && endCol < startCol {
+		endCol = startCol
+	}
 	return Diagnostic{
-		Range:    Range{Start: start, End: start},
+		Range: Range{
+			Start: Position{Line: startLine - 1, Character: startCol - 1},
+			End:   Position{Line: endLine - 1, Character: endCol - 1},
+		},
 		Severity: SeverityError,
 		Source:   "tentacle-plc",
 		Message:  message,
