@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, crosshairCursor, dropCursor } from '@codemirror/view';
-  import { EditorState, Compartment } from '@codemirror/state';
+  import { EditorState, Compartment, type Extension } from '@codemirror/state';
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
   import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
   import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from '@codemirror/autocomplete';
@@ -42,6 +42,18 @@
   let autocompleteCompartment = new Compartment();
   let updating = false;
 
+  // When useLSP is on, plcLsp() returns both extensions and a completion
+  // source. We build it once per editor lifetime (opts close over the uri,
+  // which is stable). The same session is then consumed by the autocomplete
+  // extension and by the editor's hover tooltip plumbing.
+  const lspBundle = useLSP && lspUri
+    ? plcLsp({
+        uri: lspUri,
+        language: () => (language === 'python' ? 'starlark' : language) as 'starlark' | 'st',
+        onDiagnostics,
+      })
+    : null;
+
   function getThemeExtension() {
     const effective = getEffectiveTheme();
     return effective === 'themeDark' ? oneDark : [];
@@ -53,6 +65,12 @@
   }
 
   function getAutocompleteExtension() {
+    if (lspBundle) {
+      // LSP is authoritative for completion when enabled; it already covers
+      // builtins + local symbols. The legacy variableNames list only needs
+      // to feed in via the LSP (future) so we skip the var-completion path.
+      return autocompletion({ override: [lspBundle.completionSource] });
+    }
     if (variableNames.length > 0) {
       return autocompletion({ override: [createVarCompletion(variableNames)] });
     }
@@ -146,15 +164,8 @@
               }),
             ]
           : []),
-        ...(useLSP && lspUri
-          ? [
-              lintGutter(),
-              plcLsp({
-                uri: lspUri,
-                language: () => (language === 'python' ? 'starlark' : language) as 'starlark' | 'st',
-                onDiagnostics,
-              }),
-            ]
+        ...(lspBundle
+          ? [lintGutter(), ...(lspBundle.extension as Extension[])]
           : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !updating) {

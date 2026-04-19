@@ -98,6 +98,10 @@ func (s *Server) dispatch(tr Transport, msg *rpcMessage) {
 		s.handleDidChange(tr, msg)
 	case "textDocument/didClose":
 		s.handleDidClose(msg)
+	case "textDocument/completion":
+		s.handleCompletion(tr, msg)
+	case "textDocument/hover":
+		s.handleHover(tr, msg)
 	default:
 		// Respond with MethodNotFound for requests (those with an ID);
 		// notifications are silently ignored per LSP spec.
@@ -111,6 +115,13 @@ func (s *Server) handleInitialize(tr Transport, msg *rpcMessage) {
 	result := InitializeResult{
 		Capabilities: ServerCapabilities{
 			TextDocumentSync: 1, // Full
+			CompletionProvider: &CompletionOptions{
+				// `.` triggers member-ish completion later; `"` re-opens completion
+				// inside string args so `get_var("|")` still suggests vars once the
+				// variable-source hookup lands.
+				TriggerCharacters: []string{".", "\""},
+			},
+			HoverProvider: true,
 		},
 		ServerInfo: ServerInfo{
 			Name:    "tentacle-plc-lsp",
@@ -118,6 +129,67 @@ func (s *Server) handleInitialize(tr Transport, msg *rpcMessage) {
 		},
 	}
 	body, _ := json.Marshal(result)
+	s.reply(tr, msg.ID, body)
+}
+
+func (s *Server) handleCompletion(tr Transport, msg *rpcMessage) {
+	var params TextDocumentPositionParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		s.replyError(tr, msg.ID, -32602, "invalid completion params")
+		return
+	}
+	s.mu.Lock()
+	doc, ok := s.docs[params.TextDocument.URI]
+	var source, lang string
+	if ok {
+		source, lang = doc.text, doc.languageID
+	}
+	s.mu.Unlock()
+	if !ok {
+		s.reply(tr, msg.ID, json.RawMessage(`{"isIncomplete":false,"items":[]}`))
+		return
+	}
+
+	var list CompletionList
+	switch lang {
+	case "st", "structured-text":
+		// ST completion not implemented yet — return an empty list so the
+		// client doesn't see an error. Add a case when the ST resolver lands.
+		list = CompletionList{IsIncomplete: false, Items: []CompletionItem{}}
+	default:
+		list = completeStarlark(source, params.Position)
+	}
+	body, _ := json.Marshal(list)
+	s.reply(tr, msg.ID, body)
+}
+
+func (s *Server) handleHover(tr Transport, msg *rpcMessage) {
+	var params TextDocumentPositionParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		s.replyError(tr, msg.ID, -32602, "invalid hover params")
+		return
+	}
+	s.mu.Lock()
+	doc, ok := s.docs[params.TextDocument.URI]
+	var source, lang string
+	if ok {
+		source, lang = doc.text, doc.languageID
+	}
+	s.mu.Unlock()
+	if !ok {
+		s.reply(tr, msg.ID, json.RawMessage(`null`))
+		return
+	}
+	if lang == "st" || lang == "structured-text" {
+		s.reply(tr, msg.ID, json.RawMessage(`null`))
+		return
+	}
+	hov, ok := hoverStarlark(source, params.Position)
+	if !ok {
+		s.reply(tr, msg.ID, json.RawMessage(`null`))
+		return
+	}
+	body, _ := json.Marshal(hov)
 	s.reply(tr, msg.ID, body)
 }
 

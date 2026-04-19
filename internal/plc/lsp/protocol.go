@@ -111,5 +111,64 @@ type ServerInfo struct {
 
 // TextDocumentSyncKind.Full = 1 — client sends whole document on every change.
 type ServerCapabilities struct {
-	TextDocumentSync int `json:"textDocumentSync"`
+	TextDocumentSync   int                 `json:"textDocumentSync"`
+	CompletionProvider *CompletionOptions  `json:"completionProvider,omitempty"`
+	HoverProvider      bool                `json:"hoverProvider,omitempty"`
+}
+
+type CompletionOptions struct {
+	TriggerCharacters []string `json:"triggerCharacters,omitempty"`
+	ResolveProvider   bool     `json:"resolveProvider,omitempty"`
+}
+
+// Completion request/response. TextDocumentPositionParams is the standard
+// shape for anything that asks "what's at this point in the doc?".
+type TextDocumentPositionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+// CompletionItemKind values per LSP spec. We only use the handful relevant
+// to PLC code so the client UI is consistent.
+const (
+	CompletionKindFunction = 3
+	CompletionKindVariable = 6
+	CompletionKindKeyword  = 14
+	CompletionKindSnippet  = 15
+	CompletionKindEvent    = 23 // ladder elements → map to Event for a distinct icon
+)
+
+// InsertTextFormat: 1 = PlainText, 2 = Snippet. Snippets let us emit
+// placeholders like `get_var("$1")` so the user lands inside the quotes.
+const (
+	InsertTextFormatPlainText = 1
+	InsertTextFormatSnippet   = 2
+)
+
+type CompletionItem struct {
+	Label            string `json:"label"`
+	Kind             int    `json:"kind,omitempty"`
+	Detail           string `json:"detail,omitempty"`        // one-line signature/type
+	Documentation    string `json:"documentation,omitempty"` // prose shown in the popup
+	InsertText       string `json:"insertText,omitempty"`
+	InsertTextFormat int    `json:"insertTextFormat,omitempty"`
+	SortText         string `json:"sortText,omitempty"`
+}
+
+// A CompletionList with isIncomplete=false tells the client the result set
+// is complete and doesn't need to be re-requested on the next keystroke.
+type CompletionList struct {
+	IsIncomplete bool             `json:"isIncomplete"`
+	Items        []CompletionItem `json:"items"`
+}
+
+// Hover result. Contents is a markdown string per the simpler spec form.
+type Hover struct {
+	Contents MarkupContent `json:"contents"`
+	Range    *Range        `json:"range,omitempty"`
+}
+
+type MarkupContent struct {
+	Kind  string `json:"kind"` // "plaintext" or "markdown"
+	Value string `json:"value"`
 }
