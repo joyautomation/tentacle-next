@@ -10,6 +10,7 @@
   import { oneDark } from '@codemirror/theme-one-dark';
   import { structuredText } from '$lib/lang/structured-text';
   import { createVarCompletion } from '$lib/editor/var-completion';
+  import { plcLinter, type PlcLintLanguage } from '$lib/editor/plc-lint';
   import { getEffectiveTheme } from '../../routes/theme.svelte';
 
   interface Props {
@@ -20,9 +21,10 @@
     variableNames?: string[];
     enableVariableDrop?: boolean;
     flush?: boolean;
+    enableLint?: boolean;
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
@@ -126,6 +128,14 @@
         readonlyCompartment.of(EditorState.readOnly.of(readonly)),
         autocompleteCompartment.of(getAutocompleteExtension()),
         ...(enableVariableDrop ? [getDropExtension()] : []),
+        ...(enableLint
+          ? [
+              plcLinter({
+                language: () => language as PlcLintLanguage,
+                variableNames: () => variableNames,
+              }),
+            ]
+          : []),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !updating) {
             onchange?.(update.state.doc.toString());

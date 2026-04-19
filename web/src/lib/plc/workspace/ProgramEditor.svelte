@@ -148,6 +148,7 @@
 					{variableNames}
 					enableVariableDrop
 					flush
+					enableLint
 				/>
 			</div>
 		{/if}
