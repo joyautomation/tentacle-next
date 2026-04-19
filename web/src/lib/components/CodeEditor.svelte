@@ -266,17 +266,22 @@
 
   $effect(() => {
     if (!view) return;
+    const on = showInlineValues;
     view.dispatch({
-      effects: inlineValuesCompartment.reconfigure(showInlineValues ? inlineValues() : [])
+      effects: inlineValuesCompartment.reconfigure(on ? inlineValues() : [])
     });
-    if (showInlineValues && liveValues) {
+    if (on && liveValues) {
+      // Seed the freshly-mounted field with current values so widgets don't
+      // flash a "no value" frame before the next batch tick.
       view.dispatch({ effects: setInlineValuesEffect.of(liveValues) });
     }
   });
 
   $effect(() => {
-    if (!view || !showInlineValues || !liveValues) return;
-    view.dispatch({ effects: setInlineValuesEffect.of(liveValues) });
+    if (!view) return;
+    const vals = liveValues;
+    if (!showInlineValues || !vals) return;
+    view.dispatch({ effects: setInlineValuesEffect.of(vals) });
   });
 </script>
 

@@ -1,13 +1,14 @@
 /**
  * Global live variable values store.
  *
- * One SSE subscription feeds every editor, inspector, etc. that needs live
- * PLC values. Components call `startLiveValues()` and hold onto the returned
- * stop function until they unmount — when the last consumer leaves, the SSE
+ * One SSE subscription shared by every consumer (editor overlays, the
+ * Inspector panel, anything else that needs live PLC values). Consumers
+ * call `startLiveValues()` at mount and hold onto the returned stop
+ * function until unmount. When refcount returns to zero the SSE
  * connection is torn down.
  *
- * A one-shot bootstrap fetch of `/variables` seeds the map so values appear
- * immediately instead of waiting for the first batch tick.
+ * A one-shot bootstrap fetch of `/variables` seeds the map so values
+ * show up immediately instead of waiting for the first batch tick.
  */
 
 import { subscribe } from '$lib/api/subscribe';
@@ -29,32 +30,11 @@ type VariableRecord = {
 	lastUpdated?: number;
 };
 
-const internal = $state<Record<string, LiveValue>>({});
-
+const raw = new Map<string, LiveValue>();
+let version = $state(0);
 let subscribers = 0;
 let unsubSse: (() => void) | null = null;
 let bootstrapped = false;
-
-// The map reference the editor sees changes on every batch so the
-// StateEffect with a new reference actually triggers a rebuild.
-let snapshotVersion = $state(0);
-
-const snapshotCache = $derived.by<LiveValueMap>(() => {
-	void snapshotVersion;
-	const m = new Map<string, LiveValue>();
-	for (const k in internal) m.set(k, internal[k]);
-	return m;
-});
-
-function applyOne(msg: PlcDataPayload): void {
-	if (!msg || !msg.variableId) return;
-	internal[msg.variableId] = {
-		value: msg.value,
-		datatype: msg.datatype,
-		lastUpdated: msg.timestamp,
-		quality: 'good'
-	};
-}
 
 async function bootstrap(): Promise<void> {
 	if (bootstrapped) return;
@@ -62,14 +42,15 @@ async function bootstrap(): Promise<void> {
 	const result = await api<VariableRecord[]>('/variables');
 	if (result.error) return;
 	for (const v of result.data ?? []) {
-		internal[v.variableId] = {
+		if (!v.variableId) continue;
+		raw.set(v.variableId, {
 			value: v.value,
 			datatype: v.datatype,
 			quality: v.quality,
 			lastUpdated: v.lastUpdated
-		};
+		});
 	}
-	snapshotVersion++;
+	version++;
 }
 
 export function startLiveValues(): () => void {
@@ -78,8 +59,16 @@ export function startLiveValues(): () => void {
 		void bootstrap();
 		unsubSse = subscribe<PlcDataPayload[]>('/variables/stream/batch', (batch) => {
 			if (!Array.isArray(batch)) return;
-			for (const msg of batch) applyOne(msg);
-			snapshotVersion++;
+			for (const msg of batch) {
+				if (!msg?.variableId) continue;
+				raw.set(msg.variableId, {
+					value: msg.value,
+					datatype: msg.datatype,
+					lastUpdated: msg.timestamp,
+					quality: 'good'
+				});
+			}
+			version++;
 		});
 	}
 	let stopped = false;
@@ -94,14 +83,20 @@ export function startLiveValues(): () => void {
 	};
 }
 
-export const liveValues = {
-	get snapshot(): LiveValueMap {
-		return snapshotCache;
-	},
-	get version(): number {
-		return snapshotVersion;
-	},
-	get(name: string): LiveValue | undefined {
-		return internal[name];
-	}
-};
+/** Read the reactive version counter. Consumers wrap this in `$derived.by`
+ * to subscribe to updates. */
+export function liveValuesVersion(): number {
+	return version;
+}
+
+/** Return a fresh Map snapshot of all current values. */
+export function liveValuesSnapshot(): LiveValueMap {
+	return new Map(raw);
+}
+
+/** Look up a single variable's live value. Non-reactive — wrap a call in
+ * `$derived.by(() => { void liveValuesVersion(); return getLiveValue(name); })`
+ * when you need reactivity. */
+export function getLiveValue(name: string): LiveValue | undefined {
+	return raw.get(name);
+}

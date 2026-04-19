@@ -9,7 +9,7 @@
 		workspaceView,
 		type DiagnosticSeverity
 	} from '$lib/plc/workspace-state.svelte';
-	import { liveValues, startLiveValues } from '$lib/plc/live-values.svelte';
+	import { startLiveValues, liveValuesVersion, liveValuesSnapshot } from '$lib/plc/live-values.svelte';
 
 	function lspSeverityToDiagnosticSeverity(sev: number | undefined): DiagnosticSeverity {
 		if (sev === 2) return 'warning';
@@ -60,9 +60,9 @@
 	const editValue = $derived(language === 'st' ? draftStSource : draftSource);
 
 	const showInlineValues = $derived(workspaceView.showInlineValues);
-	const liveValuesSnapshot = $derived.by(() => {
-		void liveValues.version;
-		return liveValues.snapshot;
+	const liveValuesMap = $derived.by(() => {
+		void liveValuesVersion();
+		return liveValuesSnapshot();
 	});
 
 	onMount(() => {
@@ -186,7 +186,7 @@
 					useLSP
 					lspUri={`tentacle-plc://programs/${encodeURIComponent(name)}.${editLanguage === 'st' ? 'st' : 'star'}`}
 					{showInlineValues}
-					liveValues={liveValuesSnapshot}
+					liveValues={liveValuesMap}
 					onDiagnostics={(uri, diags) => {
 						workspaceDiagnostics.set(
 							uri,

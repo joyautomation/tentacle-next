@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Variable } from '$lib/types/gateway';
 	import type { PlcVariableConfig, PlcTaskConfig, ProgramListItem } from '$lib/types/plc';
-	import { subscribe } from '$lib/api/subscribe';
+	import {
+		startLiveValues,
+		liveValuesVersion,
+		getLiveValue
+	} from '$lib/plc/live-values.svelte';
 	import { workspaceSelection } from '../workspace-state.svelte';
 
 	type Props = {
@@ -13,42 +16,16 @@
 
 	let { variables, tasks, programs }: Props = $props();
 
-	let liveMap = $state<Map<string, Variable>>(new Map());
-	let version = $state(0);
 	let now = $state(Date.now());
-	let flushTimer: ReturnType<typeof setTimeout> | null = null;
-
-	function scheduleFlush() {
-		if (!flushTimer) {
-			flushTimer = setTimeout(() => {
-				flushTimer = null;
-				version++;
-			}, 300);
-		}
-	}
 
 	onMount(() => {
 		const tick = setInterval(() => {
 			now = Date.now();
 		}, 1000);
-
-		const unsub = subscribe<Variable[]>('/variables/stream/batch', (batch) => {
-			if (!batch) return;
-			for (const v of batch) {
-				const existing = liveMap.get(v.variableId);
-				liveMap.set(v.variableId, {
-					...(existing ?? ({} as Variable)),
-					...v,
-					lastUpdated: v.timestamp ?? v.lastUpdated ?? existing?.lastUpdated ?? Date.now()
-				});
-			}
-			scheduleFlush();
-		});
-
+		const stop = startLiveValues();
 		return () => {
 			clearInterval(tick);
-			if (flushTimer) clearTimeout(flushTimer);
-			unsub();
+			stop();
 		};
 	});
 
@@ -56,11 +33,11 @@
 
 	const selectedVariable = $derived.by(() => {
 		if (selection?.kind !== 'variable') return null;
-		void version;
+		void liveValuesVersion();
 		return {
 			name: selection.id,
 			config: variables[selection.id],
-			live: liveMap.get(selection.id) ?? null
+			live: getLiveValue(selection.id) ?? null
 		};
 	});
 
