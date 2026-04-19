@@ -12,6 +12,7 @@
   import { createVarCompletion } from '$lib/editor/var-completion';
   import { plcLinter, type PlcLintLanguage } from '$lib/editor/plc-lint';
   import { plcLsp } from '$lib/editor/plc-lsp';
+  import { rainbowBrackets } from '$lib/editor/rainbow-brackets';
   import { lintGutter } from '@codemirror/lint';
   import { getEffectiveTheme } from '../../routes/theme.svelte';
 
@@ -132,6 +133,7 @@
           indentWithTab,
         ]),
         getLanguageExtension(),
+        rainbowBrackets(),
         themeCompartment.of(getThemeExtension()),
         readonlyCompartment.of(EditorState.readOnly.of(readonly)),
         autocompleteCompartment.of(getAutocompleteExtension()),
