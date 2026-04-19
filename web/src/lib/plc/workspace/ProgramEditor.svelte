@@ -1,9 +1,15 @@
 <script lang="ts">
 	import { api, apiPut } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
+	import { onMount } from 'svelte';
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
-	import { workspaceDiagnostics, type DiagnosticSeverity } from '$lib/plc/workspace-state.svelte';
+	import {
+		workspaceDiagnostics,
+		workspaceView,
+		type DiagnosticSeverity
+	} from '$lib/plc/workspace-state.svelte';
+	import { liveValues, startLiveValues } from '$lib/plc/live-values.svelte';
 
 	function lspSeverityToDiagnosticSeverity(sev: number | undefined): DiagnosticSeverity {
 		if (sev === 2) return 'warning';
@@ -52,6 +58,17 @@
 	});
 
 	const editValue = $derived(language === 'st' ? draftStSource : draftSource);
+
+	const showInlineValues = $derived(workspaceView.showInlineValues);
+	const liveValuesSnapshot = $derived.by(() => {
+		void liveValues.version;
+		return liveValues.snapshot;
+	});
+
+	onMount(() => {
+		const stop = startLiveValues();
+		return () => stop();
+	});
 
 	$effect(() => {
 		if (!name) return;
@@ -126,6 +143,15 @@
 			{/if}
 		</div>
 		<div class="right">
+			<button
+				type="button"
+				class="btn toggle"
+				class:active={showInlineValues}
+				onclick={() => workspaceView.toggleInlineValues()}
+				title={showInlineValues ? 'Hide inline values' : 'Show live variable values inline'}
+			>
+				{showInlineValues ? 'Hide Values' : 'Show Values'}
+			</button>
 			{#if dirty}
 				<button type="button" class="btn subtle" onclick={revert} disabled={saving}>
 					Revert
@@ -159,6 +185,8 @@
 					enableLint
 					useLSP
 					lspUri={`tentacle-plc://programs/${encodeURIComponent(name)}.${editLanguage === 'st' ? 'st' : 'star'}`}
+					{showInlineValues}
+					liveValues={liveValuesSnapshot}
 					onDiagnostics={(uri, diags) => {
 						workspaceDiagnostics.set(
 							uri,
@@ -254,6 +282,17 @@
 
 		&.subtle {
 			color: var(--theme-text-muted);
+		}
+
+		&.toggle {
+			color: var(--theme-text-muted);
+			font-size: 0.75rem;
+
+			&.active {
+				color: var(--theme-primary);
+				border-color: var(--theme-primary);
+				background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+			}
 		}
 
 		&:disabled {

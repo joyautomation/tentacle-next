@@ -22,19 +22,44 @@ export type WorkspaceDiagnostic = {
 	source?: string;
 };
 
+const VIEW_STORAGE_KEY = 'tentacle-plc-workspace-view';
+
+function loadViewPrefs(): { showInlineValues: boolean } {
+	if (typeof localStorage === 'undefined') return { showInlineValues: false };
+	try {
+		const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+		if (!raw) return { showInlineValues: false };
+		const parsed = JSON.parse(raw) as { showInlineValues?: boolean };
+		return { showInlineValues: !!parsed.showInlineValues };
+	} catch {
+		return { showInlineValues: false };
+	}
+}
+
 const state = $state<{
 	selection: Selection;
 	tabs: ProgramTab[];
 	activeTab: string | null;
 	dirty: Record<string, boolean>;
 	diagnostics: Record<string, WorkspaceDiagnostic[]>;
+	view: { showInlineValues: boolean };
 }>({
 	selection: null,
 	tabs: [],
 	activeTab: null,
 	dirty: {},
-	diagnostics: {}
+	diagnostics: {},
+	view: loadViewPrefs()
 });
+
+function persistView() {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify(state.view));
+	} catch {
+		/* storage may be blocked — non-fatal */
+	}
+}
 
 export const workspaceSelection = {
 	get current() {
@@ -92,6 +117,20 @@ export const workspaceTabs = {
 	},
 	clearDirty(name: string) {
 		delete state.dirty[name];
+	}
+};
+
+export const workspaceView = {
+	get showInlineValues() {
+		return state.view.showInlineValues;
+	},
+	setShowInlineValues(on: boolean) {
+		state.view.showInlineValues = on;
+		persistView();
+	},
+	toggleInlineValues() {
+		state.view.showInlineValues = !state.view.showInlineValues;
+		persistView();
 	}
 };
 

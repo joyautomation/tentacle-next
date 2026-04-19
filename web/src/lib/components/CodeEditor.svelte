@@ -13,6 +13,7 @@
   import { plcLinter, type PlcLintLanguage } from '$lib/editor/plc-lint';
   import { plcLsp } from '$lib/editor/plc-lsp';
   import { rainbowBrackets } from '$lib/editor/rainbow-brackets';
+  import { inlineValues, setInlineValuesEffect, type LiveValueMap } from '$lib/editor/inline-values';
   import { lintGutter } from '@codemirror/lint';
   import { getEffectiveTheme } from '../../routes/theme.svelte';
 
@@ -31,15 +32,20 @@
     lspUri?: string;
     /** Side-channel: receive every publishDiagnostics payload (for a Problems panel). */
     onDiagnostics?: (uri: string, diagnostics: Array<{ range: { start: { line: number; character: number }; end: { line: number; character: number } }; severity?: number; message: string; source?: string }>) => void;
+    /** When true, live variable values are rendered as inline widgets next to builtin calls. */
+    showInlineValues?: boolean;
+    /** Current snapshot of live variable values. Pass a new Map reference to trigger a refresh. */
+    liveValues?: LiveValueMap;
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false, useLSP = false, lspUri, onDiagnostics }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false, useLSP = false, lspUri, onDiagnostics, showInlineValues = false, liveValues }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
   let themeCompartment = new Compartment();
   let readonlyCompartment = new Compartment();
   let autocompleteCompartment = new Compartment();
+  let inlineValuesCompartment = new Compartment();
   let updating = false;
 
   // When useLSP is on, plcLsp() returns both extensions and a completion
@@ -155,6 +161,7 @@
         themeCompartment.of(getThemeExtension()),
         readonlyCompartment.of(EditorState.readOnly.of(readonly)),
         autocompleteCompartment.of(getAutocompleteExtension()),
+        inlineValuesCompartment.of(showInlineValues ? inlineValues() : []),
         ...(enableVariableDrop ? [getDropExtension()] : []),
         ...(enableLint && !useLSP
           ? [
@@ -199,6 +206,10 @@
     });
 
     view = new EditorView({ state, parent: container });
+
+    if (showInlineValues && liveValues) {
+      view.dispatch({ effects: setInlineValuesEffect.of(liveValues) });
+    }
 
     const mediaQuery = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
     mediaQuery?.addEventListener('change', updateTheme);
@@ -249,6 +260,21 @@
   $effect(() => {
     void getEffectiveTheme();
     updateTheme();
+  });
+
+  $effect(() => {
+    if (!view) return;
+    view.dispatch({
+      effects: inlineValuesCompartment.reconfigure(showInlineValues ? inlineValues() : [])
+    });
+    if (showInlineValues && liveValues) {
+      view.dispatch({ effects: setInlineValuesEffect.of(liveValues) });
+    }
+  });
+
+  $effect(() => {
+    if (!view || !showInlineValues || !liveValues) return;
+    view.dispatch({ effects: setInlineValuesEffect.of(liveValues) });
   });
 </script>
 
