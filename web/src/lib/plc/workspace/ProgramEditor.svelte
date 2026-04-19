@@ -149,6 +149,8 @@
 					enableVariableDrop
 					flush
 					enableLint
+					useLSP
+					lspUri={`tentacle-plc://programs/${encodeURIComponent(name)}.${editLanguage === 'st' ? 'st' : 'star'}`}
 				/>
 			</div>
 		{/if}

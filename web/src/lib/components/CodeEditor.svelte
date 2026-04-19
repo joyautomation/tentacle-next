@@ -11,6 +11,8 @@
   import { structuredText } from '$lib/lang/structured-text';
   import { createVarCompletion } from '$lib/editor/var-completion';
   import { plcLinter, type PlcLintLanguage } from '$lib/editor/plc-lint';
+  import { plcLsp } from '$lib/editor/plc-lsp';
+  import { lintGutter } from '@codemirror/lint';
   import { getEffectiveTheme } from '../../routes/theme.svelte';
 
   interface Props {
@@ -22,9 +24,13 @@
     enableVariableDrop?: boolean;
     flush?: boolean;
     enableLint?: boolean;
+    /** Route diagnostics through the in-process LSP server instead of the legacy /validate POST path. */
+    useLSP?: boolean;
+    /** Stable document URI for the LSP session. Required when useLSP is true. */
+    lspUri?: string;
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false, useLSP = false, lspUri }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
@@ -128,11 +134,20 @@
         readonlyCompartment.of(EditorState.readOnly.of(readonly)),
         autocompleteCompartment.of(getAutocompleteExtension()),
         ...(enableVariableDrop ? [getDropExtension()] : []),
-        ...(enableLint
+        ...(enableLint && !useLSP
           ? [
               plcLinter({
                 language: () => language as PlcLintLanguage,
                 variableNames: () => variableNames,
+              }),
+            ]
+          : []),
+        ...(useLSP && lspUri
+          ? [
+              lintGutter(),
+              plcLsp({
+                uri: lspUri,
+                language: () => (language === 'python' ? 'starlark' : language) as 'starlark' | 'st',
               }),
             ]
           : []),

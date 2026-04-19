@@ -246,6 +246,7 @@ func (m *Module) routes() http.Handler {
 		r.Get("/plcs/{plcId}/programs", m.handleListPlcPrograms)
 		r.Post("/plcs/{plcId}/programs/transpile", m.handleTranspilePlcProgram)
 		r.Post("/plcs/{plcId}/programs/validate", m.handleValidatePlcProgram)
+		r.Get("/plcs/{plcId}/lsp", m.handlePlcLSP)
 		r.Post("/plcs/{plcId}/programs/ladder/parse", m.handleParseLadder)
 		r.Post("/plcs/{plcId}/programs/ladder/generate", m.handleGenerateLadder)
 		r.Get("/plcs/{plcId}/programs/{name}", m.handleGetPlcProgram)
