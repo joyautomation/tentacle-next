@@ -139,7 +139,7 @@ class InlineValueWidget extends WidgetType {
 	override toDOM(): HTMLElement {
 		const span = document.createElement('span');
 		span.className = `cm-inline-value cm-inline-${this.kind}`;
-		span.textContent = ' ⇒ ' + this.label;
+		span.textContent = this.label;
 		return span;
 	}
 
@@ -200,36 +200,45 @@ const inlineValuesPlugin = ViewPlugin.fromClass(
 
 const inlineValuesTheme = EditorView.baseTheme({
 	'.cm-inline-value': {
-		marginLeft: '0.25rem',
-		padding: '0 0.3rem',
-		borderRadius: '0.1875rem',
-		fontFamily: 'inherit',
-		fontSize: '0.85em',
-		fontWeight: '500',
-		opacity: '0.85',
+		marginLeft: '0.5rem',
+		padding: '0.05rem 0.4rem',
+		borderRadius: '999px',
+		border: '1px solid',
+		fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+		fontSize: '0.75em',
+		fontWeight: '600',
+		lineHeight: '1.2',
+		letterSpacing: '0.01em',
+		verticalAlign: 'middle',
 		cursor: 'default',
-		pointerEvents: 'none'
+		pointerEvents: 'none',
+		userSelect: 'none'
 	},
 	'.cm-inline-good': {
 		color: '#64d88a',
-		background: 'rgba(100, 216, 138, 0.08)'
+		borderColor: 'rgba(100, 216, 138, 0.45)',
+		background: 'rgba(100, 216, 138, 0.12)'
 	},
 	'.cm-inline-stale': {
 		color: '#e0b050',
-		background: 'rgba(224, 176, 80, 0.08)'
+		borderColor: 'rgba(224, 176, 80, 0.45)',
+		background: 'rgba(224, 176, 80, 0.12)'
 	},
 	'.cm-inline-bad': {
 		color: '#ff6b6b',
-		background: 'rgba(255, 107, 107, 0.08)'
+		borderColor: 'rgba(255, 107, 107, 0.45)',
+		background: 'rgba(255, 107, 107, 0.12)'
 	},
 	'.cm-inline-unknown': {
-		color: '#999',
-		background: 'rgba(150, 150, 150, 0.08)'
+		color: '#aaa',
+		borderColor: 'rgba(150, 150, 150, 0.4)',
+		background: 'rgba(150, 150, 150, 0.12)'
 	},
 	'.cm-inline-missing': {
 		color: '#888',
-		fontStyle: 'italic',
-		opacity: '0.55'
+		borderColor: 'rgba(150, 150, 150, 0.3)',
+		background: 'rgba(150, 150, 150, 0.06)',
+		fontStyle: 'italic'
 	}
 });
 
