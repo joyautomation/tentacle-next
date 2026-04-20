@@ -22,6 +22,7 @@ func Command(moduleID, variableID string) string        { return fmt.Sprintf("%s
 func CommandWildcard(moduleID string) string             { return moduleID + ".command.>" }
 func Variables(moduleID string) string                  { return moduleID + ".variables" }
 func Shutdown(moduleID string) string                   { return moduleID + ".shutdown" }
+func PlcTaskStats(plcID string) string                  { return plcID + ".plc.task-stats" }
 
 // Service management.
 func ServiceLogs(serviceType, moduleID string) string { return fmt.Sprintf("service.logs.%s.%s", serviceType, moduleID) }

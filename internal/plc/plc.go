@@ -156,6 +156,14 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.subs = append(m.subs, varSub)
 	m.mu.Unlock()
 
+	// Handle task-stats request/reply.
+	statsSub, _ := b.Subscribe(topics.PlcTaskStats(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		m.handleTaskStatsRequest(reply)
+	})
+	m.mu.Lock()
+	m.subs = append(m.subs, statsSub)
+	m.mu.Unlock()
+
 	m.log.Info("plc: started")
 
 	// Block until context cancelled or signal.
@@ -340,6 +348,36 @@ func (m *Module) handleVariablesRequest(reply bus.ReplyFunc) {
 	data, err := json.Marshal(result)
 	if err != nil {
 		m.log.Error("plc: failed to marshal variables response", "error", err)
+		return
+	}
+	reply(data)
+}
+
+// handleTaskStatsRequest returns per-task scan-time statistics.
+// The response is a map of taskID -> TaskStatsSnapshot, plus the task's
+// configured scan rate so the UI can compute headroom.
+func (m *Module) handleTaskStatsRequest(reply bus.ReplyFunc) {
+	if reply == nil {
+		return
+	}
+	m.mu.RLock()
+	type taskStatsResponse struct {
+		TaskStatsSnapshot
+		ScanRateMs int `json:"scanRateMs"`
+	}
+	out := make(map[string]taskStatsResponse, len(m.tasks))
+	for id, t := range m.tasks {
+		snap := t.stats.snapshot()
+		out[id] = taskStatsResponse{
+			TaskStatsSnapshot: snap,
+			ScanRateMs:        int(t.scanRate / time.Millisecond),
+		}
+	}
+	m.mu.RUnlock()
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		m.log.Error("plc: failed to marshal task stats response", "error", err)
 		return
 	}
 	reply(data)

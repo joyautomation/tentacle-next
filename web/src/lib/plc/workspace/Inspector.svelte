@@ -6,6 +6,11 @@
 		liveValuesVersion,
 		getLiveValue
 	} from '$lib/plc/live-values.svelte';
+	import {
+		startTaskStats,
+		taskStatsVersion,
+		getTaskStats
+	} from '$lib/plc/task-stats.svelte';
 	import { workspaceSelection } from '../workspace-state.svelte';
 
 	type Props = {
@@ -23,9 +28,11 @@
 			now = Date.now();
 		}, 1000);
 		const stop = startLiveValues();
+		const stopStats = startTaskStats();
 		return () => {
 			clearInterval(tick);
 			stop();
+			stopStats();
 		};
 	});
 
@@ -45,6 +52,28 @@
 		if (selection?.kind !== 'task') return null;
 		return tasks[selection.id] ?? null;
 	});
+
+	const selectedTaskStats = $derived.by(() => {
+		if (selection?.kind !== 'task') return null;
+		void taskStatsVersion();
+		return getTaskStats(selection.id) ?? null;
+	});
+
+	function formatMicros(us: number): string {
+		if (!Number.isFinite(us) || us <= 0) return '—';
+		if (us < 1) return `${us.toFixed(2)} µs`;
+		if (us < 1000) return `${us.toFixed(1)} µs`;
+		const ms = us / 1000;
+		if (ms < 100) return `${ms.toFixed(2)} ms`;
+		return `${ms.toFixed(1)} ms`;
+	}
+
+	function headroomPct(stats: { p99Us: number; scanRateMs: number }): number | null {
+		if (!stats.scanRateMs) return null;
+		const scanUs = stats.scanRateMs * 1000;
+		if (scanUs <= 0) return null;
+		return Math.max(0, Math.min(100, 100 * (1 - stats.p99Us / scanUs)));
+	}
 
 	const selectedProgram = $derived.by(() => {
 		if (selection?.kind !== 'program') return null;
@@ -186,6 +215,69 @@
 				</span>
 			</div>
 		</div>
+		{#if selectedTaskStats}
+			{@const s = selectedTaskStats}
+			{@const headroom = headroomPct(s)}
+			<div class="section">
+				<div class="label">Scan time ({s.samples} samples)</div>
+				<div class="stat-grid">
+					<div class="stat">
+						<span class="stat-k">p50</span>
+						<span class="stat-v">{formatMicros(s.p50Us)}</span>
+					</div>
+					<div class="stat">
+						<span class="stat-k">p95</span>
+						<span class="stat-v">{formatMicros(s.p95Us)}</span>
+					</div>
+					<div class="stat">
+						<span class="stat-k">p99</span>
+						<span class="stat-v">{formatMicros(s.p99Us)}</span>
+					</div>
+					<div class="stat">
+						<span class="stat-k">max</span>
+						<span class="stat-v">{formatMicros(s.maxUs)}</span>
+					</div>
+					<div class="stat">
+						<span class="stat-k">mean</span>
+						<span class="stat-v">{formatMicros(s.meanUs)}</span>
+					</div>
+					<div class="stat">
+						<span class="stat-k">last</span>
+						<span class="stat-v">{formatMicros(s.lastUs)}</span>
+					</div>
+				</div>
+				<div class="field">
+					<span class="k">Runs</span>
+					<span class="val">{s.totalRuns.toLocaleString()}</span>
+				</div>
+				{#if s.totalErrors > 0}
+					<div class="field">
+						<span class="k">Errors</span>
+						<span class="val err">{s.totalErrors.toLocaleString()}</span>
+					</div>
+				{/if}
+				<div class="field">
+					<span class="k">Effective</span>
+					<span class="val">{s.effectiveHz > 0 ? `${s.effectiveHz.toFixed(1)} Hz` : '—'}</span>
+				</div>
+				{#if headroom !== null}
+					<div class="field">
+						<span class="k">Headroom</span>
+						<span
+							class="val"
+							class:warn={headroom < 20}
+							class:err={headroom < 5}
+						>{headroom.toFixed(0)}%</span>
+					</div>
+				{/if}
+				{#if s.lastError}
+					<div class="field">
+						<span class="k">Last error</span>
+						<span class="val err">{s.lastError}</span>
+					</div>
+				{/if}
+			</div>
+		{/if}
 	{:else if selectedProgram}
 		<div class="section">
 			<div class="label">Program</div>
@@ -331,7 +423,46 @@
 			&.muted {
 				color: var(--theme-text-muted);
 			}
+
+			&.warn {
+				color: var(--theme-warning, #e0b050);
+			}
+
+			&.err {
+				color: var(--theme-danger, #c33);
+			}
 		}
+	}
+
+	.stat-grid {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.25rem 0.5rem;
+		margin-bottom: 0.5rem;
+	}
+
+	.stat {
+		display: flex;
+		flex-direction: column;
+		padding: 0.25rem 0.375rem;
+		background: var(--theme-surface);
+		border-radius: 0.1875rem;
+		border: 1px solid var(--theme-border);
+	}
+
+	.stat-k {
+		font-size: 0.625rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--theme-text-muted);
+	}
+
+	.stat-v {
+		font-family: var(--font-mono, monospace);
+		font-size: 0.8125rem;
+		font-weight: 600;
+		color: var(--theme-text);
 	}
 
 	.empty {

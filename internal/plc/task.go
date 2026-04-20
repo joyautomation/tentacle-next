@@ -14,6 +14,7 @@ type taskRunner struct {
 	scanRate time.Duration
 	engine   *Engine
 	state    *TaskState
+	stats    *scanStats
 	log      *slog.Logger
 	stopCh   chan struct{}
 	doneCh   chan struct{}
@@ -27,6 +28,7 @@ func newTaskRunner(name, progRef string, scanRateMs int, engine *Engine, log *sl
 		scanRate: time.Duration(scanRateMs) * time.Millisecond,
 		engine:   engine,
 		state:    NewTaskState(),
+		stats:    newScanStats(),
 		log:      log.With("task", name),
 		stopCh:   make(chan struct{}),
 		doneCh:   make(chan struct{}),
@@ -51,7 +53,10 @@ func (t *taskRunner) run() {
 			t.log.Info("task stopped")
 			return
 		case <-ticker.C:
-			if err := t.engine.Execute(t.progRef, t.state); err != nil {
+			start := time.Now()
+			err := t.engine.Execute(t.progRef, t.state)
+			t.stats.record(time.Since(start), err)
+			if err != nil {
 				t.log.Error("task execution error", "error", err)
 			}
 		}
