@@ -66,3 +66,16 @@ jobs:
           CGO_LDFLAGS_ALLOW: ".*"
           C_INCLUDE_PATH: /usr/local/include
           LIBRARY_PATH: /usr/local/lib
+
+      - name: Publish to DigitalOcean Spaces + Directus
+        run: |
+          sudo apt-get install -y -qq s3cmd jq
+          ./scripts/release-infra/publish-release.sh
+        env:
+          DO_SPACES_KEY: ${{ secrets.DO_SPACES_KEY }}
+          DO_SPACES_SECRET: ${{ secrets.DO_SPACES_SECRET }}
+          DO_SPACES_BUCKET: ${{ secrets.DO_SPACES_BUCKET }}
+          DO_SPACES_REGION: ${{ secrets.DO_SPACES_REGION }}
+          DIRECTUS_URL: ${{ secrets.DIRECTUS_URL }}
+          DIRECTUS_TOKEN: ${{ secrets.DIRECTUS_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

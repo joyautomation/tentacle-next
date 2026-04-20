@@ -22,13 +22,13 @@ func (m *Module) handleGetVersion(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleListReleases returns all available releases from GitHub (cached).
+// handleListReleases returns all available releases from the joyautomation.com
+// release manifest (cached).
 // GET /api/v1/system/releases
 func (m *Module) handleListReleases(w http.ResponseWriter, _ *http.Request) {
-	ghOrg := os.Getenv("TENTACLE_GH_ORG")
-	ghToken := os.Getenv("GITHUB_TOKEN")
+	baseURL := os.Getenv("TENTACLE_RELEASE_BASE")
 
-	resp, err := selfupgrade.ListReleases(ghOrg, ghToken)
+	resp, err := selfupgrade.ListReleases(baseURL)
 	if err != nil {
 		status := http.StatusBadGateway
 		var offline *selfupgrade.OfflineError
@@ -66,11 +66,11 @@ func (m *Module) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	baseURL := os.Getenv("TENTACLE_RELEASE_BASE")
+
 	// If no version specified, resolve latest from release list.
 	if body.Version == "" {
-		ghOrg := os.Getenv("TENTACLE_GH_ORG")
-		ghToken := os.Getenv("GITHUB_TOKEN")
-		resp, err := selfupgrade.ListReleases(ghOrg, ghToken)
+		resp, err := selfupgrade.ListReleases(baseURL)
 		if err != nil || len(resp.Releases) == 0 {
 			msg := "failed to resolve latest version"
 			if err != nil {
@@ -82,10 +82,7 @@ func (m *Module) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		body.Version = resp.Releases[0].Version
 	}
 
-	ghOrg := os.Getenv("TENTACLE_GH_ORG")
-	ghToken := os.Getenv("GITHUB_TOKEN")
-
-	go selfupgrade.PerformUpgrade(body.Version, ghOrg, ghToken, service.BinaryPath, m.log)
+	go selfupgrade.PerformUpgrade(body.Version, baseURL, service.BinaryPath, m.log)
 
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"status":  "upgrading",

@@ -71,22 +71,23 @@ Experimental modules are marked with a badge in the web UI. On stable builds, th
 
 ### Download a release
 
-Download the latest binary from [GitHub Releases](https://github.com/joyautomation/tentacle-next/releases):
+Download the latest binary directly:
 
 ```bash
-# Replace VERSION with the desired release (e.g. 0.0.8)
-VERSION=0.0.8
+# amd64
+curl -LO "https://joyautomation.com/downloads/tentacle/latest/linux_amd64.tar.gz"
+tar xzf linux_amd64.tar.gz
 
-# For amd64
-curl -LO "https://github.com/joyautomation/tentacle-next/releases/download/v${VERSION}/tentacle_${VERSION}_linux_amd64.tar.gz"
-tar xzf "tentacle_${VERSION}_linux_amd64.tar.gz"
-
-# For arm64
-curl -LO "https://github.com/joyautomation/tentacle-next/releases/download/v${VERSION}/tentacle_${VERSION}_linux_arm64.tar.gz"
-tar xzf "tentacle_${VERSION}_linux_arm64.tar.gz"
+# arm64
+curl -LO "https://joyautomation.com/downloads/tentacle/latest/linux_arm64.tar.gz"
+tar xzf linux_arm64.tar.gz
 ```
 
-Or browse all releases at [github.com/joyautomation/tentacle-next/releases](https://github.com/joyautomation/tentacle-next/releases).
+To pin a specific version, replace `latest` with the tag (e.g.
+`https://joyautomation.com/downloads/tentacle/v0.0.11/linux_amd64.tar.gz`).
+
+Browse all releases and notes at
+[joyautomation.com/software/tentacle/releases](https://joyautomation.com/software/tentacle/releases).
 
 The binary is fully self-contained — no runtime dependencies.
 
