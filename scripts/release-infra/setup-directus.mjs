@@ -23,22 +23,26 @@ const headers = {
 	'Content-Type': 'application/json'
 };
 
-async function api(method, path, body) {
+async function api(method, path, body, { allowMissing = false } = {}) {
 	const res = await fetch(`${URL_BASE}${path}`, {
 		method,
 		headers,
 		body: body ? JSON.stringify(body) : undefined
 	});
-	if (!res.ok && res.status !== 404) {
+	// Directus returns 403 (not 404) for nonexistent collections/fields to
+	// prevent enumeration. Treat 403/404 alike when the caller asked for it.
+	if (allowMissing && (res.status === 403 || res.status === 404)) return null;
+	if (!res.ok) {
 		const txt = await res.text();
 		throw new Error(`${method} ${path} → ${res.status}: ${txt}`);
 	}
-	return res.status === 404 ? null : res.json().catch(() => null);
+	return res.json().catch(() => null);
 }
 
 async function ensureCollection() {
-	const existing = await api('GET', `/collections/${COLLECTION}`);
-	if (existing) {
+	const list = await api('GET', '/collections?limit=-1');
+	const exists = list?.data?.some((c) => c.collection === COLLECTION);
+	if (exists) {
 		console.log(`✓ collection ${COLLECTION} already exists`);
 		return;
 	}
@@ -107,7 +111,9 @@ const FIELDS = [
 ];
 
 async function ensureField(field) {
-	const existing = await api('GET', `/fields/${COLLECTION}/${field.field}`);
+	const existing = await api('GET', `/fields/${COLLECTION}/${field.field}`, undefined, {
+		allowMissing: true
+	});
 	if (existing) {
 		console.log(`  ✓ field ${field.field} exists`);
 		return;
@@ -116,21 +122,63 @@ async function ensureField(field) {
 	await api('POST', `/fields/${COLLECTION}`, field);
 }
 
+async function findPublicPolicy() {
+	// Try a few lookup strategies — the "Public" policy may have a localized
+	// or empty name in different Directus versions.
+	const direct = await api(
+		'GET',
+		'/policies?filter[name][_eq]=Public&limit=1&fields=id,name'
+	);
+	if (direct?.data?.[0]) return direct.data[0];
+
+	const role = await api(
+		'GET',
+		'/roles?filter[name][_eq]=Public&limit=1&fields=id'
+	);
+	const publicRoleId = role?.data?.[0]?.id;
+	if (publicRoleId) {
+		const access = await api(
+			'GET',
+			`/access?filter[role][_eq]=${publicRoleId}&fields=policy.id,policy.name`
+		);
+		const item = access?.data?.find((a) => a.policy);
+		if (item?.policy) return item.policy;
+	}
+
+	const allPolicies = await api('GET', '/policies?limit=-1&fields=id,name');
+	const fuzzy = allPolicies?.data?.find((p) =>
+		(p.name ?? '').toLowerCase().includes('public')
+	);
+	return fuzzy ?? null;
+}
+
 async function ensurePublicRead() {
-	// Allow public role to read this collection (so the website can list
-	// releases without auth, and the manifest endpoint works for tentacles).
-	const policies = await api('GET', `/permissions?filter[collection][_eq]=${COLLECTION}&filter[action][_eq]=read`);
-	const items = policies?.data ?? [];
-	const hasPublic = items.some((p) => p.policy === null || p.role === null);
-	if (hasPublic) {
+	const publicPolicy = await findPublicPolicy();
+	if (!publicPolicy) {
+		console.log('! could not find a "Public" policy in Directus.');
+		console.log(
+			'  Grant read access on tentacle_releases to the Public policy manually:'
+		);
+		console.log(
+			'  Settings → Access Control → Public → Permissions → tentacle_releases → Read = All access'
+		);
+		return;
+	}
+
+	const existing = await api(
+		'GET',
+		`/permissions?filter[collection][_eq]=${COLLECTION}&filter[action][_eq]=read&filter[policy][_eq]=${publicPolicy.id}&limit=1`
+	);
+	if (existing?.data?.length) {
 		console.log('✓ public read permission already configured');
 		return;
 	}
-	console.log('+ granting public read permission');
+
+	console.log('+ granting public read permission via Public policy');
 	await api('POST', '/permissions', {
 		collection: COLLECTION,
 		action: 'read',
-		role: null,
+		policy: publicPolicy.id,
 		fields: ['*']
 	});
 }
