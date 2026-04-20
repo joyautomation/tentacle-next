@@ -34,25 +34,25 @@ S3CMD=(s3cmd
   --host="$ENDPOINT"
   --host-bucket="%(bucket)s.$ENDPOINT")
 
-echo "==> Creating Space '$BUCKET' in $SPACES_REGION..."
-"${S3CMD[@]}" mb "s3://$BUCKET" 2>&1 | grep -v "BucketAlreadyOwnedByYou" || true
+# Verify the key can write to the bucket. Doesn't try to create the bucket
+# (DO scoped keys can't run CreateBucket — create it via the web console).
+echo "==> Verifying access to bucket '$BUCKET'..."
+PROBE=$(mktemp)
+echo "tentacle-release-infra ok" > "$PROBE"
+if ! "${S3CMD[@]}" --acl-public put "$PROBE" "s3://$BUCKET/.setup-probe" >/dev/null 2>&1; then
+  echo "    ERROR: cannot write to s3://$BUCKET. Check that:"
+  echo "      - the bucket exists (create it at https://cloud.digitalocean.com/spaces)"
+  echo "      - SPACES_REGION ($SPACES_REGION) matches the bucket's region"
+  echo "      - the access key has Read/Write on this bucket"
+  rm -f "$PROBE"
+  exit 1
+fi
+"${S3CMD[@]}" del "s3://$BUCKET/.setup-probe" >/dev/null 2>&1 || true
+rm -f "$PROBE"
+echo "    OK"
 
-POLICY_FILE=$(mktemp)
-trap 'rm -f "$POLICY_FILE"' EXIT
-cat > "$POLICY_FILE" <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Sid": "PublicReadReleases",
-    "Effect": "Allow",
-    "Principal": {"AWS": ["*"]},
-    "Action": ["s3:GetObject"],
-    "Resource": ["arn:aws:s3:::$BUCKET/releases/*"]
-  }]
-}
-EOF
-echo "==> Applying public-read policy to releases/* prefix..."
-"${S3CMD[@]}" setpolicy "$POLICY_FILE" "s3://$BUCKET"
+# No bucket policy needed: publish-release.sh sets --acl-public on every
+# uploaded object, so each tarball is publicly readable on its own.
 
 echo "==> Enabling CDN..."
 ORIGIN="$BUCKET.$ENDPOINT"

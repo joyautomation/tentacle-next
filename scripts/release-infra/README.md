@@ -19,16 +19,23 @@ The DigitalOcean web console is the only way to create Spaces access keys:
 
 ## 2. Create the Space + CDN
 
+DO scoped access keys can't run bucket-admin operations like CreateBucket
+or PutBucketPolicy — create the Space yourself in the web console first,
+then this script verifies access and enables the CDN. Each uploaded
+tarball gets `--acl-public` at upload time, so no bucket policy is
+needed.
+
+1. Create the Space at https://cloud.digitalocean.com/spaces (any name,
+   defaults to `joyautomation-releases`)
+2. Run:
+
 ```bash
 chmod +x setup-spaces.sh
-SPACES_KEY=...  SPACES_SECRET=...  ./setup-spaces.sh
+SPACES_KEY=...  SPACES_SECRET=...  BUCKET=<your-bucket>  ./setup-spaces.sh
 ```
 
 Defaults: region `sfo3`, bucket `joyautomation-releases`. Override with
 `SPACES_REGION=` and `BUCKET=` env vars.
-
-The script creates the Space, applies a public-read policy on the
-`releases/*` prefix, and enables the CDN.
 
 ## 3. Create the Directus collection
 
