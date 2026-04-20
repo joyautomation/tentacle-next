@@ -65,10 +65,6 @@
 </script>
 
 <div class="workspace">
-	<div class="toolbar">
-		<strong class="title">PLC Workspace</strong>
-	</div>
-
 	<div class="split-root">
 		{#if !layout.leftOpen}
 			<button
@@ -246,20 +242,6 @@
 		flex-direction: column;
 		flex: 1;
 		min-height: 0;
-	}
-
-	.toolbar {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-		padding: 0.5rem 1rem;
-		border-bottom: 1px solid var(--theme-border);
-		background: var(--theme-surface);
-	}
-
-	.title {
-		font-size: 0.875rem;
-		color: var(--theme-text);
 	}
 
 	.split-root {
@@ -443,22 +425,6 @@
 		a {
 			color: var(--theme-primary);
 		}
-	}
-
-	.label {
-		font-size: 0.6875rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--theme-text-muted);
-	}
-
-	.title {
-		font-size: 1rem;
-		font-weight: 600;
-		font-family: var(--font-mono, monospace);
-		color: var(--theme-text);
-		margin-bottom: 0.25rem;
 	}
 
 	:global(.splitpanes.plc-workspace .splitpanes__splitter) {
