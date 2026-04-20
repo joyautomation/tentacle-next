@@ -175,14 +175,10 @@
   }
 
   .service-tabs {
-    padding: 0 2rem;
     background: var(--theme-surface);
   }
 
   @media (max-width: 640px) {
-    .service-tabs {
-      padding: 0 1rem;
-    }
     .service-nav {
       padding: 0.75rem 1rem;
     }
