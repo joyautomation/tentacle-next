@@ -242,19 +242,23 @@ type TimelinePoint struct {
 
 // StoreForwardStatus is the JSON-friendly status snapshot.
 type StoreForwardStatus struct {
-	State             string          `json:"state"`
-	PrimaryHostID     string          `json:"primaryHostId,omitempty"`
-	PrimaryHostOnline bool            `json:"primaryHostOnline"`
-	BufferedCount     int             `json:"bufferedCount"`
-	MaxRecords        int             `json:"maxRecords"`
-	UsagePercent      float64         `json:"usagePercent"`
-	Draining          bool            `json:"draining"`
-	DrainETA          float64         `json:"drainEtaSeconds"`
-	TotalBuffered     int64           `json:"totalBuffered"`
-	TotalDrained      int64           `json:"totalDrained"`
-	TotalEvicted      int64           `json:"totalEvicted"`
-	PublishRate       float64         `json:"publishRate"`
-	Timeline          []TimelinePoint `json:"timeline"`
+	State                 string          `json:"state"`
+	PrimaryHostID         string          `json:"primaryHostId,omitempty"`
+	PrimaryHostOnline     bool            `json:"primaryHostOnline"`
+	PrimaryHostConfigured bool            `json:"primaryHostConfigured"`
+	PrimaryHostSeen       bool            `json:"primaryHostSeen"`
+	BrokerReachable       bool            `json:"brokerReachable"`
+	NodeBorn              bool            `json:"nodeBorn"`
+	BufferedCount         int             `json:"bufferedCount"`
+	MaxRecords            int             `json:"maxRecords"`
+	UsagePercent          float64         `json:"usagePercent"`
+	Draining              bool            `json:"draining"`
+	DrainETA              float64         `json:"drainEtaSeconds"`
+	TotalBuffered         int64           `json:"totalBuffered"`
+	TotalDrained          int64           `json:"totalDrained"`
+	TotalEvicted          int64           `json:"totalEvicted"`
+	PublishRate           float64         `json:"publishRate"`
+	Timeline              []TimelinePoint `json:"timeline"`
 }
 
 func (sf *StoreForwardBuffer) Status() StoreForwardStatus {

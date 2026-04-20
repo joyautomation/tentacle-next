@@ -50,7 +50,11 @@ type Bridge struct {
 	// Inputs to the store-forward state reconciler. hostOnline starts true
 	// when no primary host is configured (we publish whenever the node is
 	// born); otherwise it flips with STATE messages from the primary host.
+	// hostSeen records whether we've ever received a STATE message — it
+	// lets the UI distinguish "waiting for primary host" (never seen) from
+	// "primary host went offline" (seen then lost).
 	hostOnline bool
+	hostSeen   bool
 }
 
 // NewBridge creates a new NATS-to-MQTT bridge.
@@ -558,6 +562,7 @@ func (br *Bridge) handleHostState(hostID string, online bool) {
 	}
 	br.mu.Lock()
 	br.hostOnline = online
+	br.hostSeen = true
 	br.mu.Unlock()
 	br.reconcileSFState()
 }
@@ -756,6 +761,14 @@ func (br *Bridge) subscribeToSFStatus() {
 		}
 		status := br.sf.Status()
 		status.PrimaryHostID = br.config.PrimaryHostID
+		status.PrimaryHostConfigured = br.config.PrimaryHostID != ""
+		br.mu.RLock()
+		status.PrimaryHostSeen = br.hostSeen
+		br.mu.RUnlock()
+		if br.node != nil {
+			status.BrokerReachable = br.node.IsBrokerReachable()
+			status.NodeBorn = br.node.State() == StateBorn
+		}
 		respData, err := json.Marshal(status)
 		if err != nil {
 			return
