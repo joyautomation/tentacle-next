@@ -161,6 +161,11 @@ function buildDecorations(view: EditorView): DecorationSet {
 	const values = view.state.field(inlineValuesField, false) ?? new Map();
 	const text = view.state.doc.toString();
 	const calls = scanCallSites(text);
+	// RangeSetBuilder requires ascending `from` positions. Nested calls
+	// (e.g. `set_var("a", get_num("b"))`) are emitted outer-first by the
+	// regex scanner, which would violate that invariant and silently drop
+	// all decorations. Sort by end-of-call position before feeding them in.
+	calls.sort((a, b) => a.endPos - b.endPos);
 	for (const call of calls) {
 		const lv = values.get(call.name);
 		const kind = kindFor(lv);
