@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { subscribe } from '$lib/api/subscribe';
-  import { apiPost } from '$lib/api/client';
+  import { api, apiPost } from '$lib/api/client';
   import { state as saltState } from '@joyautomation/salt';
 
   interface LogEntry {
@@ -49,12 +49,17 @@
     })
   );
 
+  function tsToMs(ts: string | number): number {
+    if (typeof ts === 'number') return ts;
+    if (/^\d+$/.test(ts)) return Number(ts);
+    const t = new Date(ts).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+
   function formatTime(ts: string | number): string {
-    // Handle both ISO strings and Unix millis
-    const d = typeof ts === 'number' || /^\d+$/.test(String(ts))
-      ? new Date(Number(ts))
-      : new Date(ts);
-    if (isNaN(d.getTime())) return String(ts);
+    const t = tsToMs(ts);
+    if (!t) return String(ts);
+    const d = new Date(t);
     const h = String(d.getHours()).padStart(2, '0');
     const m = String(d.getMinutes()).padStart(2, '0');
     const s = String(d.getSeconds()).padStart(2, '0');
@@ -112,18 +117,54 @@
     }
   }
 
+  // Refresh from the buffered-logs endpoint and merge anything we don't already have.
+  // SSE drops silently when the tab backgrounds or the network blips; this fills the gap.
+  let refreshing = false;
+  let lastRefreshAt = 0;
+  async function refreshFromBuffer() {
+    if (refreshing) return;
+    if (Date.now() - lastRefreshAt < 2000) return;
+    refreshing = true;
+    lastRefreshAt = Date.now();
+    try {
+      const result = await api<LogEntry[]>(`/services/${serviceType}/logs?limit=${MAX_LINES}`);
+      if (!result.data || result.data.length === 0) return;
+      const latestShown = logs.length > 0 ? tsToMs(logs[0].timestamp) : 0;
+      const fresh = result.data
+        .filter((e) => tsToMs(e.timestamp) > latestShown)
+        .reverse() // backend returns oldest→newest; we render newest first
+        .map((e) => ({ ...e, _id: logIdCounter++ }));
+      if (fresh.length === 0) return;
+      logs = [...fresh, ...logs].slice(0, MAX_LINES);
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  function onVisibilityChange() {
+    if (document.visibilityState === 'visible') {
+      refreshFromBuffer();
+    }
+  }
+
   onMount(() => {
     // Subscribe to real-time log stream
     unsubscribe = subscribe<LogEntry>(
       `/services/${serviceType}/logs/stream`,
       (data) => {
         enqueueLog(data);
+      },
+      () => {
+        // EventSource auto-reconnects with backoff; once it does, replay the gap.
+        refreshFromBuffer();
       }
     );
+    document.addEventListener('visibilitychange', onVisibilityChange);
   });
 
   onDestroy(() => {
     unsubscribe?.();
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     pendingLogs = [];
     flushScheduled = false;
   });
