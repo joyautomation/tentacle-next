@@ -94,6 +94,7 @@
 		align-items: stretch;
 		gap: 0;
 		overflow-x: auto;
+		overflow-y: hidden;
 		-webkit-overflow-scrolling: touch;
 		border-bottom: 1px solid var(--theme-border);
 		background: var(--theme-surface);
