@@ -1,6 +1,7 @@
 <script lang="ts">
 	import LogViewer from '$lib/components/LogViewer.svelte';
 	import ProblemsView from '$lib/plc/workspace/ProblemsView.svelte';
+	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceDiagnostics } from '$lib/plc/workspace-state.svelte';
 
 	type Props = {
@@ -15,35 +16,29 @@
 
 	const problemCount = $derived(workspaceDiagnostics.total);
 	const errorCount = $derived(workspaceDiagnostics.errorCount);
+
+	const tabs = $derived<TabItem[]>([
+		{ id: 'problems', label: 'Problems' },
+		{ id: 'logs', label: 'Logs' }
+	]);
 </script>
 
 <section class="panel">
 	<header class="panel-header">
-		<div class="tabs" role="tablist">
-			<button
-				type="button"
-				role="tab"
-				aria-selected={activeTab === 'problems'}
-				class="tab"
-				class:active={activeTab === 'problems'}
-				onclick={() => (activeTab = 'problems')}
-			>
-				Problems
-				{#if problemCount > 0}
+		<Tabs
+			{tabs}
+			active={activeTab}
+			onChange={(id) => (activeTab = id as TabId)}
+			size="sm"
+			ariaLabel="Output panel"
+		>
+			{#snippet tab({ tab }: { tab: TabItem; active: boolean })}
+				<span>{tab.label}</span>
+				{#if tab.id === 'problems' && problemCount > 0}
 					<span class="badge" class:error={errorCount > 0}>{problemCount}</span>
 				{/if}
-			</button>
-			<button
-				type="button"
-				role="tab"
-				aria-selected={activeTab === 'logs'}
-				class="tab"
-				class:active={activeTab === 'logs'}
-				onclick={() => (activeTab = 'logs')}
-			>
-				Logs
-			</button>
-		</div>
+			{/snippet}
+		</Tabs>
 	</header>
 	<div class="panel-body" class:with-padding={activeTab === 'logs'}>
 		{#if activeTab === 'problems'}
@@ -64,40 +59,7 @@
 	}
 
 	.panel-header {
-		padding: 0;
 		background: var(--theme-surface);
-		border-bottom: 1px solid var(--theme-border);
-	}
-
-	.tabs {
-		display: flex;
-		gap: 0;
-	}
-
-	.tab {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.875rem;
-		font-size: 0.75rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--theme-text-muted);
-		background: transparent;
-		border: 0;
-		border-bottom: 2px solid transparent;
-		cursor: pointer;
-		transition: color 0.12s ease, border-color 0.12s ease;
-
-		&:hover {
-			color: var(--theme-text);
-		}
-
-		&.active {
-			color: var(--theme-primary);
-			border-bottom-color: var(--theme-primary);
-		}
 	}
 
 	.badge {
@@ -113,6 +75,7 @@
 		color: var(--theme-text);
 		background: var(--theme-border);
 		border-radius: 0.625rem;
+		letter-spacing: 0;
 
 		&.error {
 			color: white;

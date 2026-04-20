@@ -1,32 +1,120 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { getServiceName } from '$lib/constants/services';
+  import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 
   let { children } = $props();
 
   const serviceType = $derived($page.params.serviceType ?? '');
   const serviceName = $derived(getServiceName(serviceType));
 
-  const currentTab = $derived(() => {
+  const currentTab = $derived.by(() => {
     const path = $page.url?.pathname ?? '';
-    if (path.endsWith('/logs')) return 'logs';
-    if (path.endsWith('/traffic')) return 'traffic';
-    if (path.endsWith('/info')) return 'info';
-    if (path.endsWith('/tag-config')) return 'tag-config';
-    if (path.endsWith('/status')) return 'status';
-    if (path.endsWith('/config')) return 'config';
-    if (path.endsWith('/settings')) return 'settings';
-    if (path.endsWith('/metrics')) return 'metrics';
-    if (path.endsWith('/devices')) return 'devices';
-    if (path.endsWith('/oids')) return 'oids';
-    if (path.endsWith('/modules')) return 'modules';
-    if (path.endsWith('/history')) return 'history';
-    if (path.endsWith('/tasks')) return 'tasks';
-    if (path.endsWith('/programs')) return 'programs';
-    if (path.endsWith('/workspace')) return 'workspace';
-    if (path.endsWith('/trends')) return 'trends';
+    const suffixes = [
+      'logs', 'traffic', 'info', 'tag-config', 'status', 'config', 'settings',
+      'metrics', 'devices', 'oids', 'modules', 'history', 'tasks', 'programs',
+      'workspace', 'trends'
+    ];
+    for (const s of suffixes) if (path.endsWith(`/${s}`)) return s;
     return 'default';
   });
+
+  const tabConfig: Record<string, TabItem[]> = $derived({
+    plc: [
+      { id: 'default', label: 'Config', href: `/services/${serviceType}` },
+      { id: 'workspace', label: 'Workspace', href: `/services/${serviceType}/workspace` },
+      { id: 'info', label: 'Variables', href: `/services/${serviceType}/info` },
+      { id: 'tasks', label: 'Tasks', href: `/services/${serviceType}/tasks` },
+      { id: 'programs', label: 'Programs', href: `/services/${serviceType}/programs` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    network: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'status', label: 'Status', href: `/services/${serviceType}/status` },
+      { id: 'config', label: 'Config', href: `/services/${serviceType}/config` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    nftables: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'status', label: 'Status', href: `/services/${serviceType}/status` },
+      { id: 'config', label: 'Config', href: `/services/${serviceType}/config` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    nats: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'traffic', label: 'Traffic', href: `/services/${serviceType}/traffic` }
+    ],
+    mqtt: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'metrics', label: 'Metrics', href: `/services/${serviceType}/metrics` },
+      { id: 'settings', label: 'Settings', href: `/services/${serviceType}/settings` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    ethernetip: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'devices', label: 'Devices', href: `/services/${serviceType}/devices` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    profinetcontroller: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'devices', label: 'Devices', href: `/services/${serviceType}/devices` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    profinet: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'config', label: 'Config', href: `/services/${serviceType}/config` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    gateway: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'devices', label: 'Sources', href: `/services/${serviceType}/devices` },
+      { id: 'tag-config', label: 'Variables', href: `/services/${serviceType}/tag-config` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    snmp: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'oids', label: 'OIDs', href: `/services/${serviceType}/oids` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    orchestrator: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'modules', label: 'Modules', href: `/services/${serviceType}/modules` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    caddy: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'settings', label: 'Settings', href: `/services/${serviceType}/settings` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    gitops: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'history', label: 'History', href: `/services/${serviceType}/history` },
+      { id: 'settings', label: 'Settings', href: `/services/${serviceType}/settings` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    telemetry: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'settings', label: 'Settings', href: `/services/${serviceType}/settings` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    history: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'trends', label: 'Trends', href: `/services/${serviceType}/trends` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    modbus: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'tag-config', label: 'Tags', href: `/services/${serviceType}/tag-config` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ]
+  });
+
+  const tabs = $derived(
+    tabConfig[serviceType] ?? [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ]
+  );
 </script>
 
 <div class="service-layout">
@@ -42,195 +130,7 @@
   </nav>
 
   <div class="service-tabs">
-    {#if serviceType === 'plc'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Config
-      </a>
-      <a href="/services/{serviceType}/workspace" class="tab" class:active={currentTab() === 'workspace'}>
-        Workspace
-      </a>
-      <a href="/services/{serviceType}/info" class="tab" class:active={currentTab() === 'info'}>
-        Variables
-      </a>
-      <a href="/services/{serviceType}/tasks" class="tab" class:active={currentTab() === 'tasks'}>
-        Tasks
-      </a>
-      <a href="/services/{serviceType}/programs" class="tab" class:active={currentTab() === 'programs'}>
-        Programs
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'network'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/status" class="tab" class:active={currentTab() === 'status'}>
-        Status
-      </a>
-      <a href="/services/{serviceType}/config" class="tab" class:active={currentTab() === 'config'}>
-        Config
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'nftables'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/status" class="tab" class:active={currentTab() === 'status'}>
-        Status
-      </a>
-      <a href="/services/{serviceType}/config" class="tab" class:active={currentTab() === 'config'}>
-        Config
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'nats'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/traffic" class="tab" class:active={currentTab() === 'traffic'}>
-        Traffic
-      </a>
-    {:else if serviceType === 'mqtt'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/metrics" class="tab" class:active={currentTab() === 'metrics'}>
-        Metrics
-      </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'ethernetip'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
-        Devices
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'profinetcontroller'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
-        Devices
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'profinet'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/config" class="tab" class:active={currentTab() === 'config'}>
-        Config
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'gateway'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
-        Sources
-      </a>
-      <a href="/services/{serviceType}/tag-config" class="tab" class:active={currentTab() === 'tag-config'}>
-        Variables
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'snmp'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/oids" class="tab" class:active={currentTab() === 'oids'}>
-        OIDs
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'orchestrator'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/modules" class="tab" class:active={currentTab() === 'modules'}>
-        Modules
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'caddy'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'gitops'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/history" class="tab" class:active={currentTab() === 'history'}>
-        History
-      </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'telemetry'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'history'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/trends" class="tab" class:active={currentTab() === 'trends'}>
-        Trends
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'modbus'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/tag-config" class="tab" class:active={currentTab() === 'tag-config'}>
-        Tags
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {/if}
+    <Tabs {tabs} active={currentTab} ariaLabel="Service sections" />
   </div>
 
   {@render children()}
@@ -275,44 +175,13 @@
   }
 
   .service-tabs {
-    display: flex;
-    gap: 0.25rem;
     padding: 0 2rem;
-    border-bottom: 1px solid var(--theme-border);
     background: var(--theme-surface);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .tab {
-    padding: 0.875rem 1.25rem;
-    white-space: nowrap;
-    flex-shrink: 0;
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--theme-text-muted);
-    text-decoration: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    transition: all 0.15s ease;
-
-    &:hover {
-      color: var(--theme-text);
-    }
-
-    &.active {
-      color: var(--theme-primary);
-      border-bottom-color: var(--theme-primary);
-    }
   }
 
   @media (max-width: 640px) {
     .service-tabs {
       padding: 0 1rem;
-    }
-    .tab {
-      padding: 0.75rem 0.75rem;
-      font-size: 0.8125rem;
     }
     .service-nav {
       padding: 0.75rem 1rem;
