@@ -66,135 +66,163 @@
 
 <div class="workspace">
 	<div class="toolbar">
-		<div class="toolbar-group">
-			<strong class="title">PLC Workspace</strong>
-		</div>
-		<div class="toolbar-group">
-			<button
-				type="button"
-				class="toggle"
-				class:active={layout.leftOpen}
-				onclick={toggleLeft}
-				title="Toggle navigator"
-				aria-pressed={layout.leftOpen}
-			>
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<rect x="3" y="4" width="6" height="16" rx="1" />
-					<rect x="10" y="4" width="11" height="16" rx="1" opacity="0.35" />
-				</svg>
-				<span>Navigator</span>
-			</button>
-			<button
-				type="button"
-				class="toggle"
-				class:active={layout.rightOpen}
-				onclick={toggleRight}
-				title="Toggle inspector"
-				aria-pressed={layout.rightOpen}
-			>
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<rect x="3" y="4" width="11" height="16" rx="1" opacity="0.35" />
-					<rect x="15" y="4" width="6" height="16" rx="1" />
-				</svg>
-				<span>Inspector</span>
-			</button>
-			<button
-				type="button"
-				class="toggle"
-				class:active={layout.bottomOpen}
-				onclick={toggleBottom}
-				title="Toggle output"
-				aria-pressed={layout.bottomOpen}
-			>
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<rect x="3" y="3" width="18" height="12" rx="1" opacity="0.35" />
-					<rect x="3" y="16" width="18" height="5" rx="1" />
-				</svg>
-				<span>Output</span>
-			</button>
-		</div>
+		<strong class="title">PLC Workspace</strong>
 	</div>
 
 	<div class="split-root">
-		<Splitpanes
-			horizontal
-			theme="plc-workspace"
-			on:resized={(e) => onOuterResize(e.detail)}
-		>
-			<Pane minSize={30}>
-				<Splitpanes theme="plc-workspace" on:resized={(e) => onMainResize(e.detail)}>
-					{#if layout.leftOpen}
-						<Pane size={layout.leftSize} minSize={10}>
+		{#if !layout.leftOpen}
+			<button
+				type="button"
+				class="rail rail-left"
+				onclick={toggleLeft}
+				title="Show navigator"
+				aria-label="Show navigator"
+			>
+				<svg width="10" height="10" viewBox="0 0 12 12" class="triangle">
+					<polygon points="3,2 9,6 3,10" fill="currentColor" />
+				</svg>
+				<span class="rail-label">Navigator</span>
+			</button>
+		{/if}
+		<div class="split-area">
+			<Splitpanes
+				horizontal
+				theme="plc-workspace"
+				on:resized={(e) => onOuterResize(e.detail)}
+			>
+				<Pane minSize={30}>
+					<Splitpanes theme="plc-workspace" on:resized={(e) => onMainResize(e.detail)}>
+						{#if layout.leftOpen}
+							<Pane size={layout.leftSize} minSize={10}>
+								<section class="panel">
+									<header class="panel-header">
+										<span>Navigator</span>
+										<button
+											type="button"
+											class="collapse-btn"
+											onclick={toggleLeft}
+											title="Hide navigator"
+											aria-label="Hide navigator"
+										>
+											<svg width="10" height="10" viewBox="0 0 12 12" class="triangle left">
+												<polygon points="3,2 9,6 3,10" fill="currentColor" />
+											</svg>
+										</button>
+									</header>
+									<div class="panel-body no-pad">
+										<Navigator
+											variables={data.variables}
+											tasks={data.tasks}
+											programs={data.programs}
+											onCreate={(kind) => (createKind = kind)}
+										/>
+									</div>
+								</section>
+							</Pane>
+						{/if}
+						<Pane minSize={20}>
 							<section class="panel">
-								<header class="panel-header">Navigator</header>
+								<header class="panel-header">Editor</header>
 								<div class="panel-body no-pad">
-									<Navigator
-										variables={data.variables}
-										tasks={data.tasks}
-										programs={data.programs}
-										onCreate={(kind) => (createKind = kind)}
-									/>
+									{#if workspaceTabs.list.length > 0}
+										<EditorTabs {variableNames} />
+									{:else if selection?.kind === 'task'}
+										<div class="placeholder-card">
+											<div class="label">Task</div>
+											<div class="title">{selection.id}</div>
+											<div class="hint">
+												Task editing in the workspace is not yet wired up.
+												<a href="/services/plc/tasks">Open in the Tasks tab</a>.
+											</div>
+										</div>
+									{:else if selection?.kind === 'variable'}
+										<div class="placeholder-card">
+											<div class="label">Variable</div>
+											<div class="title">{selection.id}</div>
+											<div class="hint">
+												Variable config editing will appear in the Inspector soon.
+												For now, use the <a href="/services/plc/info">Variables tab</a>.
+											</div>
+										</div>
+									{:else}
+										<div class="placeholder-card muted">
+											<div class="title">Nothing selected</div>
+											<div class="hint">
+												Pick a program from the Navigator to open it here.
+											</div>
+										</div>
+									{/if}
 								</div>
 							</section>
 						</Pane>
-					{/if}
-					<Pane minSize={20}>
-						<section class="panel">
-							<header class="panel-header">Editor</header>
-							<div class="panel-body no-pad">
-								{#if workspaceTabs.list.length > 0}
-									<EditorTabs {variableNames} />
-								{:else if selection?.kind === 'task'}
-									<div class="placeholder-card">
-										<div class="label">Task</div>
-										<div class="title">{selection.id}</div>
-										<div class="hint">
-											Task editing in the workspace is not yet wired up.
-											<a href="/services/plc/tasks">Open in the Tasks tab</a>.
-										</div>
+						{#if layout.rightOpen}
+							<Pane size={layout.rightSize} minSize={10}>
+								<section class="panel">
+									<header class="panel-header">
+										<span>Inspector</span>
+										<button
+											type="button"
+											class="collapse-btn"
+											onclick={toggleRight}
+											title="Hide inspector"
+											aria-label="Hide inspector"
+										>
+											<svg width="10" height="10" viewBox="0 0 12 12" class="triangle right">
+												<polygon points="3,2 9,6 3,10" fill="currentColor" />
+											</svg>
+										</button>
+									</header>
+									<div class="panel-body no-pad">
+										<Inspector
+											variables={data.variables}
+											tasks={data.tasks}
+											programs={data.programs}
+										/>
 									</div>
-								{:else if selection?.kind === 'variable'}
-									<div class="placeholder-card">
-										<div class="label">Variable</div>
-										<div class="title">{selection.id}</div>
-										<div class="hint">
-											Variable config editing will appear in the Inspector soon.
-											For now, use the <a href="/services/plc/info">Variables tab</a>.
-										</div>
-									</div>
-								{:else}
-									<div class="placeholder-card muted">
-										<div class="title">Nothing selected</div>
-										<div class="hint">
-											Pick a program from the Navigator to open it here.
-										</div>
-									</div>
-								{/if}
-							</div>
-						</section>
-					</Pane>
-					{#if layout.rightOpen}
-						<Pane size={layout.rightSize} minSize={10}>
-							<section class="panel">
-								<header class="panel-header">Inspector</header>
-								<div class="panel-body no-pad">
-									<Inspector
-										variables={data.variables}
-										tasks={data.tasks}
-										programs={data.programs}
-									/>
-								</div>
-							</section>
-						</Pane>
-					{/if}
-				</Splitpanes>
-			</Pane>
-			{#if layout.bottomOpen}
-				<Pane size={layout.bottomSize} minSize={8}>
-					<OutputPanel serviceType={data.serviceType} initialLogs={data.initialLogs} />
+								</section>
+							</Pane>
+						{/if}
+					</Splitpanes>
 				</Pane>
+				{#if layout.bottomOpen}
+					<Pane size={layout.bottomSize} minSize={8}>
+						<OutputPanel
+							serviceType={data.serviceType}
+							initialLogs={data.initialLogs}
+							onCollapse={toggleBottom}
+						/>
+					</Pane>
+				{/if}
+			</Splitpanes>
+			{#if !layout.bottomOpen}
+				<button
+					type="button"
+					class="rail rail-bottom"
+					onclick={toggleBottom}
+					title="Show output"
+					aria-label="Show output"
+				>
+					<svg width="10" height="10" viewBox="0 0 12 12" class="triangle up">
+						<polygon points="3,2 9,6 3,10" fill="currentColor" />
+					</svg>
+					<span class="rail-label-h">Output</span>
+				</button>
 			{/if}
-		</Splitpanes>
+		</div>
+		{#if !layout.rightOpen}
+			<button
+				type="button"
+				class="rail rail-right"
+				onclick={toggleRight}
+				title="Show inspector"
+				aria-label="Show inspector"
+			>
+				<svg width="10" height="10" viewBox="0 0 12 12" class="triangle left">
+					<polygon points="3,2 9,6 3,10" fill="currentColor" />
+				</svg>
+				<span class="rail-label">Inspector</span>
+			</button>
+		{/if}
 	</div>
 </div>
 
@@ -223,17 +251,10 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.5rem 1rem;
 		border-bottom: 1px solid var(--theme-border);
 		background: var(--theme-surface);
-	}
-
-	.toolbar-group {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
 	}
 
 	.title {
@@ -241,39 +262,97 @@
 		color: var(--theme-text);
 	}
 
-	.toggle {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.375rem;
-		padding: 0.375rem 0.625rem;
-		font-size: 0.8125rem;
-		color: var(--theme-text-muted);
-		background: transparent;
-		border: 1px solid var(--theme-border);
-		border-radius: 0.375rem;
-		cursor: pointer;
-		transition: all 0.12s ease;
-
-		&:hover {
-			color: var(--theme-text);
-			border-color: var(--theme-text-muted);
-		}
-
-		&.active {
-			color: var(--theme-primary);
-			border-color: var(--theme-primary);
-			background: color-mix(in srgb, var(--theme-primary) 10%, transparent);
-		}
-
-		svg {
-			flex-shrink: 0;
-		}
-	}
-
 	.split-root {
 		flex: 1;
 		min-height: 0;
-		position: relative;
+		display: flex;
+		flex-direction: row;
+	}
+
+	.split-area {
+		flex: 1;
+		min-width: 0;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.rail {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0;
+		background: var(--theme-surface);
+		border: 0;
+		color: var(--theme-text-muted);
+		cursor: pointer;
+		transition: color 0.12s ease, background 0.12s ease;
+
+		&:hover {
+			color: var(--theme-primary);
+			background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-surface));
+		}
+	}
+
+	.rail-left,
+	.rail-right {
+		flex-direction: column;
+		width: 1.75rem;
+		flex-shrink: 0;
+		padding: 0.5rem 0;
+	}
+
+	.rail-left {
+		border-right: 1px solid var(--theme-border);
+	}
+
+	.rail-right {
+		border-left: 1px solid var(--theme-border);
+	}
+
+	.rail-bottom {
+		flex-direction: row;
+		height: 1.75rem;
+		flex-shrink: 0;
+		border-top: 1px solid var(--theme-border);
+	}
+
+	.rail-label {
+		writing-mode: vertical-rl;
+		transform: rotate(180deg);
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.rail-label-h {
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.triangle {
+		display: block;
+		transition: transform 0.2s ease;
+
+		&.left {
+			transform: rotate(180deg);
+		}
+
+		&.right {
+			transform: rotate(0deg);
+		}
+
+		&.up {
+			transform: rotate(-90deg);
+		}
+
+		&.down {
+			transform: rotate(90deg);
+		}
 	}
 
 	.panel {
@@ -285,6 +364,10 @@
 	}
 
 	.panel-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
 		padding: 0.5rem 0.75rem;
 		font-size: 0.75rem;
 		font-weight: 600;
@@ -295,6 +378,26 @@
 		border-bottom: 1px solid var(--theme-border);
 	}
 
+	.collapse-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.25rem;
+		height: 1.25rem;
+		padding: 0;
+		background: transparent;
+		border: 0;
+		color: var(--theme-text-muted);
+		cursor: pointer;
+		border-radius: 0.1875rem;
+		transition: color 0.12s ease, background 0.12s ease;
+
+		&:hover {
+			color: var(--theme-text);
+			background: var(--theme-border);
+		}
+	}
+
 	.panel-body {
 		flex: 1;
 		min-height: 0;
@@ -303,12 +406,6 @@
 
 		&.no-pad {
 			padding: 0;
-		}
-
-		&.logs {
-			padding: 0.5rem 0.75rem;
-			display: flex;
-			flex-direction: column;
 		}
 	}
 
