@@ -230,4 +230,7 @@ Key endpoints:
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+[PolyForm Small Business License 1.0.0](LICENSE) — free to use for
+organizations with fewer than 100 employees and under $1M USD in annual
+revenue. For larger organizations, contact joyja@joyautomation.com for
+a commercial license.
