@@ -71,8 +71,6 @@
       if (result.data) {
         status = result.data;
         loaded = true;
-        renderGauge();
-        renderTimeline();
       }
     } catch { /* ignore */ }
   }
@@ -81,6 +79,14 @@
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
+  });
+
+  // Re-render d3 visuals after the DOM has committed. Using $effect ensures
+  // the svg elements mounted by {#if loaded} have bound refs before d3 runs.
+  $effect(() => {
+    if (!loaded || !status) return;
+    if (gaugeContainer) renderGauge();
+    if (timelineContainer) renderTimeline();
   });
 
   function formatBytes(bytes: number): string {
