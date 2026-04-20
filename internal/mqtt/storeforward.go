@@ -67,14 +67,16 @@ func NewStoreForwardBuffer(maxRecords int, maxBytes int64, drainRate int, log *s
 	}
 	sf := &StoreForwardBuffer{
 		log:       log,
-		state:     SFOnline,
+		state:     SFOffline,
 		records:   make([]BufferedRecord, 0, 256),
 		maxCount:  maxRecords,
 		maxBytes:  maxBytes,
 		drainRate: drainRate,
 	}
-	// Seed timeline with initial online state
-	sf.timeline = []TimelineEntry{{Timestamp: time.Now(), State: SFOnline, StateStr: "online"}}
+	// Seed timeline in offline/buffering state. The bridge reconciles to
+	// online once the node publishes NBIRTH and (if configured) the primary
+	// host reports online.
+	sf.timeline = []TimelineEntry{{Timestamp: time.Now(), State: SFOffline, StateStr: "buffering"}}
 	return sf
 }
 

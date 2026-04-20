@@ -59,10 +59,19 @@
   const isInfra = $derived(infraServices.has(data.serviceType));
   const isRunning = $derived(isInfra ? data.graphqlConnected : (data.instances?.length ?? 0) > 0);
 
-  // MQTT broker connection status from heartbeat metadata
-  const mqttBrokerDisconnected = $derived(
+  // MQTT broker connection status from heartbeat metadata.
+  // `brokerReachable` reflects the underlying TCP/MQTT session — the real
+  // "broker unreachable" signal. `connected` means "NBIRTH has been published"
+  // and can be briefly false during reconnects even when the broker is fine.
+  const mqttBrokerUnreachable = $derived(
     data.serviceType === 'mqtt' &&
     isRunning &&
+    data.instances?.some(i => i.metadata?.brokerReachable === false)
+  );
+  const mqttSessionNotEstablished = $derived(
+    data.serviceType === 'mqtt' &&
+    isRunning &&
+    !mqttBrokerUnreachable &&
     data.instances?.some(i => i.metadata?.connected === false)
   );
   const description = $derived(
@@ -120,14 +129,23 @@
     </span>
   </div>
 
-  {#if mqttBrokerDisconnected}
+  {#if mqttBrokerUnreachable}
     <div class="info-box warning">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10" />
         <line x1="12" y1="8" x2="12" y2="12" />
         <line x1="12" y1="16" x2="12.01" y2="16" />
       </svg>
-      <p>MQTT broker is not connected. Check that the broker at <strong>{data.instances?.find(i => i.metadata?.brokerUrl)?.metadata?.brokerUrl ?? 'unknown'}</strong> is reachable.</p>
+      <p>MQTT broker is unreachable. Check that <strong>{data.instances?.find(i => i.metadata?.brokerUrl)?.metadata?.brokerUrl ?? 'unknown'}</strong> is running and accepting connections.</p>
+    </div>
+  {:else if mqttSessionNotEstablished}
+    <div class="info-box warning">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <p>Connected to <strong>{data.instances?.find(i => i.metadata?.brokerUrl)?.metadata?.brokerUrl ?? 'the broker'}</strong> but Sparkplug NBIRTH hasn't been published yet — data is being buffered until the session completes.</p>
     </div>
   {/if}
 
