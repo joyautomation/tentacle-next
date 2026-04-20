@@ -2,17 +2,22 @@
   import type { PageData } from './$types';
   import PlcVariables from '$lib/components/PlcVariables.svelte';
   import PlcVariableConfig from '$lib/components/PlcVariableConfig.svelte';
+  import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 
   let { data }: { data: PageData } = $props();
 
   let activeTab: 'live' | 'config' = $state('live');
+
+  const tabs: TabItem[] = [
+    { id: 'live', label: 'Live Values' },
+    { id: 'config', label: 'Configuration' }
+  ];
 </script>
 
 {#if data.serviceType === 'plc'}
   <div class="plc-info-page">
     <div class="tab-switcher">
-      <button class="tab-btn" class:active={activeTab === 'live'} onclick={() => activeTab = 'live'}>Live Values</button>
-      <button class="tab-btn" class:active={activeTab === 'config'} onclick={() => activeTab = 'config'}>Configuration</button>
+      <Tabs {tabs} active={activeTab} onChange={(id) => (activeTab = id as 'live' | 'config')} ariaLabel="Variables view" />
     </div>
 
     {#if activeTab === 'live'}
@@ -41,21 +46,7 @@
   }
 
   .tab-switcher {
-    display: flex; gap: 0; padding: 0 2rem; border-bottom: 1px solid var(--theme-border);
-  }
-
-  .tab-btn {
-    padding: 0.75rem 1.25rem; font-size: 0.8125rem; font-weight: 500;
-    border: none; border-bottom: 2px solid transparent;
-    background: none; color: var(--theme-text-muted); cursor: pointer;
-    transition: color 0.15s ease, border-color 0.15s ease;
-
-    &:hover { color: var(--theme-text); }
-    &.active {
-      color: var(--theme-primary);
-      border-bottom-color: var(--theme-primary);
-      font-weight: 600;
-    }
+    padding: 0 2rem;
   }
 
   .config-container {

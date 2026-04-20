@@ -11,6 +11,7 @@
   import TemplateDefaultsTab from './TemplateDefaultsTab.svelte';
   import InstancesTab from './InstancesTab.svelte';
   import AtomicTagsTab from './AtomicTagsTab.svelte';
+  import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 
   let { gatewayConfig, browseCaches, browseStates, error }: {
     gatewayConfig: GatewayConfig | null;
@@ -1713,8 +1714,15 @@
           {/if}
 
           <div class="tc-tabs">
-            <button class="tc-tab" class:active={activeTab === 'template'} onclick={() => activeTab = 'template'}>Template Defaults</button>
-            <button class="tc-tab" class:active={activeTab === 'instances'} onclick={() => activeTab = 'instances'}>Instances</button>
+            <Tabs
+              tabs={[
+                { id: 'template', label: 'Template Defaults' },
+                { id: 'instances', label: 'Instances' }
+              ] satisfies TabItem[]}
+              active={activeTab}
+              onChange={(id) => (activeTab = id as 'template' | 'instances')}
+              ariaLabel="Template section"
+            />
           </div>
 
           {#if activeTab === 'template'}
@@ -2069,22 +2077,7 @@
   }
 
   .tc-tabs {
-    display: flex; gap: 0;
-    border-bottom: 1px solid var(--theme-border);
-    background: var(--theme-surface);
     padding: 0 1.25rem;
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
-  }
-
-  .tc-tab {
-    padding: 0.625rem 1rem;
-    font-size: 0.8125rem; font-weight: 600;
-    color: var(--theme-text-muted); cursor: pointer;
-    border: none; background: none; font-family: inherit;
-    border-bottom: 2px solid transparent; margin-bottom: -1px;
-    border-radius: 0; outline: none; white-space: nowrap; flex-shrink: 0;
-    &:hover { color: var(--theme-text); }
-    &.active { color: var(--theme-primary); border-bottom-color: var(--theme-primary); }
   }
 
   // ── Save bar ──

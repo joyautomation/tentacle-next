@@ -3,6 +3,7 @@
   import { fly, slide } from 'svelte/transition';
   import { state as saltState } from '@joyautomation/salt';
   import { apiPost, apiPut } from '$lib/api/client';
+  import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
   import type {
     GatewayConfig,
     GatewayDevice,
@@ -566,15 +567,16 @@
     {:else}
       <!-- Tabs -->
       <div class="tc-tabs">
-        <button class="tc-tab" class:active={activeTab === 'templates'} onclick={() => activeTab = 'templates'}>
-          Templates
-        </button>
-        <button class="tc-tab" class:active={activeTab === 'instances'} onclick={() => activeTab = 'instances'}>
-          Instances
-        </button>
-        <button class="tc-tab" class:active={activeTab === 'atomic'} onclick={() => activeTab = 'atomic'}>
-          Atomic Tags
-        </button>
+        <Tabs
+          tabs={[
+            { id: 'templates', label: 'Templates' },
+            { id: 'instances', label: 'Instances' },
+            { id: 'atomic', label: 'Atomic Tags' }
+          ] satisfies TabItem[]}
+          active={activeTab}
+          onChange={(id) => (activeTab = id as 'templates' | 'instances' | 'atomic')}
+          ariaLabel="Tag config section"
+        />
       </div>
 
       <div class="tc-content">
@@ -1151,26 +1153,7 @@
   }
 
   .tc-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--theme-border);
-    background: var(--theme-surface);
     flex-shrink: 0;
-  }
-
-  .tc-tab {
-    padding: 0.625rem 1.25rem;
-    font-size: 0.8125rem;
-    color: var(--theme-text-muted);
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: none;
-    cursor: pointer;
-
-    &:hover { color: var(--theme-text); }
-    &.active {
-      color: var(--theme-primary);
-      border-bottom-color: var(--theme-primary);
-    }
   }
 
   .tc-content {
