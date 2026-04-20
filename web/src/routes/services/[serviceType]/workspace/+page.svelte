@@ -127,8 +127,8 @@
 											<div class="label">Task</div>
 											<div class="title">{selection.id}</div>
 											<div class="hint">
-												Task editing in the workspace is not yet wired up.
-												<a href="/services/plc/tasks">Open in the Tasks tab</a>.
+												Task editing lives in the Inspector for now — UDT-style
+												editing in the Editor pane is coming.
 											</div>
 										</div>
 									{:else if selection?.kind === 'variable'}
