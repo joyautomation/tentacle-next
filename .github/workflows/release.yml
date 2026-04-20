@@ -68,6 +68,9 @@ jobs:
           LIBRARY_PATH: /usr/local/lib
 
       - name: Publish to DigitalOcean Spaces + Directus
+        # Non-fatal: GitHub Releases is still authoritative if this step fails
+        # (e.g. Spaces/Directus outage). Surfaces as a workflow warning.
+        continue-on-error: true
         run: |
           sudo apt-get install -y -qq s3cmd jq
           ./scripts/release-infra/publish-release.sh
