@@ -4,6 +4,7 @@ package plc
 
 import (
 	"log/slog"
+	"runtime"
 	"time"
 )
 
@@ -41,6 +42,13 @@ func (t *taskRunner) start() {
 }
 
 func (t *taskRunner) run() {
+	// Pin this goroutine to its OS thread for the lifetime of the task.
+	// Eliminates scheduler migration between threads between ticks, which
+	// is a meaningful source of jitter at sub-10ms scan rates. When the
+	// goroutine exits the OS thread also exits — acceptable because tasks
+	// are long-lived and stopped only on config reload/shutdown.
+	runtime.LockOSThread()
+
 	defer close(t.doneCh)
 	ticker := time.NewTicker(t.scanRate)
 	defer ticker.Stop()

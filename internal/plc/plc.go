@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -63,6 +65,23 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.b = b
 	m.startedAt = time.Now()
 	m.log = slog.Default().With("serviceType", m.ServiceType(), "moduleID", m.ModuleID())
+
+	// Apply GC tuning for tighter scan-time p99. Lower GOGC means smaller,
+	// more frequent collections — trades a few percent of CPU for much
+	// shorter pauses. Opt-in via env so users not running the PLC module
+	// aren't affected.
+	if v := os.Getenv("TENTACLE_PLC_GOGC"); v != "" {
+		if pct, err := strconv.Atoi(v); err == nil && pct > 0 {
+			debug.SetGCPercent(pct)
+			m.log.Info("plc: GOGC tuned", "percent", pct)
+		}
+	}
+	if v := os.Getenv("TENTACLE_PLC_MEMLIMIT_MB"); v != "" {
+		if mb, err := strconv.Atoi(v); err == nil && mb > 0 {
+			debug.SetMemoryLimit(int64(mb) * 1024 * 1024)
+			m.log.Info("plc: soft memory limit set", "mb", mb)
+		}
+	}
 
 	// Ensure required KV buckets exist.
 	for _, bucket := range []string{

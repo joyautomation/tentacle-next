@@ -32,6 +32,10 @@ type TaskState struct {
 	Timers   map[string]*TimerState
 	Counters map[string]*CounterState
 	RungEdge map[string]bool
+
+	// thread is reused across scans to avoid allocating a fresh
+	// starlark.Thread per tick. Lazily initialised by Engine.Execute.
+	thread *starlark.Thread
 }
 
 // TimerState tracks a timer's persistent state.
@@ -118,11 +122,13 @@ func (e *Engine) Execute(name string, state *TaskState) error {
 		return fmt.Errorf("execute: program %q not found", name)
 	}
 
-	thread := &starlark.Thread{Name: name}
-	thread.SetLocal("taskState", state)
-	thread.SetLocal("vars", e.vars)
+	if state.thread == nil {
+		state.thread = &starlark.Thread{Name: name}
+		state.thread.SetLocal("taskState", state)
+		state.thread.SetLocal("vars", e.vars)
+	}
 
-	_, err := starlark.Call(thread, prog.mainFn, nil, nil)
+	_, err := starlark.Call(state.thread, prog.mainFn, nil, nil)
 	if err != nil {
 		return fmt.Errorf("execute %s: %w", name, err)
 	}
