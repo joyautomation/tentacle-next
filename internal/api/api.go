@@ -205,6 +205,10 @@ func (m *Module) routes() http.Handler {
 		r.Get("/plcs/{plcId}/programs/{name}", m.handleGetPlcProgram)
 		r.Put("/plcs/{plcId}/programs/{name}", m.handlePutPlcProgram)
 		r.Delete("/plcs/{plcId}/programs/{name}", m.handleDeletePlcProgram)
+		r.Get("/plcs/{plcId}/templates", m.handleListPlcTemplates)
+		r.Get("/plcs/{plcId}/templates/{name}", m.handleGetPlcTemplate)
+		r.Put("/plcs/{plcId}/templates/{name}", m.handlePutPlcTemplate)
+		r.Delete("/plcs/{plcId}/templates/{name}", m.handleDeletePlcTemplate)
 
 		// Services
 		r.Get("/services", m.handleListServices)

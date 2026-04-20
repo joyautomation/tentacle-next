@@ -27,8 +27,9 @@ const (
 	BucketScannerSNMP       = "scanner_config_snmp"
 
 	// PLC configuration and programs.
-	BucketPlcConfig   = "plc_config"
-	BucketPlcPrograms = "plc_programs"
+	BucketPlcConfig    = "plc_config"
+	BucketPlcPrograms  = "plc_programs"
+	BucketPlcTemplates = "plc_templates"
 
 	// PROFINET IO Device configuration bucket.
 	BucketProfinetConfig = "profinet_config"
@@ -77,6 +78,7 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketScannerSNMP:       {History: 1},
 		BucketPlcConfig:                 {History: 5},
 		BucketPlcPrograms:               {History: 10},
+		BucketPlcTemplates:              {History: 10},
 		BucketProfinetConfig:            {History: 5},
 		BucketScannerProfinetController: {History: 1},
 		BucketConfigMetadata:    {History: 1},

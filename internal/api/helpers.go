@@ -22,6 +22,23 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// ValidationIssue describes a single structured validation problem so
+// the UI can highlight the exact offending field.
+type ValidationIssue struct {
+	Path    string `json:"path"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// writeValidationError returns a 400 response with structured issues,
+// keeping a flat "error" string for backward compat with simpler clients.
+func writeValidationError(w http.ResponseWriter, issues []ValidationIssue) {
+	writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		"error":  "validation_failed",
+		"issues": issues,
+	})
+}
+
 // readJSON decodes the request body into v.
 func readJSON(r *http.Request, v interface{}) error {
 	defer r.Body.Close()
