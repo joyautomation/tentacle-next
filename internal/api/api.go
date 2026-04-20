@@ -189,7 +189,22 @@ func (m *Module) routes() http.Handler {
 		r.Put("/variables/{moduleId}/{variableId}/value", m.handleWriteVariable)
 
 		// PLCs
+		r.Get("/plcs/{plcId}/config", m.handleGetPlcConfig)
+		r.Put("/plcs/{plcId}/config", m.handlePutPlcConfig)
+		r.Get("/plcs/{plcId}/tasks", m.handleListPlcTasks)
 		r.Get("/plcs/{plcId}/tasks/stats", m.handleGetPlcTaskStats)
+		r.Put("/plcs/{plcId}/tasks/{taskName}", m.handlePutPlcTask)
+		r.Delete("/plcs/{plcId}/tasks/{taskName}", m.handleDeletePlcTask)
+		r.Get("/plcs/{plcId}/variables", m.handleListPlcConfigVariables)
+		r.Put("/plcs/{plcId}/variables/{variableId}", m.handlePutPlcConfigVariable)
+		r.Delete("/plcs/{plcId}/variables/{variableId}", m.handleDeletePlcConfigVariable)
+		r.Get("/plcs/{plcId}/programs", m.handleListPlcPrograms)
+		r.Post("/plcs/{plcId}/programs/transpile", m.handleTranspilePlcProgram)
+		r.Post("/plcs/{plcId}/programs/validate", m.handleValidatePlcProgram)
+		r.Get("/plcs/{plcId}/lsp", m.handlePlcLSP)
+		r.Get("/plcs/{plcId}/programs/{name}", m.handleGetPlcProgram)
+		r.Put("/plcs/{plcId}/programs/{name}", m.handlePutPlcProgram)
+		r.Delete("/plcs/{plcId}/programs/{name}", m.handleDeletePlcProgram)
 
 		// Services
 		r.Get("/services", m.handleListServices)
