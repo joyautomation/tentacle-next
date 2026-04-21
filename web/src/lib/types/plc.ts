@@ -37,6 +37,7 @@ export interface PlcTaskConfig {
   description?: string;
   scanRateMs: number;
   programRef: string;
+  entryFn?: string;
   enabled: boolean;
 }
 
@@ -49,9 +50,29 @@ export interface PlcConfig {
   updatedAt: number;
 }
 
+export interface PlcFunctionParam {
+  name: string;
+  type: string;
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+}
+
+export interface PlcFunctionReturn {
+  type: string;
+  description?: string;
+}
+
+export interface PlcFunctionSig {
+  params?: PlcFunctionParam[];
+  returns?: PlcFunctionReturn | null;
+}
+
 export interface ProgramListItem {
   name: string;
+  description?: string;
   language: string;
+  signature?: PlcFunctionSig | null;
   updatedAt: number;
   updatedBy?: string;
 }

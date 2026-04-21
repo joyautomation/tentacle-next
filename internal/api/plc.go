@@ -273,10 +273,12 @@ func (m *Module) handleDeletePlcConfigVariable(w http.ResponseWriter, r *http.Re
 
 // programListItem is the program list response (omits source for payload size).
 type programListItem struct {
-	Name      string `json:"name"`
-	Language  string `json:"language"`
-	UpdatedAt int64  `json:"updatedAt"`
-	UpdatedBy string `json:"updatedBy,omitempty"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Language    string                 `json:"language"`
+	Signature   *itypes.PlcFunctionSig `json:"signature,omitempty"`
+	UpdatedAt   int64                  `json:"updatedAt"`
+	UpdatedBy   string                 `json:"updatedBy,omitempty"`
 }
 
 func (m *Module) handleListPlcPrograms(w http.ResponseWriter, r *http.Request) {
@@ -294,10 +296,12 @@ func (m *Module) handleListPlcPrograms(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out = append(out, programListItem{
-			Name:      prog.Name,
-			Language:  prog.Language,
-			UpdatedAt: prog.UpdatedAt,
-			UpdatedBy: prog.UpdatedBy,
+			Name:        prog.Name,
+			Description: prog.Description,
+			Language:    prog.Language,
+			Signature:   prog.Signature,
+			UpdatedAt:   prog.UpdatedAt,
+			UpdatedBy:   prog.UpdatedBy,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

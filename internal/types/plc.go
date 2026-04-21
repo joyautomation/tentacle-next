@@ -74,11 +74,38 @@ type PlcTaskConfigKV struct {
 }
 
 // PlcProgramKV stores a Starlark program in the plc_programs KV bucket.
+// A program exposes one or more top-level callable functions; `Signature`
+// documents the entry function's parameters and return type so the editor
+// and LSP can offer completion/hover/diagnostics across the flat namespace.
 type PlcProgramKV struct {
-	Name      string `json:"name"`
-	Language  string `json:"language"`            // "ladder", "st", "starlark"
-	Source    string `json:"source"`              // Starlark source (for ladder, this IS the DSL)
-	StSource  string `json:"stSource,omitempty"`  // Original ST source (for ST programs only)
-	UpdatedAt int64  `json:"updatedAt"`
-	UpdatedBy string `json:"updatedBy,omitempty"` // "gui", "cli", "gitops"
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Language    string              `json:"language"`            // "ladder", "st", "starlark"
+	Source      string              `json:"source"`              // Starlark source (for ladder, this IS the DSL)
+	StSource    string              `json:"stSource,omitempty"`  // Original ST source (for ST programs only)
+	Signature   *PlcFunctionSig     `json:"signature,omitempty"` // entry-function signature for intellisense
+	UpdatedAt   int64               `json:"updatedAt"`
+	UpdatedBy   string              `json:"updatedBy,omitempty"` // "gui", "cli", "gitops"
+}
+
+// PlcFunctionSig captures a callable's input/output shape. Types use the
+// same vocabulary as variables (number, boolean, string, or a UDT name).
+type PlcFunctionSig struct {
+	Params  []PlcFunctionParam `json:"params,omitempty"`
+	Returns *PlcFunctionReturn `json:"returns,omitempty"`
+}
+
+// PlcFunctionParam describes a single input parameter.
+type PlcFunctionParam struct {
+	Name        string      `json:"name"`
+	Type        string      `json:"type"` // "number", "boolean", "string", or UDT template name
+	Description string      `json:"description,omitempty"`
+	Required    bool        `json:"required,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
+}
+
+// PlcFunctionReturn describes a function's return shape.
+type PlcFunctionReturn struct {
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
 }
