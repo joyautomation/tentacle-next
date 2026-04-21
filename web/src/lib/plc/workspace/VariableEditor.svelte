@@ -251,12 +251,28 @@
 		}
 	}
 
+	// Fill in missing keys from the current template schema so a template
+	// that gained a new field doesn't make every existing instance look
+	// dirty against its persisted default.
+	function normalizeAgainstTemplate(def: unknown): unknown {
+		if (!selectedTemplate) return def;
+		const d = (def && typeof def === 'object' ? def : {}) as Record<string, unknown>;
+		const next: Record<string, unknown> = {};
+		for (const f of selectedTemplate.fields) {
+			next[f.name] = f.name in d ? d[f.name] : f.default !== undefined ? f.default : fieldZero(f.type);
+		}
+		return next;
+	}
+
 	const isDirty = $derived.by(() => {
 		if (!current) return false;
 		if (datatype !== current.datatype) return true;
 		if (direction !== current.direction) return true;
 		if ((description ?? '') !== (current.description ?? '')) return true;
-		return !deepEqual(buildDefault(), current.default);
+		const baseline = isPrimitiveDatatype(datatype)
+			? current.default
+			: normalizeAgainstTemplate(current.default);
+		return !deepEqual(buildDefault(), baseline);
 	});
 
 	$effect(() => {
