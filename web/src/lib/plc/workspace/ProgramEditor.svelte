@@ -52,6 +52,18 @@
 		draftSource !== serverSource || draftStSource !== serverStSource
 	);
 
+	const lspUri = $derived(
+		`tentacle-plc://programs/${encodeURIComponent(name)}.${language === 'st' ? 'st' : 'star'}`
+	);
+
+	const errorCount = $derived.by(() => {
+		const diags = workspaceDiagnostics.byUri[lspUri];
+		if (!diags) return 0;
+		let n = 0;
+		for (const d of diags) if (d.severity === 'error') n++;
+		return n;
+	});
+
 	$effect(() => {
 		onDirtyChange?.(dirty);
 	});
@@ -106,6 +118,7 @@
 
 	async function save() {
 		if (!dirty || saving) return;
+		if (errorCount > 0) return;
 		saving = true;
 		try {
 			const body: Record<string, unknown> = {
@@ -178,8 +191,16 @@
 					Revert
 				</button>
 			{/if}
-			<button type="button" class="btn primary" onclick={save} disabled={!dirty || saving}>
-				{saving ? 'Saving…' : 'Save'}
+			<button
+				type="button"
+				class="btn primary"
+				onclick={save}
+				disabled={!dirty || saving || errorCount > 0}
+				title={errorCount > 0
+					? `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before saving`
+					: undefined}
+			>
+				{saving ? 'Saving…' : errorCount > 0 ? `Save (${errorCount} error${errorCount === 1 ? '' : 's'})` : 'Save'}
 			</button>
 			<button
 				type="button"
@@ -214,7 +235,7 @@
 					flush
 					enableLint
 					useLSP
-					lspUri={`tentacle-plc://programs/${encodeURIComponent(name)}.${editLanguage === 'st' ? 'st' : 'star'}`}
+					{lspUri}
 					{showInlineValues}
 					liveValues={liveValuesMap}
 					onDiagnostics={(uri, diags) => {
