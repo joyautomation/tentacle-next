@@ -4,6 +4,7 @@ package lsp
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -23,7 +24,14 @@ import (
 //
 // We return IsIncomplete=false so the client caches the list until the
 // next trigger; filtering by prefix happens client-side.
-func completeStarlark(source string, pos Position) CompletionList {
+func completeStarlark(source string, pos Position, provider SymbolProvider) CompletionList {
+	// Member access (`expr.`) short-circuits the general list: if we can
+	// resolve the expression to a template, returning only its fields and
+	// methods is more useful than drowning the user in builtins.
+	if list, ok := memberCompletion(source, pos, provider); ok {
+		return list
+	}
+
 	items := make([]CompletionItem, 0, 64)
 
 	// 1. Builtins. These always apply.
@@ -193,6 +201,161 @@ func paramName(p syntax.Expr) string {
 func containsLine(n syntax.Node, line int) bool {
 	start, end := n.Span()
 	return int(start.Line) <= line && int(end.Line) >= line
+}
+
+// ─── Member access completion ───────────────────────────────────────────
+
+// getVarCallRe matches a single complete `get_var("NAME")` call with no
+// trailing junk. Used to recognize the direct pattern
+// `get_var("motor1").`.
+var getVarCallRe = regexp.MustCompile(`^get_var\s*\(\s*["']([^"']+)["']\s*\)$`)
+
+// identRe matches a bare identifier, for the indirect case where the user
+// writes `m = get_var("motor1")` and later `m.`.
+var identRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// memberCompletion returns the fields + methods of the template on the
+// left-hand side of a member access immediately preceding the cursor.
+// Returns (_, false) when the context isn't a member access we can
+// resolve — callers fall back to the general completion list.
+//
+// We deliberately use text-based detection rather than the Starlark AST:
+// by the time the user types `.`, the document almost always fails to
+// parse (the attr name is missing), so the AST loses the expression we
+// need. Looking backwards from the cursor over a single line is both
+// simpler and more robust here.
+func memberCompletion(source string, pos Position, provider SymbolProvider) (CompletionList, bool) {
+	if provider == nil {
+		return CompletionList{}, false
+	}
+	line := lineAtIndex(source, pos.Line)
+	if pos.Character < 0 || pos.Character > len(line) {
+		return CompletionList{}, false
+	}
+	prefix := line[:pos.Character]
+	// Strip any partial attribute name the user has already typed after
+	// the dot (`motor1.spe|` → trim back to `motor1.`).
+	end := len(prefix)
+	for end > 0 && isIdentByte(prefix[end-1]) {
+		end--
+	}
+	if end == 0 || prefix[end-1] != '.' {
+		return CompletionList{}, false
+	}
+	beforeDot := strings.TrimRight(prefix[:end-1], " \t")
+	templateName, ok := resolveExprTemplate(source, beforeDot, provider)
+	if !ok {
+		return CompletionList{}, false
+	}
+	tmpl := provider.Template(templateName)
+	if tmpl == nil {
+		return CompletionList{}, false
+	}
+	items := make([]CompletionItem, 0, len(tmpl.Fields)+len(tmpl.Methods))
+	for _, f := range tmpl.Fields {
+		detail := f.Name + ": " + f.Type
+		if f.Unit != "" {
+			detail += " (" + f.Unit + ")"
+		}
+		items = append(items, CompletionItem{
+			Label:            f.Name,
+			Kind:             CompletionKindVariable,
+			Detail:           detail,
+			Documentation:    f.Description,
+			InsertText:       f.Name,
+			InsertTextFormat: InsertTextFormatPlainText,
+			SortText:         "0" + f.Name,
+		})
+	}
+	for _, m := range tmpl.Methods {
+		items = append(items, CompletionItem{
+			Label:            m.Name,
+			Kind:             CompletionKindFunction,
+			Detail:           m.Name + "()",
+			InsertText:       m.Name + "($0)",
+			InsertTextFormat: InsertTextFormatSnippet,
+			SortText:         "1" + m.Name,
+		})
+	}
+	return CompletionList{IsIncomplete: false, Items: items}, true
+}
+
+// resolveExprTemplate maps a simple expression (the text just before a
+// member-access dot) to a template name. Two forms are recognized:
+//
+//   - A direct `get_var("NAME")` call — look up NAME.
+//   - A bare identifier — search the source for an assignment of the
+//     form `IDENT = get_var("NAME")` and resolve that.
+//
+// Anything more complex (chained calls, attribute access, arithmetic)
+// returns false; supporting those would require real type inference and
+// is a follow-up.
+func resolveExprTemplate(source, expr string, provider SymbolProvider) (string, bool) {
+	expr = strings.TrimSpace(expr)
+	if m := getVarCallRe.FindStringSubmatch(expr); m != nil {
+		return variableTemplate(provider, m[1])
+	}
+	if identRe.MatchString(expr) {
+		if name, ok := findGetVarAssignment(source, expr); ok {
+			return variableTemplate(provider, name)
+		}
+	}
+	return "", false
+}
+
+func variableTemplate(provider SymbolProvider, varName string) (string, bool) {
+	v := provider.Variable(varName)
+	if v == nil || v.TemplateName == "" {
+		return "", false
+	}
+	return v.TemplateName, true
+}
+
+// findGetVarAssignment scans source for `ident = get_var("NAME")` and
+// returns NAME. Picks the last assignment if several exist — that matches
+// ordinary Python/Starlark shadowing semantics well enough for
+// completion. Returns ("", false) when no matching assignment is found.
+func findGetVarAssignment(source, ident string) (string, bool) {
+	// Build a dedicated regex per ident; identRe upstream already
+	// guarantees `ident` is a safe identifier, so regex-quoting is
+	// unnecessary.
+	re := regexp.MustCompile(`(?m)(?:^|[^A-Za-z0-9_])` + ident + `\s*=\s*get_var\s*\(\s*["']([^"']+)["']\s*\)`)
+	matches := re.FindAllStringSubmatch(source, -1)
+	if len(matches) == 0 {
+		return "", false
+	}
+	last := matches[len(matches)-1]
+	return last[1], true
+}
+
+// lineAtIndex returns the 0-indexed source line. Out-of-range indices
+// return an empty string; the caller will simply produce no completion.
+func lineAtIndex(source string, line int) string {
+	if line < 0 {
+		return ""
+	}
+	start := 0
+	current := 0
+	for i := 0; i < len(source); i++ {
+		if source[i] == '\n' {
+			if current == line {
+				return source[start:i]
+			}
+			current++
+			start = i + 1
+		}
+	}
+	if current == line {
+		return source[start:]
+	}
+	return ""
+}
+
+func isIdentByte(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
 }
 
 // formatHoverMarkdown renders a builtin as a markdown block suitable for a

@@ -5,6 +5,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	"github.com/joyautomation/tentacle/internal/plc/lsp"
 )
@@ -27,7 +28,8 @@ func (m *Module) handlePlcLSP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tr := &wsTransport{conn: conn}
-	server := lsp.NewServer(m.log)
+	plcID := chi.URLParam(r, "plcId")
+	server := lsp.NewServer(m.log, &plcLspProvider{mod: m, plcID: plcID})
 	// Serve blocks until the peer disconnects or the server errors.
 	if err := server.Serve(r.Context(), tr); err != nil {
 		m.log.Warn("plc lsp session ended with error", "err", err)

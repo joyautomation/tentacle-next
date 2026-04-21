@@ -29,7 +29,8 @@ type Transport interface {
 // Server is one LSP session. Create one per connection; goroutines that
 // invoke its methods must not escape the session lifetime.
 type Server struct {
-	log *slog.Logger
+	log      *slog.Logger
+	provider SymbolProvider
 
 	mu   sync.Mutex
 	docs map[string]*document // uri → doc
@@ -44,13 +45,18 @@ type document struct {
 
 // NewServer creates an LSP session. The caller runs Serve(ctx, transport) in
 // its own goroutine.
-func NewServer(log *slog.Logger) *Server {
+//
+// provider may be nil — when it is, completion and hover degrade gracefully
+// to builtin/local-only behavior. Pass a provider to unlock PLC-aware
+// features like template-field completion after `get_var("motor1").`.
+func NewServer(log *slog.Logger, provider SymbolProvider) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Server{
-		log:  log.With("component", "plc-lsp"),
-		docs: make(map[string]*document),
+		log:      log.With("component", "plc-lsp"),
+		provider: provider,
+		docs:     make(map[string]*document),
 	}
 }
 
@@ -157,7 +163,7 @@ func (s *Server) handleCompletion(tr Transport, msg *rpcMessage) {
 		// client doesn't see an error. Add a case when the ST resolver lands.
 		list = CompletionList{IsIncomplete: false, Items: []CompletionItem{}}
 	default:
-		list = completeStarlark(source, params.Position)
+		list = completeStarlark(source, params.Position, s.provider)
 	}
 	body, _ := json.Marshal(list)
 	s.reply(tr, msg.ID, body)

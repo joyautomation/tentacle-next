@@ -104,7 +104,7 @@ func sendJSON(t *testing.T, tr Transport, method string, id any, params any) {
 
 func TestServerDiagnosticsForParseError(t *testing.T) {
 	serverSide, clientSide := newMemPair()
-	server := NewServer(nil)
+	server := NewServer(nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = server.Serve(ctx, serverSide) }()
@@ -147,7 +147,7 @@ func TestServerDiagnosticsForParseError(t *testing.T) {
 
 func TestServerDiagnosticsClearOnValidCode(t *testing.T) {
 	serverSide, clientSide := newMemPair()
-	server := NewServer(nil)
+	server := NewServer(nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = server.Serve(ctx, serverSide) }()
@@ -178,7 +178,7 @@ func TestServerDiagnosticsClearOnValidCode(t *testing.T) {
 
 func TestServerDidChangeUpdatesDiagnostics(t *testing.T) {
 	serverSide, clientSide := newMemPair()
-	server := NewServer(nil)
+	server := NewServer(nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = server.Serve(ctx, serverSide) }()
