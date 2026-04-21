@@ -14,7 +14,7 @@
 	import { watchVariable, liveValuesVersion, getLiveValue } from '../live-values.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
-	import { PencilSquare } from '@joyautomation/salt/icons';
+	import { PencilSquare, XMark } from '@joyautomation/salt/icons';
 
 	type Props = {
 		name: string;
@@ -474,7 +474,7 @@
 							<div class="leaf-head">
 								<span class="leaf-name">{selectedFieldName}</span>
 								{#if selectedFieldType}<span class="leaf-type">{selectedFieldType}</span>{/if}
-								<button class="btn small" onclick={() => (selectedLeafPath = null)} title="Close">×</button>
+								<button class="btn small icon-btn" onclick={() => (selectedLeafPath = null)} title="Close" aria-label="Close"><XMark size="0.875rem" /></button>
 							</div>
 							<div class="leaf-grid">
 								<label class="field">
@@ -779,11 +779,13 @@
 			font-family: var(--font-mono, monospace);
 		}
 
-		.btn.small {
+		.btn.small.icon-btn {
 			margin-left: auto;
-			font-size: 0.875rem;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
 			line-height: 1;
-			padding: 0.125rem 0.4375rem;
+			padding: 0.1875rem;
 		}
 	}
 

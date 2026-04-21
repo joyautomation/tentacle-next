@@ -2,6 +2,7 @@
 	import { apiPut } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
+	import { XMark } from '@joyautomation/salt/icons';
 	import { workspaceSelection, workspaceTabs } from '../workspace-state.svelte';
 	import type { PlcTaskConfig, PlcTemplate, ProgramListItem } from '$lib/types/plc';
 
@@ -170,7 +171,7 @@
 	<div class="dialog" role="dialog" aria-modal="true" aria-label={title}>
 		<header class="dlg-head">
 			<h3>{title}</h3>
-			<button type="button" class="close" onclick={onClose} aria-label="Close">×</button>
+			<button type="button" class="close" onclick={onClose} aria-label="Close"><XMark size="1rem" /></button>
 		</header>
 
 		<form
@@ -325,12 +326,14 @@
 	}
 
 	.close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		width: 1.75rem;
 		height: 1.75rem;
 		background: transparent;
 		border: none;
 		color: var(--theme-text-muted);
-		font-size: 1.25rem;
 		line-height: 1;
 		cursor: pointer;
 		border-radius: 0.25rem;

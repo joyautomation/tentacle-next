@@ -4,7 +4,7 @@
 	import { state as saltState } from '@joyautomation/salt';
 	import { slide } from 'svelte/transition';
 	import type { PlcConfig, PlcTemplate, PlcTemplateField } from '$lib/types/plc';
-	import { PencilSquare } from '@joyautomation/salt/icons';
+	import { PencilSquare, Plus, Trash, ArrowUp, ArrowDown } from '@joyautomation/salt/icons';
 	import TidyTreeView, { type TidyNode } from '$lib/components/TidyTreeView.svelte';
 
 	type Props = {
@@ -277,11 +277,11 @@
 			</div>
 
 	<div class="tree-actions">
-		<button class="btn small" onclick={addField}>+ Add field</button>
+		<button class="btn small icon-text" onclick={addField}><Plus size="0.875rem" /><span>Add field</span></button>
 		{#if selectedIdx !== null}
-			<button class="btn small" onclick={() => moveField(selectedIdx!, -1)} disabled={selectedIdx === 0}>↑ Up</button>
-			<button class="btn small" onclick={() => moveField(selectedIdx!, 1)} disabled={selectedIdx === fields.length - 1}>↓ Down</button>
-			<button class="btn small danger" onclick={() => removeField(selectedIdx!)}>× Remove</button>
+			<button class="btn small icon-text" onclick={() => moveField(selectedIdx!, -1)} disabled={selectedIdx === 0}><ArrowUp size="0.875rem" /><span>Up</span></button>
+			<button class="btn small icon-text" onclick={() => moveField(selectedIdx!, 1)} disabled={selectedIdx === fields.length - 1}><ArrowDown size="0.875rem" /><span>Down</span></button>
+			<button class="btn small danger icon-text" onclick={() => removeField(selectedIdx!)}><Trash size="0.875rem" /><span>Remove</span></button>
 		{/if}
 	</div>
 
@@ -586,6 +586,12 @@
 		&.small {
 			padding: 0.1875rem 0.5rem;
 			font-size: 0.75rem;
+		}
+
+		&.icon-text {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.3125rem;
 		}
 
 		&:disabled {

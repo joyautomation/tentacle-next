@@ -3,6 +3,7 @@
 	import ProblemsView from '$lib/plc/workspace/ProblemsView.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceDiagnostics } from '$lib/plc/workspace-state.svelte';
+	import { ChevronDown } from '@joyautomation/salt/icons';
 
 	type Props = {
 		serviceType: string;
@@ -48,9 +49,7 @@
 						title="Hide output"
 						aria-label="Hide output"
 					>
-						<svg width="10" height="10" viewBox="0 0 12 12" class="triangle down">
-							<polygon points="2,4 10,4 6,10" fill="currentColor" />
-						</svg>
+						<ChevronDown size="0.875rem" />
 					</button>
 				{/if}
 			{/snippet}
@@ -117,10 +116,6 @@
 			color: var(--theme-text);
 			background: var(--theme-border);
 		}
-	}
-
-	.triangle {
-		display: block;
 	}
 
 	.panel-body {

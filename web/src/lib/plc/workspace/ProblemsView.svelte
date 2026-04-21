@@ -5,6 +5,11 @@
 		workspaceSelection,
 		type WorkspaceDiagnostic
 	} from '$lib/plc/workspace-state.svelte';
+	import {
+		XCircle,
+		ExclamationTriangle,
+		InformationCircle
+	} from '@joyautomation/salt/icons';
 
 	type Row = {
 		uri: string;
@@ -52,11 +57,6 @@
 		workspaceTabs.activate(row.programName);
 	}
 
-	function severityIcon(sev: WorkspaceDiagnostic['severity']): string {
-		if (sev === 'error') return '✖';
-		if (sev === 'warning') return '⚠';
-		return 'ℹ';
-	}
 </script>
 
 <div class="problems">
@@ -68,7 +68,13 @@
 				<li>
 					<button type="button" class="row" onclick={() => gotoRow(row)}>
 						<span class="icon" class:error={row.diag.severity === 'error'} class:warning={row.diag.severity === 'warning'}>
-							{severityIcon(row.diag.severity)}
+							{#if row.diag.severity === 'error'}
+								<XCircle size="1rem" />
+							{:else if row.diag.severity === 'warning'}
+								<ExclamationTriangle size="1rem" />
+							{:else}
+								<InformationCircle size="1rem" />
+							{/if}
 						</span>
 						<span class="message">{row.diag.message}</span>
 						<span class="location">
@@ -123,7 +129,8 @@
 	}
 
 	.icon {
-		font-size: 0.9rem;
+		display: inline-flex;
+		align-items: center;
 		flex-shrink: 0;
 		color: var(--theme-text-muted);
 

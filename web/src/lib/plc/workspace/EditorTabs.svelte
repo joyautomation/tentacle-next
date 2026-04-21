@@ -5,7 +5,7 @@
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
 	import type { PlcConfig, PlcTemplate } from '$lib/types/plc';
-	import { PencilSquare } from '@joyautomation/salt/icons';
+	import { PencilSquare, XMark } from '@joyautomation/salt/icons';
 
 	type Props = {
 		variableNames: string[];
@@ -73,7 +73,7 @@
 					if (e.key === 'Enter' || e.key === ' ') close(e, tab.id);
 				}}
 			>
-				×
+				<XMark size="0.75rem" />
 			</span>
 		{/snippet}
 	</Tabs>
@@ -146,7 +146,6 @@
 		height: 1rem;
 		color: var(--theme-text-muted);
 		border-radius: 0.1875rem;
-		font-size: 1rem;
 		line-height: 1;
 
 		&:hover {

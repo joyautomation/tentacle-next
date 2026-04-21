@@ -7,6 +7,7 @@
 	import EditorTabs from '$lib/plc/workspace/EditorTabs.svelte';
 	import CreateDialog from '$lib/plc/workspace/CreateDialog.svelte';
 	import OutputPanel from '$lib/plc/workspace/OutputPanel.svelte';
+	import { ChevronLeft, ChevronRight, ChevronUp } from '@joyautomation/salt/icons';
 	import type { WorkspaceLoadData } from './+page';
 
 	let { data }: { data: WorkspaceLoadData } = $props();
@@ -80,9 +81,7 @@
 				title="Show navigator"
 				aria-label="Show navigator"
 			>
-				<svg width="10" height="10" viewBox="0 0 12 12" class="triangle">
-					<polygon points="3,2 9,6 3,10" fill="currentColor" />
-				</svg>
+				<ChevronRight size="0.875rem" />
 				<span class="rail-label">Navigator</span>
 			</button>
 		{/if}
@@ -106,9 +105,7 @@
 											title="Hide navigator"
 											aria-label="Hide navigator"
 										>
-											<svg width="10" height="10" viewBox="0 0 12 12" class="triangle left">
-												<polygon points="3,2 9,6 3,10" fill="currentColor" />
-											</svg>
+											<ChevronLeft size="0.875rem" />
 										</button>
 									</header>
 									<div class="panel-body no-pad">
@@ -164,9 +161,7 @@
 											title="Hide inspector"
 											aria-label="Hide inspector"
 										>
-											<svg width="10" height="10" viewBox="0 0 12 12" class="triangle right">
-												<polygon points="3,2 9,6 3,10" fill="currentColor" />
-											</svg>
+											<ChevronRight size="0.875rem" />
 										</button>
 									</header>
 									<div class="panel-body no-pad">
@@ -199,9 +194,7 @@
 					title="Show output"
 					aria-label="Show output"
 				>
-					<svg width="10" height="10" viewBox="0 0 12 12" class="triangle up">
-						<polygon points="3,2 9,6 3,10" fill="currentColor" />
-					</svg>
+					<ChevronUp size="0.875rem" />
 					<span class="rail-label-h">Output</span>
 				</button>
 			{/if}
@@ -214,9 +207,7 @@
 				title="Show inspector"
 				aria-label="Show inspector"
 			>
-				<svg width="10" height="10" viewBox="0 0 12 12" class="triangle left">
-					<polygon points="3,2 9,6 3,10" fill="currentColor" />
-				</svg>
+				<ChevronLeft size="0.875rem" />
 				<span class="rail-label">Inspector</span>
 			</button>
 		{/if}
@@ -316,27 +307,6 @@
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-	}
-
-	.triangle {
-		display: block;
-		transition: transform 0.2s ease;
-
-		&.left {
-			transform: rotate(180deg);
-		}
-
-		&.right {
-			transform: rotate(0deg);
-		}
-
-		&.up {
-			transform: rotate(-90deg);
-		}
-
-		&.down {
-			transform: rotate(90deg);
-		}
 	}
 
 	.panel {

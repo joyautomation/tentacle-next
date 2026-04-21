@@ -2,6 +2,7 @@
 	import { slide } from 'svelte/transition';
 	import type { PlcVariableConfig, PlcTaskConfig, ProgramListItem } from '$lib/types/plc';
 	import { workspaceSelection } from '../workspace-state.svelte';
+	import { ChevronRight, Plus } from '@joyautomation/salt/icons';
 
 	type Props = {
 		variables: Record<string, PlcVariableConfig>;
@@ -86,7 +87,7 @@
 					onclick={() => toggle('variables')}
 					aria-expanded={sections.variables}
 				>
-					<span class="chevron" class:open={sections.variables}>▸</span>
+					<span class="chevron" class:open={sections.variables}><ChevronRight size="0.75rem" /></span>
 					<span class="label">Variables</span>
 					<span class="count">{variableEntries.length}</span>
 				</button>
@@ -97,7 +98,7 @@
 					title="New variable"
 					aria-label="New variable"
 				>
-					+
+					<Plus size="0.875rem" />
 				</button>
 			</div>
 			{#if sections.variables}
@@ -134,7 +135,7 @@
 					onclick={() => toggle('tasks')}
 					aria-expanded={sections.tasks}
 				>
-					<span class="chevron" class:open={sections.tasks}>▸</span>
+					<span class="chevron" class:open={sections.tasks}><ChevronRight size="0.75rem" /></span>
 					<span class="label">Tasks</span>
 					<span class="count">{taskEntries.length}</span>
 				</button>
@@ -145,7 +146,7 @@
 					title="New task"
 					aria-label="New task"
 				>
-					+
+					<Plus size="0.875rem" />
 				</button>
 			</div>
 			{#if sections.tasks}
@@ -181,7 +182,7 @@
 					onclick={() => toggle('programs')}
 					aria-expanded={sections.programs}
 				>
-					<span class="chevron" class:open={sections.programs}>▸</span>
+					<span class="chevron" class:open={sections.programs}><ChevronRight size="0.75rem" /></span>
 					<span class="label">Programs</span>
 					<span class="count">{programEntries.length}</span>
 				</button>
@@ -192,7 +193,7 @@
 					title="New program"
 					aria-label="New program"
 				>
-					+
+					<Plus size="0.875rem" />
 				</button>
 			</div>
 			{#if sections.programs}
@@ -293,7 +294,6 @@
 		background: transparent;
 		border: none;
 		color: var(--theme-text-muted);
-		font-size: 1rem;
 		line-height: 1;
 		cursor: pointer;
 		opacity: 0.4;
@@ -313,8 +313,9 @@
 	}
 
 	.chevron {
-		display: inline-block;
-		font-size: 0.625rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		color: var(--theme-text-muted);
 		transition: transform 0.15s ease;
 
