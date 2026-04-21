@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -204,6 +205,20 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.mu.Lock()
 	m.subs = append(m.subs, statsSub)
 	m.mu.Unlock()
+
+	// Handle variable write commands. The API publishes {"value": X} to
+	// {plcID}.command.{variableID}; variableID may contain dots for
+	// nested struct field paths (e.g. motor1.test).
+	cmdSub, err := b.Subscribe(topics.CommandWildcard(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		m.handleVariableCommand(subject, data)
+	})
+	if err != nil {
+		m.log.Error("plc: failed to subscribe to commands", "error", err)
+	} else {
+		m.mu.Lock()
+		m.subs = append(m.subs, cmdSub)
+		m.mu.Unlock()
+	}
 
 	m.log.Info("plc: started")
 
@@ -445,6 +460,73 @@ func (m *Module) handleVariablesRequest(reply bus.ReplyFunc) {
 		return
 	}
 	reply(data)
+}
+
+// handleVariableCommand processes a write command published by the API.
+// Subject format: {plcID}.command.{variableID}. For atomic variables,
+// variableID is a simple name (e.g. "counter"). For struct fields, it
+// is dot-separated (e.g. "motor1.test" or "motor1.nested.flag").
+func (m *Module) handleVariableCommand(subject string, data []byte) {
+	prefix := m.plcID + ".command."
+	if !strings.HasPrefix(subject, prefix) {
+		return
+	}
+	path := strings.TrimPrefix(subject, prefix)
+	if path == "" {
+		return
+	}
+
+	var body struct {
+		Value interface{} `json:"value"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		m.log.Warn("plc: invalid command payload", "subject", subject, "error", err)
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	parts := strings.Split(path, ".")
+
+	// Atomic variable write.
+	if len(parts) == 1 {
+		if !m.variables.Set(parts[0], body.Value, now) {
+			m.log.Warn("plc: command for unknown variable", "variable", parts[0])
+		}
+		return
+	}
+
+	// Struct field write: walk from the root StructValue through any
+	// intermediate struct fields, then SetField on the leaf.
+	rootID := parts[0]
+	rv := m.variables.GetVariable(rootID)
+	if rv == nil {
+		m.log.Warn("plc: command for unknown variable", "variable", rootID)
+		return
+	}
+	sv, ok := rv.Value.(*StructValue)
+	if !ok {
+		m.log.Warn("plc: nested write to non-struct variable", "variable", rootID)
+		return
+	}
+	for i := 1; i < len(parts)-1; i++ {
+		attr, err := sv.Attr(parts[i])
+		if err != nil || attr == nil {
+			m.log.Warn("plc: nested path not found", "variable", rootID, "field", parts[i])
+			return
+		}
+		next, ok := attr.(*StructValue)
+		if !ok {
+			m.log.Warn("plc: nested path is not a struct", "variable", rootID, "field", parts[i])
+			return
+		}
+		sv = next
+	}
+	leaf := parts[len(parts)-1]
+	if err := sv.SetField(leaf, goToStarlark(body.Value)); err != nil {
+		m.log.Warn("plc: struct field write failed", "path", path, "error", err)
+		return
+	}
+	m.variables.MarkChanged(rootID)
 }
 
 // handleTaskStatsRequest returns per-task scan-time statistics.
