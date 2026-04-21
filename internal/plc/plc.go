@@ -43,6 +43,8 @@ type Module struct {
 	pub       *publisher
 	bridge    *scannerBridge
 
+	persist *persister
+
 	subs          []bus.Subscription
 	stopHeartbeat func()
 	startedAt     time.Time
@@ -88,7 +90,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	// Ensure required KV buckets exist.
 	for _, bucket := range []string{
 		topics.BucketPlcConfig, topics.BucketPlcPrograms, topics.BucketPlcTemplates,
-		topics.BucketPlcVariables,
+		topics.BucketPlcVariables, topics.BucketPlcValues,
 		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
 		topics.BucketScannerModbus, topics.BucketScannerSNMP,
 	} {
@@ -249,6 +251,12 @@ func (m *Module) Stop() error {
 		m.pub = nil
 	}
 
+	// Stop persister (flushes pending writes before exiting).
+	if m.persist != nil {
+		m.persist.stop()
+		m.persist = nil
+	}
+
 	// Stop scanner bridge.
 	if m.bridge != nil {
 		m.bridge.unsubscribe()
@@ -296,6 +304,13 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 		m.pub = nil
 	}
 
+	// Stop existing persister. Its run loop flushes any pending writes
+	// on close, so values in flight when config reloads are preserved.
+	if m.persist != nil {
+		m.persist.stop()
+		m.persist = nil
+	}
+
 	// Stop existing scanner bridge.
 	if m.bridge != nil {
 		m.bridge.unsubscribe()
@@ -316,18 +331,33 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	templates := m.loadTemplates()
 	m.engine.SetTemplates(templates)
 
-	// Register variables.
+	// Register variables. Persisted snapshots override config defaults
+	// so values survive restart/redeploy; a variable missing from the
+	// snapshot (newly added in config) falls back to its configured
+	// default.
+	persisted := loadPersistedValues(m.b, m.log)
 	now := time.Now().UnixMilli()
+	restored := 0
 	for id, vcfg := range config.Variables {
+		var initial interface{}
+		if snap, ok := persisted[id]; ok {
+			initial = restoreVariableValue(m.engine, &vcfg, snap.Value, m.log)
+			restored++
+		} else {
+			initial = initialVariableValue(m.engine, &vcfg, m.log)
+		}
 		rv := &RuntimeVariable{
 			ID:          id,
 			Datatype:    vcfg.Datatype,
 			Direction:   vcfg.Direction,
-			Value:       initialVariableValue(m.engine, &vcfg, m.log),
+			Value:       initial,
 			Quality:     "good",
 			LastUpdated: now,
 		}
 		m.variables.Add(rv)
+	}
+	if restored > 0 {
+		m.log.Info("plc: restored persisted values", "count", restored)
 	}
 
 	// Load and compile programs from KV.
@@ -362,6 +392,11 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	// Start publisher.
 	m.pub = newPublisher(m.b, m.plcID, m.variables, m.log)
 	m.pub.start()
+
+	// Start persister. Snapshots changed values to KV on a 1s debounce
+	// and flushes on shutdown so the last value survives restart.
+	m.persist = newPersister(m.b, m.variables, m.log)
+	m.persist.start()
 
 	// Start task runners.
 	m.tasks = make(map[string]*taskRunner)
@@ -408,6 +443,59 @@ func (m *Module) loadTemplates() map[string]*itypes.PlcTemplate {
 		out[tmpl.Name] = &tmpl
 	}
 	return out
+}
+
+// restoreVariableValue builds the runtime value from a persisted
+// snapshot. For atomic types the snapshot's value is returned as-is.
+// For template-typed variables the snapshot is a JSON object with a
+// `_type` discriminator and field values; we instantiate a fresh
+// StructValue (so methods/attrs bind to the current template) and
+// overlay the saved field values. Fields removed from the template
+// since the snapshot are dropped; fields added since get the
+// template's default.
+func restoreVariableValue(e *Engine, vcfg *itypes.PlcVariableConfigKV, snap interface{}, log *slog.Logger) interface{} {
+	if _, ok := e.getTemplate(vcfg.Datatype); !ok {
+		return snap
+	}
+	m, ok := snap.(map[string]interface{})
+	if !ok {
+		log.Warn("plc: template snapshot is not an object, using defaults",
+			"variable", vcfg.ID, "type", vcfg.Datatype)
+		return initialVariableValue(e, vcfg, log)
+	}
+	values := make(map[string]starlark.Value, len(m))
+	for k, v := range m {
+		if k == "_type" {
+			continue
+		}
+		values[k] = goToStarlark(v)
+	}
+	sv, err := e.NewStruct(vcfg.Datatype, values)
+	if err != nil {
+		// NewStruct rejects unknown fields — retry dropping any field
+		// that isn't on the current template. This handles the case
+		// where a field was removed from the template between snapshot
+		// and restore.
+		if tmpl, ok := e.getTemplate(vcfg.Datatype); ok {
+			valid := make(map[string]bool, len(tmpl.Fields))
+			for _, f := range tmpl.Fields {
+				valid[f.Name] = true
+			}
+			filtered := make(map[string]starlark.Value, len(values))
+			for k, v := range values {
+				if valid[k] {
+					filtered[k] = v
+				}
+			}
+			sv, err = e.NewStruct(vcfg.Datatype, filtered)
+		}
+	}
+	if err != nil {
+		log.Warn("plc: failed to restore template variable, using defaults",
+			"variable", vcfg.ID, "type", vcfg.Datatype, "error", err)
+		return initialVariableValue(e, vcfg, log)
+	}
+	return sv
 }
 
 // initialVariableValue derives the runtime value for a newly-registered

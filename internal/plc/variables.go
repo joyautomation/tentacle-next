@@ -9,13 +9,14 @@ import (
 
 // RuntimeVariable holds the current value and metadata for a single PLC variable.
 type RuntimeVariable struct {
-	ID          string
-	Datatype    string      // "number", "boolean", "string"
-	Direction   string      // "input", "output", "internal"
-	Value       interface{}
-	Quality     string      // "good", "uncertain", "bad"
-	LastUpdated int64       // unix millis
-	changed     bool        // dirty flag for publish cycle
+	ID           string
+	Datatype     string      // "number", "boolean", "string"
+	Direction    string      // "input", "output", "internal"
+	Value        interface{}
+	Quality      string      // "good", "uncertain", "bad"
+	LastUpdated  int64       // unix millis
+	changed      bool        // dirty flag for publish cycle
+	persistDirty bool        // dirty flag for KV snapshot cycle
 }
 
 // VariableStore is a thread-safe container for all PLC runtime variables.
@@ -103,6 +104,7 @@ func (vs *VariableStore) Set(id string, value interface{}, nowMs int64) bool {
 	v.Value = value
 	v.LastUpdated = nowMs
 	v.changed = true
+	v.persistDirty = true
 	return ok
 }
 
@@ -163,7 +165,24 @@ func (vs *VariableStore) MarkChanged(id string) {
 	defer vs.mu.Unlock()
 	if v, ok := vs.vars[id]; ok {
 		v.changed = true
+		v.persistDirty = true
 	}
+}
+
+// DrainPersistDirty returns all variables marked dirty for persistence
+// since the last drain, clearing their persist-dirty flags. Called by
+// the persister goroutine to snapshot the current values to KV.
+func (vs *VariableStore) DrainPersistDirty() []*RuntimeVariable {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	var out []*RuntimeVariable
+	for _, v := range vs.vars {
+		if v.persistDirty {
+			v.persistDirty = false
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // Count returns the number of variables.

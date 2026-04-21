@@ -31,6 +31,11 @@ const (
 	BucketPlcPrograms  = "plc_programs"
 	BucketPlcTemplates = "plc_templates"
 
+	// BucketPlcValues persists the last-known runtime value of every
+	// PLC variable so values survive restart/redeploy. Keyed by
+	// variable ID; value is a JSON snapshot of the RuntimeVariable.
+	BucketPlcValues = "plc_values"
+
 	// PROFINET IO Device configuration bucket.
 	BucketProfinetConfig = "profinet_config"
 
@@ -79,6 +84,7 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketPlcConfig:                 {History: 5},
 		BucketPlcPrograms:               {History: 10},
 		BucketPlcTemplates:              {History: 10},
+		BucketPlcValues:                 {History: 1},
 		BucketProfinetConfig:            {History: 5},
 		BucketScannerProfinetController: {History: 1},
 		BucketConfigMetadata:    {History: 1},
