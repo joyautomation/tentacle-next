@@ -37,6 +37,12 @@
 		workspaceTabs.open({ name: selection.id, kind: 'variable' });
 	});
 
+	$effect(() => {
+		if (selection?.kind !== 'task') return;
+		if (!(selection.id in data.tasks)) return;
+		workspaceTabs.open({ name: selection.id, kind: 'task' });
+	});
+
 	let createKind = $state<'variable' | 'task' | 'program' | null>(null);
 
 	function toggleLeft() {
@@ -128,16 +134,9 @@
 											{variableNames}
 											plcConfig={data.plcConfig}
 											templates={data.templates}
+											tasks={data.tasks}
+											programs={data.programs}
 										/>
-									{:else if selection?.kind === 'task'}
-										<div class="placeholder-card">
-											<div class="label">Task</div>
-											<div class="title">{selection.id}</div>
-											<div class="hint">
-												Task editing lives in the Inspector for now — UDT-style
-												editing in the Editor pane is coming.
-											</div>
-										</div>
 									{:else}
 										<div class="placeholder-card muted">
 											<div class="title">Nothing selected</div>
@@ -376,14 +375,6 @@
 			color: var(--theme-text-muted);
 		}
 
-		.label {
-			font-size: 0.6875rem;
-			font-weight: 600;
-			text-transform: uppercase;
-			letter-spacing: 0.04em;
-			color: var(--theme-text-muted);
-		}
-
 		.title {
 			font-size: 1rem;
 			font-weight: 600;
@@ -396,10 +387,6 @@
 		color: var(--theme-text-muted);
 		font-size: 0.75rem;
 		font-style: italic;
-
-		a {
-			color: var(--theme-primary);
-		}
 	}
 
 	:global(.splitpanes.plc-workspace .splitpanes__splitter) {

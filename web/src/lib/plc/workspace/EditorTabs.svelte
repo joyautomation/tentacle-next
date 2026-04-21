@@ -1,10 +1,11 @@
 <script lang="ts">
 	import ProgramEditor from './ProgramEditor.svelte';
 	import VariableEditor from './VariableEditor.svelte';
+	import TaskEditor from './TaskEditor.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
-	import type { PlcConfig, PlcTemplate } from '$lib/types/plc';
+	import type { PlcConfig, PlcTaskConfig, PlcTemplate, ProgramListItem } from '$lib/types/plc';
 	import { XMark } from '@joyautomation/salt/icons';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 
@@ -12,9 +13,11 @@
 		variableNames: string[];
 		plcConfig: PlcConfig | null;
 		templates: PlcTemplate[];
+		tasks: Record<string, PlcTaskConfig>;
+		programs: ProgramListItem[];
 	};
 
-	let { variableNames, plcConfig, templates }: Props = $props();
+	let { variableNames, plcConfig, templates, tasks, programs }: Props = $props();
 
 	type EditorTab = TabItem & { kind: EditorTabKind; language?: string };
 
@@ -33,6 +36,7 @@
 		if (!tab) return;
 		if (tab.kind === 'program') workspaceSelection.select('program', name);
 		else if (tab.kind === 'variable') workspaceSelection.select('variable', name);
+		else if (tab.kind === 'task') workspaceSelection.select('task', name);
 	}
 
 	function close(e: MouseEvent | KeyboardEvent, name: string) {
@@ -42,6 +46,7 @@
 
 	function badgeLabel(tab: EditorTab): string {
 		if (tab.kind === 'variable') return 'VAR';
+		if (tab.kind === 'task') return 'TASK';
 		const lang = tab.language ?? '';
 		if (lang === 'starlark') return 'PY';
 		if (lang === 'st' || lang === 'structured-text') return 'ST';
@@ -59,7 +64,11 @@
 		ariaLabel="Open editors"
 	>
 		{#snippet tab({ tab }: { tab: EditorTab; active: boolean })}
-			<span class="badge" class:var-badge={tab.kind === 'variable'}>{badgeLabel(tab)}</span>
+			<span
+				class="badge"
+				class:var-badge={tab.kind === 'variable'}
+				class:task-badge={tab.kind === 'task'}
+			>{badgeLabel(tab)}</span>
 			<span class="name">{tab.label}</span>
 			{#if workspaceTabs.dirty[tab.id]}
 				<DirtyIcon size="0.875rem" />
@@ -84,6 +93,13 @@
 			<div class="editor-host" class:hidden={workspaceTabs.active !== tab.name}>
 				{#if tab.kind === 'variable'}
 					<VariableEditor name={tab.name} {plcConfig} {templates} />
+				{:else if tab.kind === 'task'}
+					<TaskEditor
+						name={tab.name}
+						{tasks}
+						{programs}
+						onDirtyChange={(d) => workspaceTabs.setDirty(tab.name, d)}
+					/>
 				{:else}
 					<ProgramEditor
 						name={tab.name}
@@ -116,6 +132,11 @@
 		letter-spacing: 0;
 
 		&.var-badge {
+			color: var(--theme-text);
+			background: color-mix(in srgb, var(--theme-text) 12%, transparent);
+		}
+
+		&.task-badge {
 			color: var(--theme-text);
 			background: color-mix(in srgb, var(--theme-text) 12%, transparent);
 		}
