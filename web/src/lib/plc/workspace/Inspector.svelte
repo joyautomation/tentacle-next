@@ -12,6 +12,11 @@
 		getTaskStats
 	} from '$lib/plc/task-stats.svelte';
 	import { workspaceSelection } from '../workspace-state.svelte';
+	import ValueTree from '$lib/components/ValueTree.svelte';
+
+	function isStruct(v: unknown): boolean {
+		return v !== null && typeof v === 'object';
+	}
 
 	type Props = {
 		variables: Record<string, PlcVariableConfig>;
@@ -134,9 +139,13 @@
 			<div class="title">{v.name}</div>
 		</div>
 		<div class="value-block">
-			<div class="value-big" class:good={v.live?.quality?.toLowerCase() === 'good'}>
-				{v.live ? formatValue(v.live.value) : '—'}
-			</div>
+			{#if v.live && isStruct(v.live.value)}
+				<ValueTree value={v.live.value} label={v.config?.datatype ?? v.name} />
+			{:else}
+				<div class="value-big" class:good={v.live?.quality?.toLowerCase() === 'good'}>
+					{v.live ? formatValue(v.live.value) : '—'}
+				</div>
+			{/if}
 			<div class="value-meta">
 				<span class={`quality ${qualityClass(v.live?.quality)}`}>
 					{v.live?.quality ?? 'no data'}
@@ -163,10 +172,17 @@
 					</div>
 				{/if}
 				{#if v.config.default !== undefined && v.config.default !== null}
-					<div class="field">
-						<span class="k">Default</span>
-						<span class="val">{formatValue(v.config.default)}</span>
-					</div>
+					{#if isStruct(v.config.default)}
+						<div class="field stacked">
+							<span class="k">Default</span>
+							<ValueTree value={v.config.default} label={v.config.datatype} />
+						</div>
+					{:else}
+						<div class="field">
+							<span class="k">Default</span>
+							<span class="val">{formatValue(v.config.default)}</span>
+						</div>
+					{/if}
 				{/if}
 				{#if v.config.source}
 					<div class="field">
@@ -406,6 +422,12 @@
 		gap: 0.5rem;
 		padding: 0.1875rem 0;
 		font-size: 0.8125rem;
+
+		&.stacked {
+			flex-direction: column;
+			align-items: stretch;
+			gap: 0.25rem;
+		}
 
 		.k {
 			flex-shrink: 0;
