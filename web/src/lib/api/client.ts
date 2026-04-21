@@ -2,12 +2,28 @@
 
 const API_BASE = '/api/v1';
 
+export type ValidationIssue = {
+  path: string;
+  code: string;
+  message: string;
+};
+
 export type ApiError = {
   error: string;
   status: number;
+  issues?: ValidationIssue[];
 };
 
 export type ApiResult<T> = { data: T; error?: never } | { data?: never; error: ApiError };
+
+function formatValidationError(issues: ValidationIssue[]): string {
+  if (issues.length === 0) return 'validation_failed';
+  if (issues.length === 1) {
+    const i = issues[0];
+    return i.path ? `${i.path}: ${i.message}` : i.message;
+  }
+  return issues.map((i) => (i.path ? `${i.path}: ${i.message}` : i.message)).join('; ');
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<ApiResult<T>> {
   try {
@@ -18,11 +34,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<ApiResul
     if (!response.ok) {
       const text = await response.text().catch(() => response.statusText);
       let errorMessage = text;
+      let issues: ValidationIssue[] | undefined;
       try {
         const json = JSON.parse(text);
-        if (json.error) errorMessage = json.error;
+        if (Array.isArray(json.issues) && json.issues.length > 0) {
+          issues = json.issues as ValidationIssue[];
+          errorMessage = formatValidationError(issues);
+        } else if (json.error) {
+          errorMessage = json.error;
+        }
       } catch { /* use raw text */ }
-      return { error: { error: errorMessage, status: response.status } };
+      return { error: { error: errorMessage, status: response.status, issues } };
     }
     const data = await response.json();
     return { data };

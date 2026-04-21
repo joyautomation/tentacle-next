@@ -88,7 +88,7 @@ func defaultStarlarkValue(f *itypes.PlcTemplateField) starlark.Value {
 		return starlark.NewDict(0)
 	}
 	switch base {
-	case "bool":
+	case "bool", "boolean":
 		return starlark.False
 	case "number":
 		return starlark.Float(0)
@@ -242,7 +242,7 @@ func checkFieldAssignable(f *itypes.PlcTemplateField, val starlark.Value) error 
 	}
 
 	switch base {
-	case "bool":
+	case "bool", "boolean":
 		if _, ok := val.(starlark.Bool); !ok {
 			return fmt.Errorf("field %q expects bool, got %s", f.Name, val.Type())
 		}

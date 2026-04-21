@@ -25,10 +25,11 @@ var (
 	templateNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	fieldNameRE    = regexp.MustCompile(`^[a-z_][a-zA-Z0-9_]*$`)
 	primitiveTypes = map[string]bool{
-		"bool":   true,
-		"number": true,
-		"string": true,
-		"bytes":  true,
+		"bool":    true,
+		"boolean": true,
+		"number":  true,
+		"string":  true,
+		"bytes":   true,
 	}
 )
 
