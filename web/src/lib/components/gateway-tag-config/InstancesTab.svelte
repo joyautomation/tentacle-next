@@ -2,7 +2,8 @@
 	import type { GatewayUdtTemplateMember, DeadBandConfig } from '$lib/types/gateway';
 	import type { InstanceInfo } from './utils';
 	import { slide } from 'svelte/transition';
-	import { ChevronRight, PencilSquare } from '@joyautomation/salt/icons';
+	import { ChevronRight } from '@joyautomation/salt/icons';
+	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 	import InlineEditCell from './InlineEditCell.svelte';
 	import TabToolbar from './TabToolbar.svelte';
 
@@ -144,7 +145,7 @@
 		<div class="inst-row" class:row-dirty={dirtyInstanceKeys.has(publishKey)}>
 			<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
 			<div class="inst-head" onclick={() => onToggleExpand(inst.id)}>
-				{#if dirtyInstanceKeys.has(publishKey)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
+				{#if dirtyInstanceKeys.has(publishKey)}<DirtyIcon slideIn />{/if}
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->
 				<div class="toggle-group">
 					<span class="toggle-label">MQTT</span>
@@ -210,7 +211,7 @@
 									{@const maxKey = `inst::${inst.id}::${member.name}::maxTime`}
 									{@const memberDirty = dirtyInstanceMembers.get(inst.id)?.has(member.name) ?? false}
 									<tr class:row-override={!eff.inherited} class:row-dirty={memberDirty}>
-										<td data-label="Member">{#if memberDirty}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}<span class="mono item-name">{member.name}</span></td>
+										<td data-label="Member">{#if memberDirty}<DirtyIcon slideIn inline />{/if}<span class="mono item-name">{member.name}</span></td>
 										<td data-label="RBE">
 											<button
 												class="rbe-toggle"
@@ -334,14 +335,6 @@
 	}
 	.legend-text {
 		font-family: 'IBM Plex Mono', monospace;
-	}
-
-	.dirty-icon {
-		display: inline-flex; align-items: center; flex-shrink: 0;
-		color: #f59e0b;
-		vertical-align: middle; margin-right: 0.375rem;
-		overflow: hidden;
-		:global(svg) { flex-shrink: 0; }
 	}
 
 	.inst-row {

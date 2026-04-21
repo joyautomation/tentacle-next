@@ -5,7 +5,6 @@
 	import { slide } from 'svelte/transition';
 	import type { PlcConfig, PlcTemplate, PlcTemplateField } from '$lib/types/plc';
 	import {
-		PencilSquare,
 		Plus,
 		Trash,
 		ArrowUp,
@@ -13,6 +12,7 @@
 		ChevronRight
 	} from '@joyautomation/salt/icons';
 	import TidyTreeView, { type TidyNode } from '$lib/components/TidyTreeView.svelte';
+	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 
 	type Props = {
 		template: PlcTemplate;
@@ -229,7 +229,7 @@
 			<span class="chevron" class:open={expanded}><ChevronRight size="0.75rem" /></span>
 			<span class="badge">Template</span>
 			<span class="name">{template.name}</span>
-			{#if isDirty}<span class="dirty-icon" title="Unsaved template changes"><PencilSquare size="0.875rem" /></span>{/if}
+			{#if isDirty}<DirtyIcon size="0.875rem" title="Unsaved template changes" />{/if}
 			<span class="field-count">{fields.length} {fields.length === 1 ? 'field' : 'fields'}</span>
 		</button>
 		{#if expanded}
@@ -409,16 +409,6 @@
 			font-family: var(--font-mono, monospace);
 			font-weight: 600;
 			color: var(--theme-text);
-		}
-
-		.dirty-icon {
-			display: inline-flex;
-			align-items: center;
-			color: var(--theme-warning, #f59e0b);
-
-			:global(svg) {
-				flex-shrink: 0;
-			}
 		}
 
 		.field-count {

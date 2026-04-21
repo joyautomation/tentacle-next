@@ -6,7 +6,8 @@
   import { fly, slide } from 'svelte/transition';
   import { untrack } from 'svelte';
   import { state as saltState } from '@joyautomation/salt';
-  import { ArrowPath, ChevronRight, ExclamationTriangle, PencilSquare, Signal, XMark } from '@joyautomation/salt/icons';
+  import { ArrowPath, ChevronRight, ExclamationTriangle, Signal, XMark } from '@joyautomation/salt/icons';
+  import DirtyIcon from '$lib/components/DirtyIcon.svelte';
   import { mapDatatype, type RbeState, type InstanceInfo, type ActiveSection } from './utils';
   import TemplateDefaultsTab from './TemplateDefaultsTab.svelte';
   import InstancesTab from './InstancesTab.svelte';
@@ -1506,7 +1507,7 @@
                   class:active={activeSection?.kind === 'template' && activeSection.templateName === tmpl.name}
                   onclick={() => { activeSection = { kind: 'template', templateName: tmpl.name }; activeTab = 'instances'; }}
                 >
-                  {#if dirtySidebarSections.has(`t::${tmpl.name}`)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
+                  {#if dirtySidebarSections.has(`t::${tmpl.name}`)}<DirtyIcon slideIn />{/if}
                   <span class="tc-side-icon t-icon">T</span>
                   <span class="tc-side-name">{tmpl.name}</span>
                   {#if tmpl.hasConflict}
@@ -1528,7 +1529,7 @@
           {@const cache = browseCaches.find(c => c.deviceId === device.deviceId)}
           {@const pct = isBusy && browseState && browseState.totalCount > 0 ? Math.round((browseState.discoveredCount / browseState.totalCount) * 100) : 0}
           <div class="tc-side-head">
-            {#if dirtyDevices.has(device.deviceId)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
+            {#if dirtyDevices.has(device.deviceId)}<DirtyIcon slideIn />{/if}
             <span class="side-device-name">{device.deviceId}</span>
             <span class="side-proto">{device.protocol}</span>
             {#if !device.autoManaged}
@@ -1580,7 +1581,7 @@
               class:active={activeSection?.kind === 'atomic' && activeSection.deviceId === device.deviceId}
               onclick={() => { activeSection = { kind: 'atomic', deviceId: device.deviceId }; }}
             >
-              {#if dirtySidebarSections.has(`a::${device.deviceId}`)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
+              {#if dirtySidebarSections.has(`a::${device.deviceId}`)}<DirtyIcon slideIn />{/if}
               <span class="tc-side-icon a-icon">A</span>
               <span class="tc-side-name">Atomic Tags</span>
               {#if publishedAtomicDevices.has(device.deviceId)}<span class="mqtt-icon" title="Has MQTT-published tags"><Signal size="1rem" /></span>{/if}
@@ -1961,13 +1962,6 @@
     border: none; background: none; color: var(--theme-primary); cursor: pointer;
     font: inherit; font-size: inherit; font-style: inherit; padding: 0; text-decoration: underline;
     &:hover { opacity: 0.8; }
-  }
-
-  .dirty-icon {
-    display: inline-flex; align-items: center; flex-shrink: 0;
-    color: #f59e0b;
-    overflow: hidden;
-    :global(svg) { flex-shrink: 0; }
   }
 
   .tc-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }

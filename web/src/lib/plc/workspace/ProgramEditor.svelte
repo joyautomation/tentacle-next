@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
+	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 	import {
 		workspaceDiagnostics,
 		workspaceView,
@@ -139,7 +140,7 @@
 			<span class="prog-name">{name}</span>
 			<span class="lang-badge">{language}</span>
 			{#if dirty}
-				<span class="dirty-dot" title="Unsaved changes">●</span>
+				<DirtyIcon size="0.875rem" />
 			{/if}
 		</div>
 		<div class="right">
@@ -248,11 +249,6 @@
 		color: var(--theme-primary);
 		background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
 		border-radius: 0.1875rem;
-	}
-
-	.dirty-dot {
-		color: var(--theme-warning, var(--theme-primary));
-		font-size: 0.75rem;
 	}
 
 	.btn {

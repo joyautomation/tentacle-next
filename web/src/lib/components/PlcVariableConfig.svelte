@@ -7,6 +7,7 @@
   import { slide } from 'svelte/transition';
   import { state as saltState } from '@joyautomation/salt';
   import { ChevronRight, Plus, Trash } from '@joyautomation/salt/icons';
+  import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 
   let { plcConfig, gatewayConfig, browseCaches, browseStates, templates = [], error }: {
     plcConfig: PlcConfig | null;
@@ -584,7 +585,7 @@
                       </label>
                       <span class="leaf-type">{mapDatatype(item.datatype)}</span>
                       {#if dirty}
-                        <span class="dirty-icon" title={checked ? 'Will be added' : 'Will be removed'}>*</span>
+                        <DirtyIcon title={checked ? 'Will be added' : 'Will be removed'} />
                       {/if}
                     </div>
                   {/each}
@@ -771,8 +772,6 @@
       &:hover { border-color: var(--theme-primary); }
     }
   }
-
-  .dirty-icon { color: var(--badge-amber-text, #f59e0b); font-weight: 700; flex-shrink: 0; }
 
   .leaf-name { font-family: 'IBM Plex Mono', monospace; color: var(--theme-text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .leaf-value { margin-left: auto; font-family: 'IBM Plex Mono', monospace; color: var(--theme-text-muted); font-size: 0.75rem; flex-shrink: 0; }

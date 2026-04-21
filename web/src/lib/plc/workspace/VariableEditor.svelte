@@ -14,7 +14,8 @@
 	import { watchVariable, liveValuesVersion, getLiveValue } from '../live-values.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
-	import { PencilSquare, XMark } from '@joyautomation/salt/icons';
+	import { XMark } from '@joyautomation/salt/icons';
+	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 
 	type Props = {
 		name: string;
@@ -392,7 +393,7 @@
 			<div class="title-row">
 				<span class="name">{name}</span>
 				{#if isDirty}
-					<span class="dirty-icon" title="Unsaved changes"><PencilSquare size="1rem" /></span>
+					<DirtyIcon />
 				{/if}
 			</div>
 			<div class="actions">
@@ -597,15 +598,6 @@
 			color: var(--theme-text);
 		}
 
-		.dirty-icon {
-			display: inline-flex;
-			align-items: center;
-			color: var(--theme-warning, #f59e0b);
-
-			:global(svg) {
-				flex-shrink: 0;
-			}
-		}
 	}
 
 	.actions {
