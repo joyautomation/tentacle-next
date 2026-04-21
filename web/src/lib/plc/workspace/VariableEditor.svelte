@@ -105,7 +105,7 @@
 
 	function buildDefault(): unknown {
 		if (!isPrimitiveDatatype(datatype) && selectedTemplate) {
-			return { _type: selectedTemplate.name, ...templateDefaults };
+			return { ...templateDefaults };
 		}
 		if (datatype === 'boolean') return primitiveDefault === 'true';
 		if (datatype === 'string') return primitiveDefault;
@@ -138,13 +138,9 @@
 
 	const currentValues = $derived.by(() => {
 		void liveValuesVersion();
-		const out: Record<string, unknown> = {};
-		if (!selectedTemplate) return out;
-		for (const f of selectedTemplate.fields) {
-			const lv = getLiveValue(`${name}.${f.name}`);
-			out[f.name] = lv?.value;
-		}
-		return out;
+		const lv = getLiveValue(name)?.value;
+		if (lv && typeof lv === 'object') return lv as Record<string, unknown>;
+		return {} as Record<string, unknown>;
 	});
 
 	let selectedLeafPath = $state<(string | number)[] | null>(null);
@@ -170,7 +166,12 @@
 			lastSelectedKey = '';
 			return;
 		}
-		const live = getLiveValue(`${name}.${selectedFieldName}`)?.value;
+		void liveValuesVersion();
+		const whole = getLiveValue(name)?.value;
+		const live =
+			whole && typeof whole === 'object'
+				? (whole as Record<string, unknown>)[selectedFieldName]
+				: undefined;
 		const key = `${selectedFieldName}::${JSON.stringify(live)}`;
 		if (key === lastSelectedKey) return;
 		lastSelectedKey = key;
