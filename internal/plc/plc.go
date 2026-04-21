@@ -23,6 +23,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/types"
+	"go.starlark.net/starlark"
 )
 
 const serviceType = "plc"
@@ -85,7 +86,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 	// Ensure required KV buckets exist.
 	for _, bucket := range []string{
-		topics.BucketPlcConfig, topics.BucketPlcPrograms,
+		topics.BucketPlcConfig, topics.BucketPlcPrograms, topics.BucketPlcTemplates,
 		topics.BucketPlcVariables,
 		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
 		topics.BucketScannerModbus, topics.BucketScannerSNMP,
@@ -273,6 +274,12 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 		return
 	}
 
+	// Create engine and load templates before variables so template-typed
+	// variables can be instantiated as StructValues at register time.
+	m.engine = NewEngine(m.variables, m.log)
+	templates := m.loadTemplates()
+	m.engine.SetTemplates(templates)
+
 	// Register variables.
 	now := time.Now().UnixMilli()
 	for id, vcfg := range config.Variables {
@@ -280,15 +287,12 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 			ID:          id,
 			Datatype:    vcfg.Datatype,
 			Direction:   vcfg.Direction,
-			Value:       vcfg.Default,
+			Value:       initialVariableValue(m.engine, &vcfg, m.log),
 			Quality:     "good",
 			LastUpdated: now,
 		}
 		m.variables.Add(rv)
 	}
-
-	// Create engine.
-	m.engine = NewEngine(m.variables, m.log)
 
 	// Load and compile programs from KV.
 	for _, taskCfg := range config.Tasks {
@@ -342,6 +346,56 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 		"variables", m.variables.Count(),
 		"programs", m.engine.ProgramCount(),
 		"tasks", len(m.tasks))
+}
+
+// loadTemplates reads every template from the plc_templates KV bucket.
+// Returns an empty map if the bucket is empty or unreachable; template-
+// typed variables referencing missing templates will log a warning and
+// fall back to None at instantiation time.
+func (m *Module) loadTemplates() map[string]*itypes.PlcTemplate {
+	out := map[string]*itypes.PlcTemplate{}
+	keys, err := m.b.KVKeys(topics.BucketPlcTemplates)
+	if err != nil {
+		return out
+	}
+	for _, k := range keys {
+		data, _, err := m.b.KVGet(topics.BucketPlcTemplates, k)
+		if err != nil {
+			m.log.Warn("plc: failed to read template", "name", k, "error", err)
+			continue
+		}
+		var tmpl itypes.PlcTemplate
+		if err := json.Unmarshal(data, &tmpl); err != nil {
+			m.log.Warn("plc: failed to parse template", "name", k, "error", err)
+			continue
+		}
+		out[tmpl.Name] = &tmpl
+	}
+	return out
+}
+
+// initialVariableValue derives the runtime value for a newly-registered
+// variable. Atomic variables get vcfg.Default; template-typed variables
+// get a freshly instantiated StructValue (with vcfg.Default merged into
+// its fields) so programs can use dot-access / method dispatch on them.
+func initialVariableValue(e *Engine, vcfg *itypes.PlcVariableConfigKV, log *slog.Logger) interface{} {
+	if _, ok := e.getTemplate(vcfg.Datatype); !ok {
+		return vcfg.Default
+	}
+	var values map[string]starlark.Value
+	if m, ok := vcfg.Default.(map[string]interface{}); ok {
+		values = make(map[string]starlark.Value, len(m))
+		for k, v := range m {
+			values[k] = goToStarlark(v)
+		}
+	}
+	sv, err := e.NewStruct(vcfg.Datatype, values)
+	if err != nil {
+		log.Warn("plc: failed to instantiate template variable",
+			"variable", vcfg.ID, "type", vcfg.Datatype, "error", err)
+		return nil
+	}
+	return sv
 }
 
 // handleVariablesRequest responds to {plcId}.variables request/reply

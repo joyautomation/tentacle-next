@@ -169,9 +169,14 @@ func builtinPow(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tup
 // ─── Type Conversion Helpers ────────────────────────────────────────────────
 
 // goToStarlark converts a Go value to a Starlark value.
+// Values that are already Starlark (e.g. *StructValue for template-typed
+// variables) pass through unchanged.
 func goToStarlark(v interface{}) starlark.Value {
 	if v == nil {
 		return starlark.None
+	}
+	if sv, ok := v.(starlark.Value); ok {
+		return sv
 	}
 	switch val := v.(type) {
 	case bool:
@@ -192,7 +197,12 @@ func goToStarlark(v interface{}) starlark.Value {
 }
 
 // starlarkToGo converts a Starlark value to a Go value.
+// Template-typed struct values are returned as-is so the variable store
+// keeps referring to the live instance (no copy, no serialization loss).
 func starlarkToGo(v starlark.Value) interface{} {
+	if sv, ok := v.(*StructValue); ok {
+		return sv
+	}
 	switch val := v.(type) {
 	case starlark.Bool:
 		return bool(val)
