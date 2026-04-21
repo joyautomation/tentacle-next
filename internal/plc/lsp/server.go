@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
+	"strings"
 	"sync"
 )
 
@@ -163,7 +165,7 @@ func (s *Server) handleCompletion(tr Transport, msg *rpcMessage) {
 		// client doesn't see an error. Add a case when the ST resolver lands.
 		list = CompletionList{IsIncomplete: false, Items: []CompletionItem{}}
 	default:
-		list = completeStarlark(source, params.Position, s.provider)
+		list = completeStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI))
 	}
 	body, _ := json.Marshal(list)
 	s.reply(tr, msg.ID, body)
@@ -190,7 +192,7 @@ func (s *Server) handleHover(tr Transport, msg *rpcMessage) {
 		s.reply(tr, msg.ID, json.RawMessage(`null`))
 		return
 	}
-	hov, ok := hoverStarlark(source, params.Position)
+	hov, ok := hoverStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI))
 	if !ok {
 		s.reply(tr, msg.ID, json.RawMessage(`null`))
 		return
@@ -267,7 +269,7 @@ func (s *Server) publishFor(tr Transport, uri string) {
 	source, lang, version := doc.text, doc.languageID, doc.version
 	s.mu.Unlock()
 
-	diags := Analyze(source, lang)
+	diags := AnalyzeWithProvider(source, lang, s.provider, programNameFromURI(uri))
 	if diags == nil {
 		diags = []Diagnostic{}
 	}
@@ -303,4 +305,17 @@ func (s *Server) notify(tr Transport, method string, params json.RawMessage) {
 	if err := tr.WriteMessage(raw); err != nil {
 		s.log.Warn("lsp write notify", "err", err, "method", method)
 	}
+}
+
+// programNameFromURI extracts the program name from a URI of the form
+// `tentacle-plc://programs/<name>.<ext>`. Returns "" for any URI that
+// doesn't match the shape so callers can treat "unknown program" as
+// "include all cross-program symbols".
+func programNameFromURI(uri string) string {
+	const prefix = "tentacle-plc://programs/"
+	if !strings.HasPrefix(uri, prefix) {
+		return ""
+	}
+	name := strings.TrimPrefix(uri, prefix)
+	return strings.TrimSuffix(name, path.Ext(name))
 }

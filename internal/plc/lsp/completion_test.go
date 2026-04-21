@@ -8,7 +8,7 @@ import (
 )
 
 func TestCompletionIncludesBuiltins(t *testing.T) {
-	list := completeStarlark("", Position{Line: 0, Character: 0}, nil)
+	list := completeStarlark("", Position{Line: 0, Character: 0}, nil, "")
 	if len(list.Items) == 0 {
 		t.Fatalf("expected completion items, got 0")
 	}
@@ -24,7 +24,7 @@ func TestCompletionIncludesBuiltins(t *testing.T) {
 }
 
 func TestCompletionBuiltinHasSnippet(t *testing.T) {
-	list := completeStarlark("", Position{Line: 0, Character: 0}, nil)
+	list := completeStarlark("", Position{Line: 0, Character: 0}, nil, "")
 	for _, it := range list.Items {
 		if it.Label == "get_var" {
 			if it.InsertTextFormat != InsertTextFormatSnippet {
@@ -44,7 +44,7 @@ func TestCompletionBuiltinHasSnippet(t *testing.T) {
 
 func TestCompletionIncludesLocalDef(t *testing.T) {
 	src := "def cool_helper():\n    pass\n\nx = 1\n"
-	list := completeStarlark(src, Position{Line: 3, Character: 0}, nil)
+	list := completeStarlark(src, Position{Line: 3, Character: 0}, nil, "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -60,7 +60,7 @@ func TestCompletionIncludesLocalDef(t *testing.T) {
 func TestCompletionIncludesDefParams(t *testing.T) {
 	src := "def main(motor_speed, setpoint):\n    y = 1\n"
 	// Cursor on the `y = 1` line — inside def main's body.
-	list := completeStarlark(src, Position{Line: 1, Character: 4}, nil)
+	list := completeStarlark(src, Position{Line: 1, Character: 4}, nil, "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -71,7 +71,7 @@ func TestCompletionIncludesDefParams(t *testing.T) {
 }
 
 func TestCompletionKeywordsPresent(t *testing.T) {
-	list := completeStarlark("", Position{Line: 0, Character: 0}, nil)
+	list := completeStarlark("", Position{Line: 0, Character: 0}, nil, "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -89,6 +89,7 @@ func TestCompletionKeywordsPresent(t *testing.T) {
 type fakeProvider struct {
 	vars      map[string]*VariableInfo
 	templates map[string]*TemplateInfo
+	fns       map[string]*FunctionInfo
 }
 
 func (f *fakeProvider) Variable(name string) *VariableInfo { return f.vars[name] }
@@ -96,6 +97,14 @@ func (f *fakeProvider) Template(name string) *TemplateInfo { return f.templates[
 func (f *fakeProvider) VariableNames() []string {
 	names := make([]string, 0, len(f.vars))
 	for name := range f.vars {
+		names = append(names, name)
+	}
+	return names
+}
+func (f *fakeProvider) Function(name string) *FunctionInfo { return f.fns[name] }
+func (f *fakeProvider) FunctionNames() []string {
+	names := make([]string, 0, len(f.fns))
+	for name := range f.fns {
 		names = append(names, name)
 	}
 	return names
@@ -120,7 +129,7 @@ func TestCompletionGetVarDotReturnsTemplateFields(t *testing.T) {
 	src := `def main():
     get_var("motor1").`
 	// Cursor sits right after the dot (line 1, char 22).
-	list := completeStarlark(src, Position{Line: 1, Character: 22}, newMotorProvider())
+	list := completeStarlark(src, Position{Line: 1, Character: 22}, newMotorProvider(), "")
 	labels := completionLabels(list)
 	seen := map[string]bool{}
 	for _, l := range labels {
@@ -142,7 +151,7 @@ func TestCompletionGetVarDotPartialIdentifier(t *testing.T) {
 	// fields; the client filters by prefix.
 	src := `def main():
     get_var("motor1").sp`
-	list := completeStarlark(src, Position{Line: 1, Character: 24}, newMotorProvider())
+	list := completeStarlark(src, Position{Line: 1, Character: 24}, newMotorProvider(), "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -158,7 +167,7 @@ func TestCompletionIdentAssignedFromGetVar(t *testing.T) {
 	src := `def main():
     m = get_var("motor1")
     m.`
-	list := completeStarlark(src, Position{Line: 2, Character: 6}, newMotorProvider())
+	list := completeStarlark(src, Position{Line: 2, Character: 6}, newMotorProvider(), "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -176,7 +185,7 @@ func TestCompletionNonTemplateVariableFallsThrough(t *testing.T) {
 	}
 	src := `def main():
     get_var("counter").`
-	list := completeStarlark(src, Position{Line: 1, Character: 23}, provider)
+	list := completeStarlark(src, Position{Line: 1, Character: 23}, provider, "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -188,7 +197,7 @@ func TestCompletionNonTemplateVariableFallsThrough(t *testing.T) {
 
 func TestCompletionWithoutProviderSkipsMemberCompletion(t *testing.T) {
 	src := `get_var("motor1").`
-	list := completeStarlark(src, Position{Line: 0, Character: 18}, nil)
+	list := completeStarlark(src, Position{Line: 0, Character: 18}, nil, "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -217,7 +226,7 @@ func TestCompletionGetVarArgReturnsVariableNames(t *testing.T) {
 	src := `def main():
     get_var("")`
 	// Cursor sits between the quotes on line 1: col 13.
-	list := completeStarlark(src, Position{Line: 1, Character: 13}, newVarsProvider())
+	list := completeStarlark(src, Position{Line: 1, Character: 13}, newVarsProvider(), "")
 	labels := completionLabels(list)
 	seen := map[string]bool{}
 	for _, l := range labels {
@@ -235,7 +244,7 @@ func TestCompletionGetVarArgReturnsVariableNames(t *testing.T) {
 
 func TestCompletionGetNumArgReturnsVariableNames(t *testing.T) {
 	src := `get_num("`
-	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider())
+	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider(), "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -250,7 +259,7 @@ func TestCompletionGetNumArgReturnsVariableNames(t *testing.T) {
 
 func TestCompletionSetVarArgReturnsVariableNames(t *testing.T) {
 	src := `set_var("`
-	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider())
+	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider(), "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -262,7 +271,7 @@ func TestCompletionSetVarArgReturnsVariableNames(t *testing.T) {
 
 func TestCompletionLadderTagArgReturnsVariableNames(t *testing.T) {
 	src := `NO("`
-	list := completeStarlark(src, Position{Line: 0, Character: 4}, newVarsProvider())
+	list := completeStarlark(src, Position{Line: 0, Character: 4}, newVarsProvider(), "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true
@@ -274,7 +283,7 @@ func TestCompletionLadderTagArgReturnsVariableNames(t *testing.T) {
 
 func TestCompletionArgDetailShowsType(t *testing.T) {
 	src := `get_num("`
-	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider())
+	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider(), "")
 	var motorDetail, counterDetail string
 	for _, it := range list.Items {
 		if it.Label == "motor1" {
@@ -294,7 +303,7 @@ func TestCompletionArgDetailShowsType(t *testing.T) {
 
 func TestCompletionOutsideStringFallsThrough(t *testing.T) {
 	src := `get_num(`
-	list := completeStarlark(src, Position{Line: 0, Character: 8}, newVarsProvider())
+	list := completeStarlark(src, Position{Line: 0, Character: 8}, newVarsProvider(), "")
 	// Cursor is after `(` but not inside a string — should return the
 	// full builtin list.
 	seen := map[string]bool{}
@@ -309,7 +318,7 @@ func TestCompletionOutsideStringFallsThrough(t *testing.T) {
 func TestCompletionSecondArgDoesNotOfferVariables(t *testing.T) {
 	// set_var's second arg is a value, not a variable name.
 	src := `set_var("counter", "`
-	list := completeStarlark(src, Position{Line: 0, Character: 20}, newVarsProvider())
+	list := completeStarlark(src, Position{Line: 0, Character: 20}, newVarsProvider(), "")
 	seen := map[string]bool{}
 	for _, it := range list.Items {
 		seen[it.Label] = true

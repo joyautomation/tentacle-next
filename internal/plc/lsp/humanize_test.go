@@ -78,7 +78,7 @@ func TestLineContentSpanBounds(t *testing.T) {
 
 // Integration: verify analyzeStarlark now produces a widened, humanised diagnostic.
 func TestAnalyzeStarlarkHumanised(t *testing.T) {
-	diags := analyzeStarlark("def main():\n    x=\n")
+	diags := analyzeStarlark("def main():\n    x=\n", nil, "")
 	if len(diags) != 1 {
 		t.Fatalf("expected 1 diagnostic, got %d", len(diags))
 	}

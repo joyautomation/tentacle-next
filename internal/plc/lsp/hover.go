@@ -2,30 +2,84 @@
 
 package lsp
 
+import (
+	"fmt"
+	"strings"
+)
+
 // hoverStarlark resolves the identifier under `pos` and returns a Hover
-// payload. Only PLC builtins get hover in this first cut — local symbol
-// hover (with inferred type/docstring) arrives once the resolver pass
-// lands.
+// payload. Resolution order:
+//   1. PLC builtins (get_var, log, NO, ...).
+//   2. Cross-program top-level functions — any saved program with a
+//      declared signature other than the current one.
 //
 // Returns (nil, false) when there's nothing useful at the cursor. The
 // server turns a false into a JSON `null` result, which tells the client
 // to suppress the tooltip.
-func hoverStarlark(source string, pos Position) (*Hover, bool) {
+func hoverStarlark(source string, pos Position, provider SymbolProvider, currentProgram string) (*Hover, bool) {
 	word, startCol, endCol := identifierAt(source, pos.Line, pos.Character)
 	if word == "" {
 		return nil, false
 	}
-	b, ok := BuiltinsByName()[word]
-	if !ok {
-		return nil, false
+	rng := &Range{
+		Start: Position{Line: pos.Line, Character: startCol},
+		End:   Position{Line: pos.Line, Character: endCol},
 	}
-	return &Hover{
-		Contents: MarkupContent{Kind: "markdown", Value: formatHoverMarkdown(b)},
-		Range: &Range{
-			Start: Position{Line: pos.Line, Character: startCol},
-			End:   Position{Line: pos.Line, Character: endCol},
-		},
-	}, true
+	if b, ok := BuiltinsByName()[word]; ok {
+		return &Hover{
+			Contents: MarkupContent{Kind: "markdown", Value: formatHoverMarkdown(b)},
+			Range:    rng,
+		}, true
+	}
+	if provider != nil && word != currentProgram {
+		if info := provider.Function(word); info != nil {
+			return &Hover{
+				Contents: MarkupContent{Kind: "markdown", Value: formatFunctionHoverMarkdown(info)},
+				Range:    rng,
+			}, true
+		}
+	}
+	return nil, false
+}
+
+// formatFunctionHoverMarkdown renders a cross-program function's
+// signature, description, and parameter list as markdown suitable for a
+// tooltip.
+func formatFunctionHoverMarkdown(info *FunctionInfo) string {
+	var sb strings.Builder
+	sb.WriteString("```starlark\n")
+	sb.WriteString(formatFunctionSignature(info))
+	sb.WriteString("\n```")
+	if info.Program != "" {
+		fmt.Fprintf(&sb, "\n\n*Program:* `%s`", info.Program)
+	}
+	if info.Description != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(info.Description)
+	}
+	if len(info.Params) > 0 {
+		sb.WriteString("\n\n**Parameters:**\n")
+		for _, p := range info.Params {
+			fmt.Fprintf(&sb, "\n- `%s", p.Name)
+			if p.Type != "" {
+				fmt.Fprintf(&sb, ": %s", p.Type)
+			}
+			sb.WriteByte('`')
+			if !p.Required {
+				sb.WriteString(" *(optional)*")
+			}
+			if p.Description != "" {
+				fmt.Fprintf(&sb, " — %s", p.Description)
+			}
+		}
+	}
+	if info.Returns != nil && info.Returns.Type != "" {
+		fmt.Fprintf(&sb, "\n\n**Returns:** `%s`", info.Returns.Type)
+		if info.Returns.Description != "" {
+			fmt.Fprintf(&sb, " — %s", info.Returns.Description)
+		}
+	}
+	return sb.String()
 }
 
 // identifierAt returns the word under (line, character) in source, plus

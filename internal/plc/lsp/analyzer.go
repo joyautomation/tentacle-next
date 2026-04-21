@@ -4,6 +4,7 @@ package lsp
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,22 +21,30 @@ import (
 // This function is the single source of diagnostic truth; both the legacy
 // HTTP /validate endpoint and the LSP server dispatch to it.
 func Analyze(source, languageID string) []Diagnostic {
+	return AnalyzeWithProvider(source, languageID, nil, "")
+}
+
+// AnalyzeWithProvider is the provider-aware variant. When provider is
+// non-nil, Starlark analysis additionally flags arity mismatches at call
+// sites that reference a known cross-program function (i.e. another
+// saved program whose signature is declared).
+func AnalyzeWithProvider(source, languageID string, provider SymbolProvider, currentProgram string) []Diagnostic {
 	switch strings.ToLower(languageID) {
 	case "st", "structured-text":
 		return analyzeST(source)
 	case "starlark", "python", "":
-		return analyzeStarlark(source)
+		return analyzeStarlark(source, provider, currentProgram)
 	default:
 		return nil
 	}
 }
 
-func analyzeStarlark(source string) []Diagnostic {
+func analyzeStarlark(source string, provider SymbolProvider, currentProgram string) []Diagnostic {
 	if source == "" {
 		return nil
 	}
 	var parserDiags []Diagnostic
-	_, err := syntax.Parse("program.star", source, 0)
+	file, err := syntax.Parse("program.star", source, 0)
 	if err != nil {
 		var se syntax.Error
 		if errors.As(err, &se) {
@@ -51,7 +60,142 @@ func analyzeStarlark(source string) []Diagnostic {
 	// clean but has, say, a trailing unclosed bracket, the parser may have
 	// already flagged it — mergePrepassDiagnostics dedupes by line.
 	pre := prepassStarlark(source)
-	return mergePrepassDiagnostics(parserDiags, pre)
+	diags := mergePrepassDiagnostics(parserDiags, pre)
+	// Signature-aware call-site diagnostics only run when the parse
+	// succeeded (file != nil) and there's a provider to ask.
+	if file != nil && provider != nil {
+		diags = append(diags, analyzeCallSites(file, provider, currentProgram)...)
+	}
+	return diags
+}
+
+// analyzeCallSites walks CallExpr nodes whose callee is a bare identifier.
+// When that identifier names a cross-program function with a declared
+// signature, we check that the positional + keyword argument count falls
+// within the signature's [required, total] range. Mis-naming a keyword
+// argument is also flagged.
+//
+// Local defs take precedence — when the current source defines a function
+// with the same name, we skip the check to avoid arguing with the user's
+// own helper.
+func analyzeCallSites(file *syntax.File, provider SymbolProvider, currentProgram string) []Diagnostic {
+	localDefs := collectLocalDefNames(file)
+	var diags []Diagnostic
+	syntax.Walk(file, func(n syntax.Node) bool {
+		call, ok := n.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := call.Fn.(*syntax.Ident)
+		if !ok {
+			return true
+		}
+		name := ident.Name
+		if name == currentProgram {
+			return true
+		}
+		if _, shadowed := localDefs[name]; shadowed {
+			return true
+		}
+		info := provider.Function(name)
+		if info == nil {
+			return true
+		}
+		if d, ok := checkCallArity(call, ident, info); ok {
+			diags = append(diags, d...)
+		}
+		return true
+	})
+	return diags
+}
+
+func collectLocalDefNames(file *syntax.File) map[string]struct{} {
+	out := make(map[string]struct{})
+	syntax.Walk(file, func(n syntax.Node) bool {
+		if def, ok := n.(*syntax.DefStmt); ok && def.Name != nil {
+			out[def.Name.Name] = struct{}{}
+		}
+		return true
+	})
+	return out
+}
+
+// checkCallArity returns arity/keyword-name diagnostics for a call whose
+// callee is known to be `info`. The second return is false when the call
+// should be skipped entirely (e.g. it uses *args/**kwargs which we can't
+// statically verify against a param list without variadics).
+func checkCallArity(call *syntax.CallExpr, ident *syntax.Ident, info *FunctionInfo) ([]Diagnostic, bool) {
+	required := 0
+	paramByName := make(map[string]struct{}, len(info.Params))
+	for _, p := range info.Params {
+		if p.Required {
+			required++
+		}
+		paramByName[p.Name] = struct{}{}
+	}
+	total := len(info.Params)
+
+	positional := 0
+	keyword := 0
+	var unknownKwargs []*syntax.BinaryExpr
+	for _, arg := range call.Args {
+		switch a := arg.(type) {
+		case *syntax.UnaryExpr:
+			// `*args` / `**kwargs` — can't statically check.
+			return nil, false
+		case *syntax.BinaryExpr:
+			if a.Op == syntax.EQ {
+				keyword++
+				if idk, ok := a.X.(*syntax.Ident); ok {
+					if _, known := paramByName[idk.Name]; !known {
+						unknownKwargs = append(unknownKwargs, a)
+					}
+				}
+				continue
+			}
+			positional++
+		default:
+			positional++
+		}
+	}
+
+	var diags []Diagnostic
+	callStart, callEnd := call.Span()
+	given := positional + keyword
+	sig := formatFunctionSignature(info)
+	if given < required {
+		diags = append(diags, warningDiag(
+			int(ident.NamePos.Line), int(ident.NamePos.Col),
+			int(callEnd.Line), int(callEnd.Col),
+			fmt.Sprintf("`%s` expects at least %d argument(s) but got %d. Signature: %s",
+				info.Name, required, given, sig),
+		))
+	} else if given > total {
+		diags = append(diags, warningDiag(
+			int(ident.NamePos.Line), int(ident.NamePos.Col),
+			int(callEnd.Line), int(callEnd.Col),
+			fmt.Sprintf("`%s` expects at most %d argument(s) but got %d. Signature: %s",
+				info.Name, total, given, sig),
+		))
+	}
+	for _, kw := range unknownKwargs {
+		kwStart, kwEnd := kw.Span()
+		idk := kw.X.(*syntax.Ident)
+		diags = append(diags, warningDiag(
+			int(kwStart.Line), int(kwStart.Col),
+			int(kwEnd.Line), int(kwEnd.Col),
+			fmt.Sprintf("`%s` has no parameter named `%s`. Signature: %s",
+				info.Name, idk.Name, sig),
+		))
+	}
+	_ = callStart
+	return diags, true
+}
+
+func warningDiag(startLine, startCol, endLine, endCol int, message string) Diagnostic {
+	d := rangeDiag(startLine, startCol, endLine, endCol, message)
+	d.Severity = SeverityWarning
+	return d
 }
 
 // st parser errors are formatted as "line N: message"; extract the line.

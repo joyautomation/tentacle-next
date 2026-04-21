@@ -24,7 +24,7 @@ import (
 //
 // We return IsIncomplete=false so the client caches the list until the
 // next trigger; filtering by prefix happens client-side.
-func completeStarlark(source string, pos Position, provider SymbolProvider) CompletionList {
+func completeStarlark(source string, pos Position, provider SymbolProvider, currentProgram string) CompletionList {
 	// Inside a variable-name string argument (e.g. `get_num("|")`), return
 	// the list of known PLC variables instead of the builtin-heavy default.
 	if list, ok := argumentCompletion(source, pos, provider); ok {
@@ -44,10 +44,33 @@ func completeStarlark(source string, pos Position, provider SymbolProvider) Comp
 		items = append(items, builtinToCompletionItem(b))
 	}
 
-	// 2. Local symbols. Parse-and-scan: if parsing fails (common while the
+	// 2. Cross-program functions. Offer any other saved program with a
+	// declared signature as a callable — detail shows the call form so the
+	// user can read the signature without hovering.
+	localNames := make(map[string]struct{})
+	locals := collectLocalSymbols(source, pos)
+	for _, name := range locals {
+		localNames[name] = struct{}{}
+	}
+	if provider != nil {
+		for _, fname := range provider.FunctionNames() {
+			if fname == currentProgram {
+				continue
+			}
+			if _, shadowed := localNames[fname]; shadowed {
+				continue
+			}
+			info := provider.Function(fname)
+			if info == nil {
+				continue
+			}
+			items = append(items, functionToCompletionItem(info))
+		}
+	}
+
+	// 3. Local symbols. Parse-and-scan: if parsing fails (common while the
 	// user is mid-type), we fall back to the partial AST the parser returns
 	// alongside the error.
-	locals := collectLocalSymbols(source, pos)
 	for _, name := range locals {
 		items = append(items, CompletionItem{
 			Label:            name,
@@ -55,11 +78,11 @@ func completeStarlark(source string, pos Position, provider SymbolProvider) Comp
 			Detail:           "local",
 			InsertText:       name,
 			InsertTextFormat: InsertTextFormatPlainText,
-			SortText:         "1" + name, // sort after builtins (which use "0")
+			SortText:         "2" + name, // sort after builtins (0) and fns (1)
 		})
 	}
 
-	// 3. Keywords — small list of the ones users type often.
+	// 4. Keywords — small list of the ones users type often.
 	for _, kw := range starlarkKeywords {
 		items = append(items, CompletionItem{
 			Label:            kw,
@@ -67,11 +90,84 @@ func completeStarlark(source string, pos Position, provider SymbolProvider) Comp
 			Detail:           "keyword",
 			InsertText:       kw,
 			InsertTextFormat: InsertTextFormatPlainText,
-			SortText:         "2" + kw,
+			SortText:         "3" + kw,
 		})
 	}
 
 	return CompletionList{IsIncomplete: false, Items: items}
+}
+
+// functionToCompletionItem renders a cross-program function as a snippet
+// that lands the cursor in the first required param. Detail shows the
+// call signature; documentation shows the description.
+func functionToCompletionItem(info *FunctionInfo) CompletionItem {
+	signature := formatFunctionSignature(info)
+	insert := formatFunctionSnippet(info)
+	doc := info.Description
+	if info.Program != "" && info.Description == "" {
+		doc = "Defined in program `" + info.Program + "`."
+	} else if info.Program != "" {
+		doc = info.Description + "\n\n*Defined in program `" + info.Program + "`.*"
+	}
+	return CompletionItem{
+		Label:            info.Name,
+		Kind:             CompletionKindFunction,
+		Detail:           signature,
+		Documentation:    doc,
+		InsertText:       insert,
+		InsertTextFormat: InsertTextFormatSnippet,
+		SortText:         "1" + info.Name,
+	}
+}
+
+// formatFunctionSignature returns `name(p1: number, p2: string?) -> bool`.
+// Optional params are suffixed with `?` so the user can see at a glance
+// which args can be omitted.
+func formatFunctionSignature(info *FunctionInfo) string {
+	var sb strings.Builder
+	sb.WriteString(info.Name)
+	sb.WriteByte('(')
+	for i, p := range info.Params {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(p.Name)
+		if p.Type != "" {
+			sb.WriteString(": ")
+			sb.WriteString(p.Type)
+		}
+		if !p.Required {
+			sb.WriteByte('?')
+		}
+	}
+	sb.WriteByte(')')
+	if info.Returns != nil && info.Returns.Type != "" {
+		sb.WriteString(" -> ")
+		sb.WriteString(info.Returns.Type)
+	}
+	return sb.String()
+}
+
+// formatFunctionSnippet emits `name($1, $2)` with placeholders for each
+// required param. Optional params are omitted from the snippet — the user
+// can add them explicitly if needed.
+func formatFunctionSnippet(info *FunctionInfo) string {
+	var sb strings.Builder
+	sb.WriteString(info.Name)
+	sb.WriteByte('(')
+	placeholder := 1
+	for _, p := range info.Params {
+		if !p.Required {
+			continue
+		}
+		if placeholder > 1 {
+			sb.WriteString(", ")
+		}
+		fmt.Fprintf(&sb, "${%d:%s}", placeholder, p.Name)
+		placeholder++
+	}
+	sb.WriteString(")$0")
+	return sb.String()
 }
 
 func builtinToCompletionItem(b Builtin) CompletionItem {

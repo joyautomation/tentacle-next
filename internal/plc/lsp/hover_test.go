@@ -10,7 +10,7 @@ import (
 func TestHoverOnBuiltin(t *testing.T) {
 	// `get_var` appears on line 0, columns 0–7.
 	src := `x = get_var("foo")`
-	h, ok := hoverStarlark(src, Position{Line: 0, Character: 6}) // middle of "get_var"
+	h, ok := hoverStarlark(src, Position{Line: 0, Character: 6}, nil, "") // middle of "get_var"
 	if !ok || h == nil {
 		t.Fatalf("expected hover on get_var, got nothing")
 	}
@@ -28,7 +28,7 @@ func TestHoverOnBuiltin(t *testing.T) {
 
 func TestHoverOnNonBuiltinReturnsNothing(t *testing.T) {
 	src := "my_local_var = 1\n"
-	_, ok := hoverStarlark(src, Position{Line: 0, Character: 4})
+	_, ok := hoverStarlark(src, Position{Line: 0, Character: 4}, nil, "")
 	if ok {
 		t.Errorf("expected no hover for non-builtin identifier")
 	}
@@ -37,7 +37,7 @@ func TestHoverOnNonBuiltinReturnsNothing(t *testing.T) {
 func TestHoverOffIdentifierReturnsNothing(t *testing.T) {
 	src := "x = 1"
 	// Cursor on the `=` character.
-	_, ok := hoverStarlark(src, Position{Line: 0, Character: 2})
+	_, ok := hoverStarlark(src, Position{Line: 0, Character: 2}, nil, "")
 	if ok {
 		t.Errorf("expected no hover on `=`")
 	}
@@ -46,7 +46,7 @@ func TestHoverOffIdentifierReturnsNothing(t *testing.T) {
 func TestHoverAtEndOfIdentifier(t *testing.T) {
 	// Cursor one past the last char of a builtin (common "cursor after word").
 	src := "log"
-	h, ok := hoverStarlark(src, Position{Line: 0, Character: 3})
+	h, ok := hoverStarlark(src, Position{Line: 0, Character: 3}, nil, "")
 	if !ok || h == nil {
 		t.Fatalf("expected hover when cursor is immediately after builtin")
 	}

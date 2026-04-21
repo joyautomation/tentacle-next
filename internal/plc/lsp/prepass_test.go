@@ -106,7 +106,7 @@ func TestAnalyzeStarlarkSurfacesMultipleErrors(t *testing.T) {
 	// Parser will stop at the first structural problem; pre-pass adds the
 	// second unclosed bracket so the user sees both.
 	src := "x = (\n\ny = [\n"
-	diags := analyzeStarlark(src)
+	diags := analyzeStarlark(src, nil, "")
 	if len(diags) < 2 {
 		t.Fatalf("expected at least 2 diagnostics, got %d: %+v", len(diags), diags)
 	}
