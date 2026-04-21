@@ -5,6 +5,7 @@ package plc
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -22,11 +23,11 @@ type Engine struct {
 	log       *slog.Logger
 }
 
-// compiledProgram holds a parsed Starlark program and its entry function.
+// compiledProgram holds a parsed Starlark program's global namespace.
+// Any top-level callable can be used as a task entry function.
 type compiledProgram struct {
 	name    string
 	globals starlark.StringDict
-	mainFn  starlark.Callable
 }
 
 // TaskState holds persistent state for a single task across scan cycles.
@@ -81,7 +82,7 @@ func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 }
 
 // Compile parses and compiles a Starlark source program.
-// The program must define a main() function.
+// Any top-level callable in the program can serve as a task entry point.
 func (e *Engine) Compile(name, source string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -92,19 +93,9 @@ func (e *Engine) Compile(name, source string) error {
 		return fmt.Errorf("compile %s: %w", name, err)
 	}
 
-	mainFn, ok := globals["main"]
-	if !ok {
-		return fmt.Errorf("compile %s: program must define a main() function", name)
-	}
-	callable, ok := mainFn.(starlark.Callable)
-	if !ok {
-		return fmt.Errorf("compile %s: main is not callable", name)
-	}
-
 	e.programs[name] = &compiledProgram{
 		name:    name,
 		globals: globals,
-		mainFn:  callable,
 	}
 	return nil
 }
@@ -116,13 +107,26 @@ func (e *Engine) Remove(name string) {
 	delete(e.programs, name)
 }
 
-// Execute runs a compiled program's main() function with the given TaskState.
-func (e *Engine) Execute(name string, state *TaskState) error {
+// Execute runs a named top-level function in a compiled program with the given
+// TaskState. fnName defaults to "main" when empty for backwards compatibility.
+func (e *Engine) Execute(name, fnName string, state *TaskState) error {
+	if fnName == "" {
+		fnName = "main"
+	}
 	e.mu.RLock()
 	prog, ok := e.programs[name]
 	e.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("execute: program %q not found", name)
+	}
+
+	fnVal, ok := prog.globals[fnName]
+	if !ok {
+		return fmt.Errorf("execute %s: function %q not found", name, fnName)
+	}
+	callable, ok := fnVal.(starlark.Callable)
+	if !ok {
+		return fmt.Errorf("execute %s: %q is not callable", name, fnName)
 	}
 
 	if state.thread == nil {
@@ -131,11 +135,30 @@ func (e *Engine) Execute(name string, state *TaskState) error {
 		state.thread.SetLocal("vars", e.vars)
 	}
 
-	_, err := starlark.Call(state.thread, prog.mainFn, nil, nil)
+	_, err := starlark.Call(state.thread, callable, nil, nil)
 	if err != nil {
-		return fmt.Errorf("execute %s: %w", name, err)
+		return fmt.Errorf("execute %s.%s: %w", name, fnName, err)
 	}
 	return nil
+}
+
+// EntryFunctions returns the names of top-level callables in a compiled
+// program, sorted alphabetically. Useful for populating task-entry dropdowns.
+func (e *Engine) EntryFunctions(name string) []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	prog, ok := e.programs[name]
+	if !ok {
+		return nil
+	}
+	var out []string
+	for k, v := range prog.globals {
+		if _, ok := v.(starlark.Callable); ok {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // HasProgram returns true if a program with the given name is compiled.

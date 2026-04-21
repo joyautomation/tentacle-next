@@ -408,7 +408,7 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 			m.log.Warn("plc: skipping task, program not compiled", "task", taskID, "program", taskCfg.ProgramRef)
 			continue
 		}
-		runner := newTaskRunner(taskID, taskCfg.ProgramRef, taskCfg.ScanRateMs, m.engine, m.log)
+		runner := newTaskRunner(taskID, taskCfg.ProgramRef, taskCfg.EntryFn, taskCfg.ScanRateMs, m.engine, m.log)
 		m.tasks[taskID] = runner
 		runner.start()
 	}

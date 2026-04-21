@@ -8,10 +8,12 @@ import (
 	"time"
 )
 
-// taskRunner executes a compiled Starlark program on a fixed scan interval.
+// taskRunner executes a named top-level function in a compiled Starlark
+// program on a fixed scan interval.
 type taskRunner struct {
 	name     string
 	progRef  string
+	entryFn  string
 	scanRate time.Duration
 	engine   *Engine
 	state    *TaskState
@@ -21,11 +23,16 @@ type taskRunner struct {
 	doneCh   chan struct{}
 }
 
-// newTaskRunner creates a task runner for a compiled program.
-func newTaskRunner(name, progRef string, scanRateMs int, engine *Engine, log *slog.Logger) *taskRunner {
+// newTaskRunner creates a task runner for a compiled program. entryFn is the
+// top-level function invoked each scan; empty string defaults to "main".
+func newTaskRunner(name, progRef, entryFn string, scanRateMs int, engine *Engine, log *slog.Logger) *taskRunner {
+	if entryFn == "" {
+		entryFn = "main"
+	}
 	return &taskRunner{
 		name:     name,
 		progRef:  progRef,
+		entryFn:  entryFn,
 		scanRate: time.Duration(scanRateMs) * time.Millisecond,
 		engine:   engine,
 		state:    NewTaskState(),
@@ -62,7 +69,7 @@ func (t *taskRunner) run() {
 			return
 		case <-ticker.C:
 			start := time.Now()
-			err := t.engine.Execute(t.progRef, t.state)
+			err := t.engine.Execute(t.progRef, t.entryFn, t.state)
 			t.stats.record(time.Since(start), err)
 			if err != nil {
 				t.log.Error("task execution error", "error", err)

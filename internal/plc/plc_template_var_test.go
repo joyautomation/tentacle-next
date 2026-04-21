@@ -51,7 +51,7 @@ def main():
 	state := NewTaskState()
 	state.thread = &starlark.Thread{Name: "test"}
 
-	result, err := starlark.Call(state.thread, e.programs["test"].mainFn, nil, nil)
+	result, err := starlark.Call(state.thread, e.programs["test"].globals["main"].(starlark.Callable), nil, nil)
 	if err != nil {
 		t.Fatalf("call main(): %v", err)
 	}
@@ -87,7 +87,7 @@ def main():
 		t.Fatalf("compile: %v", err)
 	}
 	thread := &starlark.Thread{Name: "test"}
-	if _, err := starlark.Call(thread, e.programs["test"].mainFn, nil, nil); err != nil {
+	if _, err := starlark.Call(thread, e.programs["test"].globals["main"].(starlark.Callable), nil, nil); err != nil {
 		t.Fatalf("call main(): %v", err)
 	}
 
@@ -221,7 +221,7 @@ def main():
 	if err := m.engine.Compile("bump", prog); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if err := m.engine.Execute("bump", NewTaskState()); err != nil {
+	if err := m.engine.Execute("bump", "main", NewTaskState()); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	after := m.variables.Get("motor1").(*StructValue)

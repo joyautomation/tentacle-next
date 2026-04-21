@@ -68,7 +68,8 @@ type PlcTaskConfigKV struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	ScanRateMs  int    `json:"scanRateMs"`
-	ProgramRef  string `json:"programRef"` // key in plc_programs KV bucket
+	ProgramRef  string `json:"programRef"`         // key in plc_programs KV bucket
+	EntryFn     string `json:"entryFn,omitempty"`  // top-level Starlark function (default "main")
 	Enabled     bool   `json:"enabled"`
 }
 
