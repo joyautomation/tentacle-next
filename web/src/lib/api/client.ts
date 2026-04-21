@@ -46,8 +46,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<ApiResul
       } catch { /* use raw text */ }
       return { error: { error: errorMessage, status: response.status, issues } };
     }
-    const data = await response.json();
-    return { data };
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
+      return { data: undefined as T };
+    }
+    const text = await response.text();
+    if (!text) return { data: undefined as T };
+    try {
+      return { data: JSON.parse(text) as T };
+    } catch {
+      return { data: undefined as T };
+    }
   } catch (e) {
     return { error: { error: e instanceof Error ? e.message : 'Network error', status: 0 } };
   }
