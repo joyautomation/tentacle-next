@@ -8,7 +8,10 @@
 	import CreateDialog from '$lib/plc/workspace/CreateDialog.svelte';
 	import OutputPanel from '$lib/plc/workspace/OutputPanel.svelte';
 	import { ChevronLeft, ChevronRight, ChevronUp } from '@joyautomation/salt/icons';
+	import { fly } from 'svelte/transition';
 	import type { WorkspaceLoadData } from './+page';
+
+	const RAIL_FLY_MS = 180;
 
 	let { data }: { data: WorkspaceLoadData } = $props();
 
@@ -80,6 +83,8 @@
 				onclick={toggleLeft}
 				title="Show navigator"
 				aria-label="Show navigator"
+				in:fly={{ y: -20, duration: RAIL_FLY_MS }}
+				out:fly={{ x: -20, duration: RAIL_FLY_MS }}
 			>
 				<ChevronRight size="0.875rem" />
 				<span class="rail-label">Navigator</span>
@@ -193,6 +198,8 @@
 					onclick={toggleBottom}
 					title="Show output"
 					aria-label="Show output"
+					in:fly={{ x: -20, duration: RAIL_FLY_MS }}
+					out:fly={{ y: 20, duration: RAIL_FLY_MS }}
 				>
 					<ChevronUp size="0.875rem" />
 					<span class="rail-label-h">Output</span>
@@ -206,6 +213,8 @@
 				onclick={toggleRight}
 				title="Show inspector"
 				aria-label="Show inspector"
+				in:fly={{ y: -20, duration: RAIL_FLY_MS }}
+				out:fly={{ x: 20, duration: RAIL_FLY_MS }}
 			>
 				<ChevronLeft size="0.875rem" />
 				<span class="rail-label">Inspector</span>
@@ -255,7 +264,7 @@
 	.rail {
 		display: flex;
 		align-items: center;
-		justify-content: center;
+		justify-content: flex-start;
 		gap: 0.5rem;
 		padding: 0;
 		background: var(--theme-surface);
@@ -275,7 +284,7 @@
 		flex-direction: column;
 		width: 1.75rem;
 		flex-shrink: 0;
-		padding: 0.5rem 0;
+		padding: 0.625rem 0;
 	}
 
 	.rail-left {
@@ -290,6 +299,7 @@
 		flex-direction: row;
 		height: 1.75rem;
 		flex-shrink: 0;
+		padding: 0 0.625rem;
 		border-top: 1px solid var(--theme-border);
 	}
 

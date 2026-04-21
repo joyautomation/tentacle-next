@@ -4,7 +4,14 @@
 	import { state as saltState } from '@joyautomation/salt';
 	import { slide } from 'svelte/transition';
 	import type { PlcConfig, PlcTemplate, PlcTemplateField } from '$lib/types/plc';
-	import { PencilSquare, Plus, Trash, ArrowUp, ArrowDown } from '@joyautomation/salt/icons';
+	import {
+		PencilSquare,
+		Plus,
+		Trash,
+		ArrowUp,
+		ArrowDown,
+		ChevronRight
+	} from '@joyautomation/salt/icons';
 	import TidyTreeView, { type TidyNode } from '$lib/components/TidyTreeView.svelte';
 
 	type Props = {
@@ -219,7 +226,7 @@
 			aria-expanded={expanded}
 			aria-label={expanded ? 'Collapse template definition' : 'Expand template definition'}
 		>
-			<span class="chevron" class:open={expanded}>▸</span>
+			<span class="chevron" class:open={expanded}><ChevronRight size="0.75rem" /></span>
 			<span class="badge">Template</span>
 			<span class="name">{template.name}</span>
 			{#if isDirty}<span class="dirty-icon" title="Unsaved template changes"><PencilSquare size="0.875rem" /></span>{/if}
@@ -422,9 +429,10 @@
 	}
 
 	.chevron {
-		display: inline-block;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 		color: var(--theme-text-muted);
-		font-size: 0.6875rem;
 		transition: transform 0.12s ease;
 		transform-origin: center;
 		width: 0.75rem;
