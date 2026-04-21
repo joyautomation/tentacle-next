@@ -183,15 +183,15 @@
 					aria-expanded={sections.programs}
 				>
 					<span class="chevron" class:open={sections.programs}><ChevronRight size="0.75rem" /></span>
-					<span class="label">Programs</span>
+					<span class="label">Functions</span>
 					<span class="count">{programEntries.length}</span>
 				</button>
 				<button
 					type="button"
 					class="add-btn"
 					onclick={() => onCreate?.('program')}
-					title="New program"
-					aria-label="New program"
+					title="New function"
+					aria-label="New function"
 				>
 					<Plus size="0.875rem" />
 				</button>
@@ -212,7 +212,7 @@
 							</button>
 						</li>
 					{:else}
-						<li class="empty">No programs</li>
+						<li class="empty">No functions</li>
 					{/each}
 				</ul>
 			{/if}

@@ -121,7 +121,7 @@
 			}
 			serverSource = draftSource;
 			serverStSource = draftStSource;
-			saltState.addNotification({ message: `Program "${name}" saved`, type: 'success' });
+			saltState.addNotification({ message: `Function "${name}" saved`, type: 'success' });
 			await invalidateAll();
 		} finally {
 			saving = false;
@@ -172,7 +172,7 @@
 		{:else if language === 'ladder'}
 			<div class="status">
 				Ladder editing isn't wired into the workspace yet.
-				<a href="/services/plc/programs">Open in the Programs tab</a> to edit visually.
+				<a href="/services/plc/programs">Open in the Functions tab</a> to edit visually.
 			</div>
 		{:else}
 			<div class="editor-wrap">

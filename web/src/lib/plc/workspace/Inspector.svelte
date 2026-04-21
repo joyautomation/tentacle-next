@@ -237,9 +237,15 @@
 				<span class="val">{selectedTask.scanRateMs} ms</span>
 			</div>
 			<div class="field">
-				<span class="k">Program</span>
+				<span class="k">Function</span>
 				<span class="val">{selectedTask.programRef || '—'}</span>
 			</div>
+			{#if selectedTask.entryFn && selectedTask.entryFn !== 'main'}
+				<div class="field">
+					<span class="k">Entry</span>
+					<span class="val">{selectedTask.entryFn}()</span>
+				</div>
+			{/if}
 			<div class="field">
 				<span class="k">Enabled</span>
 				<span class="val" class:muted={!selectedTask.enabled}>
@@ -312,10 +318,16 @@
 		{/if}
 	{:else if selectedProgram}
 		<div class="section">
-			<div class="label">Program</div>
+			<div class="label">Function</div>
 			<div class="title">{selectedProgram.name}</div>
 		</div>
 		<div class="section">
+			{#if selectedProgram.description}
+				<div class="field">
+					<span class="k">Description</span>
+					<span class="val">{selectedProgram.description}</span>
+				</div>
+			{/if}
 			<div class="field">
 				<span class="k">Language</span>
 				<span class="val">{selectedProgram.language}</span>
@@ -331,11 +343,34 @@
 				</div>
 			{/if}
 		</div>
+		{#if selectedProgram.signature?.params?.length || selectedProgram.signature?.returns}
+			<div class="section">
+				<div class="label">Signature</div>
+				{#if selectedProgram.signature.params?.length}
+					{#each selectedProgram.signature.params as p (p.name)}
+						<div class="field">
+							<span class="k">{p.name}</span>
+							<span class="val">
+								{p.type}{#if p.description} — {p.description}{/if}
+							</span>
+						</div>
+					{/each}
+				{/if}
+				{#if selectedProgram.signature.returns}
+					<div class="field">
+						<span class="k">→ returns</span>
+						<span class="val">
+							{selectedProgram.signature.returns.type}{#if selectedProgram.signature.returns.description} — {selectedProgram.signature.returns.description}{/if}
+						</span>
+					</div>
+				{/if}
+			</div>
+		{/if}
 	{:else}
 		<div class="empty">
 			<div class="empty-title">Nothing selected</div>
 			<div class="empty-hint">
-				Pick a variable, task, or program from the Navigator to see details here.
+				Pick a variable, task, or function from the Navigator to see details here.
 			</div>
 		</div>
 	{/if}

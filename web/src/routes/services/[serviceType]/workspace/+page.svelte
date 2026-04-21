@@ -142,7 +142,7 @@
 										<div class="placeholder-card muted">
 											<div class="title">Nothing selected</div>
 											<div class="hint">
-												Pick a program from the Navigator to open it here.
+												Pick a function from the Navigator to open it here.
 											</div>
 										</div>
 									{/if}
