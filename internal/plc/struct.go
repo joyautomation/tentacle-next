@@ -304,14 +304,58 @@ func (b *boundMethod) Position() syntax.Position { return syntax.Position{} }
 
 // ── Engine template + function lookup ────────────────────────────────────
 
-// SetTemplates replaces the engine's template registry. Called by the
-// PLC module when config changes. Safe to call concurrently.
+// SetTemplates replaces the engine's template registry and reconciles
+// existing StructValue instances with the new schema — new fields get
+// their template defaults, removed fields are dropped. Called by the
+// PLC module when config or templates change. Safe to call concurrently.
 func (e *Engine) SetTemplates(templates map[string]*itypes.PlcTemplate) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.templates = make(map[string]*itypes.PlcTemplate, len(templates))
 	for k, v := range templates {
 		e.templates[k] = v
+	}
+	vars := e.vars
+	e.mu.Unlock()
+
+	if vars == nil {
+		return
+	}
+	for _, rv := range vars.All() {
+		sv, ok := rv.Value.(*StructValue)
+		if !ok {
+			continue
+		}
+		newTmpl, ok := templates[sv.template.Name]
+		if !ok {
+			continue
+		}
+		reconcileStructValue(sv, newTmpl)
+	}
+}
+
+// reconcileStructValue updates a StructValue in place to match a new
+// template schema: new fields get their default values, removed fields
+// are dropped. The template pointer is swapped so method lookups also
+// reflect the new schema.
+func reconcileStructValue(s *StructValue, tmpl *itypes.PlcTemplate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.frozen {
+		return
+	}
+	s.template = tmpl
+	valid := make(map[string]bool, len(tmpl.Fields))
+	for i := range tmpl.Fields {
+		f := &tmpl.Fields[i]
+		valid[f.Name] = true
+		if _, exists := s.fields[f.Name]; !exists {
+			s.fields[f.Name] = defaultStarlarkValue(f)
+		}
+	}
+	for name := range s.fields {
+		if !valid[name] {
+			delete(s.fields, name)
+		}
 	}
 }
 

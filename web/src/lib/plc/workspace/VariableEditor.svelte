@@ -103,6 +103,30 @@
 		}
 	});
 
+	// Reconcile templateDefaults when the selected template's fields change
+	// (e.g. user added a field to the template in another pane). Adds new
+	// fields with their defaults, drops fields removed from the template,
+	// and preserves user edits on unchanged fields.
+	$effect(() => {
+		const tpl = selectedTemplate;
+		if (!tpl) return;
+		const valid = new Set(tpl.fields.map((f) => f.name));
+		const existingKeys = Object.keys(templateDefaults);
+		const needsAdd = tpl.fields.some((f) => !(f.name in templateDefaults));
+		const needsRemove = existingKeys.some((k) => !valid.has(k));
+		if (!needsAdd && !needsRemove) return;
+		const next: Record<string, unknown> = {};
+		for (const f of tpl.fields) {
+			next[f.name] =
+				f.name in templateDefaults
+					? templateDefaults[f.name]
+					: f.default !== undefined
+					  ? f.default
+					  : fieldZero(f.type);
+		}
+		templateDefaults = next;
+	});
+
 	function buildDefault(): unknown {
 		if (!isPrimitiveDatatype(datatype) && selectedTemplate) {
 			return { ...templateDefaults };

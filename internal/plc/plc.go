@@ -158,6 +158,27 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.mu.Unlock()
 	}
 
+	// Watch for template changes so existing StructValue instances pick
+	// up new fields (or drop removed ones) without a restart.
+	tmplSub, err := b.KVWatchAll(topics.BucketPlcTemplates, func(key string, value []byte, op bus.KVOperation) {
+		m.mu.RLock()
+		eng := m.engine
+		m.mu.RUnlock()
+		if eng == nil {
+			return
+		}
+		templates := m.loadTemplates()
+		m.log.Info("plc: templates updated, reconciling", "count", len(templates))
+		eng.SetTemplates(templates)
+	})
+	if err != nil {
+		m.log.Error("plc: failed to watch templates KV", "error", err)
+	} else {
+		m.mu.Lock()
+		m.subs = append(m.subs, tmplSub)
+		m.mu.Unlock()
+	}
+
 	// Listen for shutdown via Bus.
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
 		m.log.Info("plc: received shutdown command via Bus")
