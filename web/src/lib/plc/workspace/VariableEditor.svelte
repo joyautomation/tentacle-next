@@ -12,6 +12,7 @@
 	import { workspaceTabs } from '../workspace-state.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
+	import { PencilSquare } from '@joyautomation/salt/icons';
 
 	type Props = {
 		name: string;
@@ -101,11 +102,34 @@
 	});
 
 	function buildDefault(): unknown {
-		if (!isPrimitiveDatatype(datatype) && selectedTemplate) return { ...templateDefaults };
+		if (!isPrimitiveDatatype(datatype) && selectedTemplate) {
+			return { _type: selectedTemplate.name, ...templateDefaults };
+		}
 		if (datatype === 'boolean') return primitiveDefault === 'true';
 		if (datatype === 'string') return primitiveDefault;
 		if (datatype === 'number') return parseFloat(primitiveDefault) || 0;
 		return null;
+	}
+
+	function deepEqual(a: unknown, b: unknown): boolean {
+		if (a === b) return true;
+		if (a === null || b === null || a === undefined || b === undefined) return a === b;
+		if (typeof a !== typeof b) return false;
+		if (typeof a !== 'object') return false;
+		if (Array.isArray(a) !== Array.isArray(b)) return false;
+		if (Array.isArray(a)) {
+			const ba = b as unknown[];
+			if (a.length !== ba.length) return false;
+			for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], ba[i])) return false;
+			return true;
+		}
+		const ao = a as Record<string, unknown>;
+		const bo = b as Record<string, unknown>;
+		const ak = Object.keys(ao);
+		const bk = Object.keys(bo);
+		if (ak.length !== bk.length) return false;
+		for (const k of ak) if (!deepEqual(ao[k], bo[k])) return false;
+		return true;
 	}
 
 	const isDirty = $derived.by(() => {
@@ -113,8 +137,7 @@
 		if (datatype !== current.datatype) return true;
 		if (direction !== current.direction) return true;
 		if ((description ?? '') !== (current.description ?? '')) return true;
-		const proposed = buildDefault();
-		return JSON.stringify(proposed) !== JSON.stringify(current.default);
+		return !deepEqual(buildDefault(), current.default);
 	});
 
 	$effect(() => {
@@ -218,7 +241,7 @@
 			<div class="title-row">
 				<span class="name">{name}</span>
 				{#if isDirty}
-					<span class="dirty-dot" title="Unsaved changes">●</span>
+					<span class="dirty-icon" title="Unsaved changes"><PencilSquare size="1rem" /></span>
 				{/if}
 			</div>
 			<div class="actions">
@@ -356,9 +379,14 @@
 			color: var(--theme-text);
 		}
 
-		.dirty-dot {
-			color: var(--theme-warning, var(--theme-primary));
-			font-size: 0.75rem;
+		.dirty-icon {
+			display: inline-flex;
+			align-items: center;
+			color: var(--theme-warning, #f59e0b);
+
+			:global(svg) {
+				flex-shrink: 0;
+			}
 		}
 	}
 

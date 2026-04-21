@@ -5,6 +5,7 @@
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
 	import type { PlcConfig, PlcTemplate } from '$lib/types/plc';
+	import { PencilSquare } from '@joyautomation/salt/icons';
 
 	type Props = {
 		variableNames: string[];
@@ -60,7 +61,7 @@
 			<span class="badge" class:var-badge={tab.kind === 'variable'}>{badgeLabel(tab)}</span>
 			<span class="name">{tab.label}</span>
 			{#if workspaceTabs.dirty[tab.id]}
-				<span class="dirty" title="Unsaved changes">●</span>
+				<span class="dirty-icon" title="Unsaved changes"><PencilSquare size="0.875rem" /></span>
 			{/if}
 			<span
 				class="close"
@@ -127,9 +128,14 @@
 		text-overflow: ellipsis;
 	}
 
-	.dirty {
-		color: var(--theme-warning, var(--theme-primary));
-		font-size: 0.625rem;
+	.dirty-icon {
+		display: inline-flex;
+		align-items: center;
+		color: var(--theme-warning, #f59e0b);
+
+		:global(svg) {
+			flex-shrink: 0;
+		}
 	}
 
 	.close {

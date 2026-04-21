@@ -5,6 +5,7 @@
 	import { state as saltState } from '@joyautomation/salt';
 	import { slide } from 'svelte/transition';
 	import type { PlcConfig, PlcTemplate, PlcTemplateField } from '$lib/types/plc';
+	import { PencilSquare } from '@joyautomation/salt/icons';
 
 	type Props = {
 		template: PlcTemplate;
@@ -320,7 +321,7 @@
 			<span class="chevron" class:open={expanded}>▸</span>
 			<span class="badge">Template</span>
 			<span class="name">{template.name}</span>
-			{#if isDirty}<span class="dirty-dot" title="Unsaved template changes">●</span>{/if}
+			{#if isDirty}<span class="dirty-icon" title="Unsaved template changes"><PencilSquare size="0.875rem" /></span>{/if}
 			<span class="field-count">{fields.length} {fields.length === 1 ? 'field' : 'fields'}</span>
 		</button>
 		{#if expanded}
@@ -486,9 +487,14 @@
 			color: var(--theme-text);
 		}
 
-		.dirty-dot {
-			color: var(--theme-warning, var(--theme-primary));
-			font-size: 0.75rem;
+		.dirty-icon {
+			display: inline-flex;
+			align-items: center;
+			color: var(--theme-warning, #f59e0b);
+
+			:global(svg) {
+				flex-shrink: 0;
+			}
 		}
 
 		.field-count {
