@@ -34,6 +34,7 @@
 	let fields = $state<PlcTemplateField[]>([]);
 	let selectedIdx = $state<number | null>(null);
 	let saving = $state(false);
+	let expanded = $state(false);
 
 	// Reseed when the template prop changes (e.g. user switched variables).
 	let lastSeededFor = '';
@@ -196,6 +197,7 @@
 		void fields;
 		void selectedIdx;
 		void template.name;
+		void expanded;
 		if (!svgEl) return;
 
 		const data = buildTree();
@@ -306,43 +308,55 @@
 	});
 </script>
 
-<div class="tpl-def">
+<div class="tpl-def" class:collapsed={!expanded}>
 	<header class="tpl-head">
-		<div class="left">
+		<button
+			type="button"
+			class="toggle"
+			onclick={() => (expanded = !expanded)}
+			aria-expanded={expanded}
+			aria-label={expanded ? 'Collapse template definition' : 'Expand template definition'}
+		>
+			<span class="chevron" class:open={expanded}>▸</span>
 			<span class="badge">Template</span>
 			<span class="name">{template.name}</span>
 			{#if isDirty}<span class="dirty-dot" title="Unsaved template changes">●</span>{/if}
-		</div>
-		<div class="actions">
-			<button class="btn" onclick={revert} disabled={!isDirty || saving}>Revert</button>
-			<button class="btn primary" onclick={save} disabled={!isDirty || saving}>
-				{saving ? 'Saving…' : 'Save template'}
-			</button>
-		</div>
+			<span class="field-count">{fields.length} {fields.length === 1 ? 'field' : 'fields'}</span>
+		</button>
+		{#if expanded}
+			<div class="actions">
+				<button class="btn" onclick={revert} disabled={!isDirty || saving}>Revert</button>
+				<button class="btn primary" onclick={save} disabled={!isDirty || saving}>
+					{saving ? 'Saving…' : 'Save template'}
+				</button>
+			</div>
+		{/if}
 	</header>
 
-	{#if isDirty && affectedVariables.length > 0}
-		<div class="warning" transition:slide={{ duration: 150 }}>
-			<strong>Heads up:</strong>
-			Editing this template will affect
-			{affectedVariables.length}
-			{affectedVariables.length === 1 ? 'variable' : 'variables'}:
-			<span class="affected">
-				{#each affectedVariables as v, i (v)}
-					<code>{v}</code>{i < affectedVariables.length - 1 ? ', ' : ''}
-				{/each}
-			</span>
-		</div>
-	{/if}
+	{#if expanded}
+		<div class="tpl-body" transition:slide={{ duration: 150 }}>
+			{#if isDirty && affectedVariables.length > 0}
+				<div class="warning" transition:slide={{ duration: 150 }}>
+					<strong>Heads up:</strong>
+					Editing this template will affect
+					{affectedVariables.length}
+					{affectedVariables.length === 1 ? 'variable' : 'variables'}:
+					<span class="affected">
+						{#each affectedVariables as v, i (v)}
+							<code>{v}</code>{i < affectedVariables.length - 1 ? ', ' : ''}
+						{/each}
+					</span>
+				</div>
+			{/if}
 
-	<label class="field">
-		<span>Description</span>
-		<input type="text" bind:value={description} class="input" placeholder="(optional)" />
-	</label>
+			<label class="field">
+				<span>Description</span>
+				<input type="text" bind:value={description} class="input" placeholder="(optional)" />
+			</label>
 
-	<div class="tree-wrap">
-		<svg bind:this={svgEl}></svg>
-	</div>
+			<div class="tree-wrap">
+				<svg bind:this={svgEl}></svg>
+			</div>
 
 	<div class="tree-actions">
 		<button class="btn small" onclick={addField}>+ Add field</button>
@@ -419,9 +433,11 @@
 					placeholder="(optional)"
 				/>
 			</label>
+			</div>
+		{:else}
+			<p class="hint">Click a field in the tree to edit it, or add a new one.</p>
+		{/if}
 		</div>
-	{:else}
-		<p class="hint">Click a field in the tree to edit it, or add a new one.</p>
 	{/if}
 </div>
 
@@ -434,6 +450,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.625rem;
+
+		&.collapsed {
+			padding: 0.375rem 0.75rem;
+		}
 	}
 
 	.tpl-head {
@@ -441,11 +461,23 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.75rem;
+	}
 
-		.left {
-			display: flex;
-			align-items: baseline;
-			gap: 0.5rem;
+	.toggle {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		flex: 1;
+		min-width: 0;
+		padding: 0.125rem 0;
+		background: transparent;
+		border: 0;
+		cursor: pointer;
+		color: inherit;
+		text-align: left;
+
+		&:hover .name {
+			color: var(--theme-primary);
 		}
 
 		.name {
@@ -458,6 +490,31 @@
 			color: var(--theme-warning, var(--theme-primary));
 			font-size: 0.75rem;
 		}
+
+		.field-count {
+			margin-left: auto;
+			font-size: 0.6875rem;
+			color: var(--theme-text-muted);
+		}
+	}
+
+	.chevron {
+		display: inline-block;
+		color: var(--theme-text-muted);
+		font-size: 0.6875rem;
+		transition: transform 0.12s ease;
+		transform-origin: center;
+		width: 0.75rem;
+
+		&.open {
+			transform: rotate(90deg);
+		}
+	}
+
+	.tpl-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
 	}
 
 	.badge {
