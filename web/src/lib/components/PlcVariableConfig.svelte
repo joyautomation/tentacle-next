@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { GatewayConfig, BrowseCache, GatewayBrowseState } from '$lib/types/gateway';
-  import type { PlcConfig, PlcVariableConfig as PlcVarCfg } from '$lib/types/plc';
+  import type { PlcConfig, PlcTemplate, PlcVariableConfig as PlcVarCfg } from '$lib/types/plc';
   import { apiPost, apiDelete, apiPut } from '$lib/api/client';
   import { subscribe } from '$lib/api/subscribe';
   import { invalidateAll } from '$app/navigation';
@@ -8,13 +8,53 @@
   import { state as saltState } from '@joyautomation/salt';
   import { ChevronRight, Plus, Trash } from '@joyautomation/salt/icons';
 
-  let { plcConfig, gatewayConfig, browseCaches, browseStates, error }: {
+  let { plcConfig, gatewayConfig, browseCaches, browseStates, templates = [], error }: {
     plcConfig: PlcConfig | null;
     gatewayConfig: GatewayConfig | null;
     browseCaches: BrowseCache[];
     browseStates: GatewayBrowseState[];
+    templates?: PlcTemplate[];
     error: string | null;
   } = $props();
+
+  const templateByName = $derived((): Record<string, PlcTemplate> => {
+    const m: Record<string, PlcTemplate> = {};
+    for (const t of templates) m[t.name] = t;
+    return m;
+  });
+
+  const selectedTemplate = $derived((): PlcTemplate | null => {
+    return templateByName()[manualDatatype] ?? null;
+  });
+
+  function isPrimitiveDatatype(dt: string): boolean {
+    return dt === 'number' || dt === 'boolean' || dt === 'string';
+  }
+
+  function fieldZero(type: string): unknown {
+    const base = type.replace(/\[\]$/, '').replace(/\{\}$/, '');
+    if (type.endsWith('[]')) return [];
+    if (type.endsWith('{}')) return {};
+    if (base === 'bool' || base === 'boolean') return false;
+    if (base === 'string') return '';
+    if (base === 'bytes') return '';
+    if (base === 'number') return 0;
+    return null; // nested templates start null
+  }
+
+  // Per-field default editors when a template is picked. Keyed by field name.
+  let templateDefaults: Record<string, unknown> = $state({});
+
+  // Reset templateDefaults when the selected template changes.
+  $effect(() => {
+    const t = selectedTemplate();
+    if (!t) return;
+    const next: Record<string, unknown> = {};
+    for (const f of t.fields) {
+      next[f.name] = f.default !== undefined ? f.default : fieldZero(f.type);
+    }
+    templateDefaults = next;
+  });
 
   // Build set of already-configured PLC input variables (from browse)
   const configuredTags = $derived((): Set<string> => {
@@ -256,10 +296,13 @@
     if (!manualName.trim()) return;
     manualSaving = true;
     try {
-      let def: unknown = 0;
-      if (manualDatatype === 'boolean') def = manualDefault === 'true';
+      let def: unknown;
+      if (!isPrimitiveDatatype(manualDatatype) && selectedTemplate()) {
+        def = { ...templateDefaults };
+      } else if (manualDatatype === 'boolean') def = manualDefault === 'true';
       else if (manualDatatype === 'string') def = manualDefault;
-      else def = parseFloat(manualDefault) || 0;
+      else if (manualDatatype === 'number') def = parseFloat(manualDefault) || 0;
+      else def = null;
 
       const result = await apiPut(`/plcs/plc/variables/${encodeURIComponent(manualName.trim())}`, {
         id: manualName.trim(),
@@ -360,9 +403,18 @@
           <label class="form-field">
             <span>Type</span>
             <select bind:value={manualDatatype} class="form-input" onchange={() => { manualDefault = manualDatatype === 'boolean' ? 'false' : manualDatatype === 'string' ? '' : '0'; }}>
-              <option value="number">number</option>
-              <option value="boolean">boolean</option>
-              <option value="string">string</option>
+              <optgroup label="Primitives">
+                <option value="number">number</option>
+                <option value="boolean">boolean</option>
+                <option value="string">string</option>
+              </optgroup>
+              {#if templates.length > 0}
+                <optgroup label="Templates">
+                  {#each templates as tmpl (tmpl.name)}
+                    <option value={tmpl.name}>{tmpl.name}</option>
+                  {/each}
+                </optgroup>
+              {/if}
             </select>
           </label>
           <label class="form-field">
@@ -373,18 +425,52 @@
               <option value="input">input</option>
             </select>
           </label>
-          <label class="form-field">
-            <span>Default</span>
-            {#if manualDatatype === 'boolean'}
-              <select bind:value={manualDefault} class="form-input">
-                <option value="false">false</option>
-                <option value="true">true</option>
-              </select>
-            {:else}
-              <input type={manualDatatype === 'number' ? 'number' : 'text'} bind:value={manualDefault} class="form-input" />
-            {/if}
-          </label>
+          {#if isPrimitiveDatatype(manualDatatype)}
+            <label class="form-field">
+              <span>Default</span>
+              {#if manualDatatype === 'boolean'}
+                <select bind:value={manualDefault} class="form-input">
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              {:else}
+                <input type={manualDatatype === 'number' ? 'number' : 'text'} bind:value={manualDefault} class="form-input" />
+              {/if}
+            </label>
+          {/if}
         </div>
+
+        {#if selectedTemplate()}
+          {@const tmpl = selectedTemplate()}
+          <div class="template-defaults" transition:slide={{ duration: 150 }}>
+            <div class="template-defaults-header">
+              <span class="template-badge">Template</span>
+              <span class="template-name">{tmpl?.name}</span>
+              {#if tmpl?.description}
+                <span class="template-desc">{tmpl.description}</span>
+              {/if}
+            </div>
+            <div class="field-grid">
+              {#each tmpl?.fields ?? [] as field (field.name)}
+                <label class="form-field">
+                  <span>{field.name} <em class="field-type">{field.type}</em></span>
+                  {#if field.type === 'bool' || field.type === 'boolean'}
+                    <select bind:value={templateDefaults[field.name]} class="form-input">
+                      <option value={false}>false</option>
+                      <option value={true}>true</option>
+                    </select>
+                  {:else if field.type === 'number'}
+                    <input type="number" bind:value={templateDefaults[field.name]} class="form-input" step="any" />
+                  {:else if field.type === 'string'}
+                    <input type="text" bind:value={templateDefaults[field.name]} class="form-input" />
+                  {:else}
+                    <input type="text" value={JSON.stringify(templateDefaults[field.name] ?? null)} class="form-input" readonly title="Nested template/collection — set from Starlark" />
+                  {/if}
+                </label>
+              {/each}
+            </div>
+          </div>
+        {/if}
         <div class="form-actions">
           <button class="apply-btn small" onclick={addManualVariable} disabled={manualSaving || !manualName.trim()}>
             {manualSaving ? 'Creating...' : 'Create Variable'}
@@ -397,9 +483,10 @@
     {#if manualVarCount > 0}
       <div class="tree">
         {#each Object.entries(plcConfig?.variables ?? {}).filter(([, v]) => !v.source) as [id, v]}
+          {@const isTpl = !isPrimitiveDatatype(v.datatype) && !!templateByName()[v.datatype]}
           <div class="tree-leaf manual-row">
             <span class="leaf-name">{id}</span>
-            <span class="leaf-type">{v.datatype}</span>
+            <span class="leaf-type" class:tpl={isTpl}>{v.datatype}</span>
             <span class="direction-badge" class:dir-input={v.direction === 'input'} class:dir-output={v.direction === 'output'}>{v.direction}</span>
             <span class="leaf-value">{JSON.stringify(v.default)}</span>
             <button class="delete-btn" onclick={() => deleteManualVariable(id)} title="Delete variable">
@@ -570,6 +657,25 @@
   }
 
   .form-actions { display: flex; gap: 0.5rem; }
+
+  .template-defaults {
+    margin-top: 0.75rem; padding-top: 0.75rem;
+    border-top: 1px dashed color-mix(in srgb, var(--theme-border) 80%, transparent);
+  }
+  .template-defaults-header {
+    display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;
+  }
+  .template-badge {
+    font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; padding: 0.15rem 0.4rem;
+    border-radius: var(--rounded-sm); background: var(--badge-purple-bg); color: var(--badge-purple-text);
+  }
+  .template-name { font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: var(--theme-text); }
+  .template-desc { font-size: 0.75rem; color: var(--theme-text-muted); }
+  .field-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.5rem 0.75rem;
+  }
+  .field-type { font-style: normal; font-size: 0.6875rem; color: var(--theme-text-muted); margin-left: 0.25rem; }
+  .leaf-type.tpl { background: var(--badge-purple-bg); color: var(--badge-purple-text); }
 
   .device-section { margin-bottom: 1.5rem; }
   .device-section-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }

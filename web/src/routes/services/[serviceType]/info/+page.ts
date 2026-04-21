@@ -1,7 +1,7 @@
 import type { PageLoad } from './$types';
 import { api } from '$lib/api/client';
 import type { Variable, GatewayConfig, BrowseCache, GatewayBrowseState } from '$lib/types/gateway';
-import type { PlcConfig } from '$lib/types/plc';
+import type { PlcConfig, PlcTemplate } from '$lib/types/plc';
 
 export const load: PageLoad = async ({ params }) => {
   const { serviceType } = params;
@@ -12,7 +12,7 @@ export const load: PageLoad = async ({ params }) => {
       const result = await api<GatewayConfig>('/gateways/gateway');
 
       if (result.error) {
-        return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], plcConfig: null, error: result.error.error };
+        return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], plcConfig: null, templates: [] as PlcTemplate[], error: result.error.error };
       }
 
       const config = result.data ?? null;
@@ -53,6 +53,7 @@ export const load: PageLoad = async ({ params }) => {
         browseCaches,
         browseStates,
         plcConfig: null,
+        templates: [] as PlcTemplate[],
         error: null,
       };
     } catch (e) {
@@ -63,6 +64,7 @@ export const load: PageLoad = async ({ params }) => {
         browseCaches: [] as BrowseCache[],
         browseStates: [] as GatewayBrowseState[],
         plcConfig: null,
+        templates: [] as PlcTemplate[],
         error: e instanceof Error ? e.message : 'Failed to fetch gateway config',
       };
     }
@@ -71,11 +73,12 @@ export const load: PageLoad = async ({ params }) => {
   // PLC: load live variables + gateway config + browse caches for variable import
   if (serviceType === 'plc') {
     try {
-      const [variablesResult, plcConfigResult, gatewayResult, browseStatesResult] = await Promise.all([
+      const [variablesResult, plcConfigResult, gatewayResult, browseStatesResult, templatesResult] = await Promise.all([
         api<Variable[]>('/variables'),
         api<PlcConfig>('/plcs/plc/config'),
         api<GatewayConfig>('/gateways/gateway'),
         api<GatewayBrowseState[]>('/gateways/browse-states'),
+        api<PlcTemplate[]>('/plcs/plc/templates'),
       ]);
 
       const gatewayConfig = gatewayResult.data ?? null;
@@ -103,6 +106,7 @@ export const load: PageLoad = async ({ params }) => {
         browseCaches,
         browseStates: browseStatesResult.data ?? [],
         plcConfig: plcConfigResult.data ?? null,
+        templates: templatesResult.data ?? [],
         error: variablesResult.error?.error ?? null,
       };
     } catch (e) {
@@ -113,10 +117,11 @@ export const load: PageLoad = async ({ params }) => {
         browseCaches: [] as BrowseCache[],
         browseStates: [] as GatewayBrowseState[],
         plcConfig: null,
+        templates: [] as PlcTemplate[],
         error: e instanceof Error ? e.message : 'Failed to fetch PLC data',
       };
     }
   }
 
-  return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], plcConfig: null, error: null };
+  return { variables: [], serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], plcConfig: null, templates: [] as PlcTemplate[], error: null };
 };

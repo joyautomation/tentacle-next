@@ -29,6 +29,7 @@
           gatewayConfig={data.gatewayConfig}
           browseCaches={data.browseCaches}
           browseStates={data.browseStates}
+          templates={data.templates}
           error={data.error}
         />
       </div>

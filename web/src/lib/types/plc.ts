@@ -55,3 +55,31 @@ export interface ProgramListItem {
   updatedAt: number;
   updatedBy?: string;
 }
+
+export interface PlcTemplateField {
+  name: string;
+  type: string;
+  default?: unknown;
+  description?: string;
+}
+
+export interface PlcFunctionRef {
+  module: string;
+  name: string;
+}
+
+export interface PlcTemplateMethod {
+  name: string;
+  function: PlcFunctionRef;
+  description?: string;
+}
+
+export interface PlcTemplate {
+  name: string;
+  description?: string;
+  tags?: string[];
+  fields: PlcTemplateField[];
+  methods?: PlcTemplateMethod[];
+  updatedAt?: number;
+  updatedBy?: string;
+}
