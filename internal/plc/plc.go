@@ -360,29 +360,31 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 		m.log.Info("plc: restored persisted values", "count", restored)
 	}
 
-	// Load and compile programs from KV.
-	for _, taskCfg := range config.Tasks {
-		if !taskCfg.Enabled || taskCfg.ProgramRef == "" {
-			continue
-		}
-		if m.engine.HasProgram(taskCfg.ProgramRef) {
-			continue
-		}
-		data, _, err := m.b.KVGet(topics.BucketPlcPrograms, taskCfg.ProgramRef)
+	// Load and compile every program in the KV bucket (not just the ones
+	// referenced by a task). The Starlark engine cross-links top-level
+	// defs across programs at compile time, so a task program can call
+	// helper functions defined in sibling programs — even if those
+	// siblings aren't themselves run as tasks.
+	progKeys, err := m.b.KVKeys(topics.BucketPlcPrograms)
+	if err != nil {
+		m.log.Error("plc: failed to list programs", "error", err)
+	}
+	for _, key := range progKeys {
+		data, _, err := m.b.KVGet(topics.BucketPlcPrograms, key)
 		if err != nil {
-			m.log.Error("plc: failed to load program", "program", taskCfg.ProgramRef, "error", err)
+			m.log.Error("plc: failed to load program", "program", key, "error", err)
 			continue
 		}
 		var prog itypes.PlcProgramKV
 		if err := json.Unmarshal(data, &prog); err != nil {
-			m.log.Error("plc: failed to parse program", "program", taskCfg.ProgramRef, "error", err)
+			m.log.Error("plc: failed to parse program", "program", key, "error", err)
 			continue
 		}
-		if err := m.engine.Compile(taskCfg.ProgramRef, prog.Source); err != nil {
-			m.log.Error("plc: failed to compile program", "program", taskCfg.ProgramRef, "error", err)
+		if err := m.engine.Compile(prog.Name, prog.Source); err != nil {
+			m.log.Error("plc: failed to compile program", "program", prog.Name, "error", err)
 			continue
 		}
-		m.log.Info("plc: compiled program", "program", taskCfg.ProgramRef, "language", prog.Language)
+		m.log.Info("plc: compiled program", "program", prog.Name, "language", prog.Language)
 	}
 
 	// Start scanner bridge.

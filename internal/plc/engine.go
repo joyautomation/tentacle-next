@@ -11,12 +11,14 @@ import (
 
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 )
 
 // Engine manages Starlark program compilation and execution.
 type Engine struct {
 	mu        sync.RWMutex
 	programs  map[string]*compiledProgram
+	sources   map[string]string
 	builtins  starlark.StringDict
 	vars      *VariableStore
 	templates map[string]*itypes.PlcTemplate
@@ -73,6 +75,7 @@ func NewTaskState() *TaskState {
 func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 	e := &Engine{
 		programs:  make(map[string]*compiledProgram),
+		sources:   make(map[string]string),
 		vars:      vars,
 		templates: make(map[string]*itypes.PlcTemplate),
 		log:       log,
@@ -83,28 +86,139 @@ func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 
 // Compile parses and compiles a Starlark source program.
 // Any top-level callable in the program can serve as a task entry point.
+// All currently-registered programs are recompiled so their top-level
+// definitions are visible to each other (a program may call another
+// program's top-level functions by name).
 func (e *Engine) Compile(name, source string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	thread := &starlark.Thread{Name: name}
-	globals, err := starlark.ExecFile(thread, name+".star", source, e.builtins)
-	if err != nil {
-		return fmt.Errorf("compile %s: %w", name, err)
-	}
-
-	e.programs[name] = &compiledProgram{
-		name:    name,
-		globals: globals,
-	}
-	return nil
+	e.sources[name] = source
+	return e.compileAllLocked(name)
 }
 
-// Remove deletes a compiled program.
+// Remove deletes a compiled program and recompiles the rest so any
+// cross-program references to its top-level defs now fail cleanly.
 func (e *Engine) Remove(name string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	delete(e.sources, name)
 	delete(e.programs, name)
+	_ = e.compileAllLocked("")
+}
+
+// compileAllLocked rebuilds every program in e.sources with a predeclared
+// scope that exposes each other program's top-level def names as proxy
+// callables. The proxies resolve the real function at call time, so forward
+// and mutual references between programs compile without ordering tricks.
+//
+// Returns the first compile error encountered. Programs that fail compile
+// are dropped from e.programs (caller sees the error via the return value).
+//
+// focus (optional): if set, the returned error prioritises that program's
+// compile error over others — useful when Compile was called for a specific
+// program and we want to surface its error to the user.
+//
+// Caller must hold e.mu.
+func (e *Engine) compileAllLocked(focus string) error {
+	// Index top-level def names across all programs so we know what each
+	// program exports. Programs that fail to parse contribute no exports
+	// but won't block cross-linking for the rest.
+	ownDefs := map[string]map[string]bool{}
+	exportedBy := map[string][]string{}
+	for pn, src := range e.sources {
+		defs, err := extractTopLevelDefs(src)
+		if err != nil {
+			continue
+		}
+		owned := make(map[string]bool, len(defs))
+		for _, d := range defs {
+			owned[d] = true
+			exportedBy[d] = append(exportedBy[d], pn)
+		}
+		ownDefs[pn] = owned
+	}
+
+	newPrograms := make(map[string]*compiledProgram, len(e.sources))
+	var firstErr, focusErr error
+	for pn, src := range e.sources {
+		predeclared := make(starlark.StringDict, len(e.builtins)+len(exportedBy))
+		for k, v := range e.builtins {
+			predeclared[k] = v
+		}
+		owned := ownDefs[pn]
+		for defName, owners := range exportedBy {
+			if owned[defName] {
+				continue // file-scope def shadows predeclared proxy
+			}
+			if _, isBuiltin := e.builtins[defName]; isBuiltin {
+				continue // don't shadow builtins
+			}
+			predeclared[defName] = e.makeCallProxy(defName, append([]string(nil), owners...))
+		}
+
+		thread := &starlark.Thread{Name: pn}
+		globals, err := starlark.ExecFile(thread, pn+".star", src, predeclared)
+		if err != nil {
+			wrapped := fmt.Errorf("compile %s: %w", pn, err)
+			if pn == focus {
+				focusErr = wrapped
+			} else if firstErr == nil {
+				firstErr = wrapped
+			}
+			continue
+		}
+		newPrograms[pn] = &compiledProgram{name: pn, globals: globals}
+	}
+
+	e.programs = newPrograms
+	if focusErr != nil {
+		return focusErr
+	}
+	return firstErr
+}
+
+// makeCallProxy returns a Starlark callable that looks up `name` in one of
+// `owners` (other compiled programs) at call time and invokes it. If more
+// than one program defines the same name, the proxy refuses to guess.
+func (e *Engine) makeCallProxy(name string, owners []string) starlark.Value {
+	return starlark.NewBuiltin(name, func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		if len(owners) > 1 {
+			return nil, fmt.Errorf("ambiguous call to %q: defined in programs %v", name, owners)
+		}
+		src := owners[0]
+		e.mu.RLock()
+		prog, ok := e.programs[src]
+		e.mu.RUnlock()
+		if !ok {
+			return nil, fmt.Errorf("program %q not compiled", src)
+		}
+		fnVal, ok := prog.globals[name]
+		if !ok {
+			return nil, fmt.Errorf("program %q: no function %q", src, name)
+		}
+		callable, ok := fnVal.(starlark.Callable)
+		if !ok {
+			return nil, fmt.Errorf("program %q: %q is not callable", src, name)
+		}
+		return starlark.Call(thread, callable, args, kwargs)
+	})
+}
+
+// extractTopLevelDefs parses a Starlark source file and returns the names
+// of its top-level def statements. Used to index cross-program exports
+// without requiring a full compile.
+func extractTopLevelDefs(source string) ([]string, error) {
+	f, err := syntax.Parse("x.star", source, 0)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, stmt := range f.Stmts {
+		if def, ok := stmt.(*syntax.DefStmt); ok {
+			names = append(names, def.Name.Name)
+		}
+	}
+	return names, nil
 }
 
 // Execute runs a named top-level function in a compiled program with the given
