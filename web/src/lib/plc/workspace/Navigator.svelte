@@ -288,6 +288,7 @@
 	.add-btn {
 		flex-shrink: 0;
 		width: 1.75rem;
+		padding: 0;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
