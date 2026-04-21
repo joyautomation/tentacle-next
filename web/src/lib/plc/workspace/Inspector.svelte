@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { PlcVariableConfig, PlcTaskConfig, ProgramListItem } from '$lib/types/plc';
 	import {
-		startLiveValues,
+		watchVariable,
 		liveValuesVersion,
 		getLiveValue
 	} from '$lib/plc/live-values.svelte';
@@ -32,16 +32,21 @@
 		const tick = setInterval(() => {
 			now = Date.now();
 		}, 1000);
-		const stop = startLiveValues();
 		const stopStats = startTaskStats();
 		return () => {
 			clearInterval(tick);
-			stop();
 			stopStats();
 		};
 	});
 
 	const selection = $derived(workspaceSelection.current);
+
+	// Watch whichever variable is currently selected; swap on change.
+	$effect(() => {
+		if (selection?.kind !== 'variable') return;
+		const stop = watchVariable(selection.id);
+		return stop;
+	});
 
 	const selectedVariable = $derived.by(() => {
 		if (selection?.kind !== 'variable') return null;

@@ -5,6 +5,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -258,4 +260,101 @@ func (m *Module) handleStreamVariable(w http.ResponseWriter, r *http.Request) {
 	defer sub.Unsubscribe()
 
 	<-r.Context().Done()
+}
+
+// handleStreamVariableWatch streams changes for a caller-specified set
+// of root variables, coalesced over a short flush window.
+//
+// GET /api/v1/variables/stream/watch?vars=a,b,c&moduleId=&flushMs=100
+//
+//   - `vars` (optional): CSV of root variable IDs. Empty means emit all.
+//   - `moduleId` (optional): scope to one module's data subjects.
+//   - `flushMs` (optional): coalesce interval (default 100; clamped
+//     [50, 5000]). Emits dedupe per variableId inside the window.
+//
+// Emits SSE "batch" events carrying a JSON array of PlcDataMessage —
+// same envelope as handleStreamVariableBatch.
+func (m *Module) handleStreamVariableWatch(w http.ResponseWriter, r *http.Request) {
+	sse, ok := newSSEWriter(w)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	q := r.URL.Query()
+	moduleID := q.Get("moduleId")
+	subject := topics.AllData()
+	if moduleID != "" {
+		subject = topics.DataWildcard(moduleID)
+	}
+
+	filter := map[string]struct{}{}
+	if raw := strings.TrimSpace(q.Get("vars")); raw != "" {
+		for _, v := range strings.Split(raw, ",") {
+			if name := strings.TrimSpace(v); name != "" {
+				filter[name] = struct{}{}
+			}
+		}
+	}
+	wantAll := len(filter) == 0
+
+	flushMs := 100
+	if v := q.Get("flushMs"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			flushMs = n
+		}
+	}
+	if flushMs < 50 {
+		flushMs = 50
+	} else if flushMs > 5000 {
+		flushMs = 5000
+	}
+
+	var mu sync.Mutex
+	batch := make(map[string]ttypes.PlcDataMessage)
+
+	sub, err := m.bus.Subscribe(subject, func(_ string, data []byte, _ bus.ReplyFunc) {
+		var msg ttypes.PlcDataMessage
+		if json.Unmarshal(data, &msg) != nil {
+			return
+		}
+		if !wantAll {
+			if _, ok := filter[msg.VariableID]; !ok {
+				return
+			}
+		}
+		mu.Lock()
+		batch[msg.VariableID] = msg
+		mu.Unlock()
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to subscribe: "+err.Error())
+		return
+	}
+	defer sub.Unsubscribe()
+
+	ticker := time.NewTicker(time.Duration(flushMs) * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			mu.Lock()
+			if len(batch) == 0 {
+				mu.Unlock()
+				continue
+			}
+			snapshot := batch
+			batch = make(map[string]ttypes.PlcDataMessage)
+			mu.Unlock()
+
+			vals := make([]ttypes.PlcDataMessage, 0, len(snapshot))
+			for _, v := range snapshot {
+				vals = append(vals, v)
+			}
+			sse.WriteEvent("batch", vals)
+		}
+	}
 }

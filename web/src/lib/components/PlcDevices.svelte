@@ -41,7 +41,7 @@
     const tickInterval = setInterval(() => { now = Date.now(); }, 1000);
     const serviceType = $page.params.serviceType;
     const unsub = subscribe<Variable[]>(
-      `/variables/stream/batch?moduleId=${encodeURIComponent(serviceType)}`,
+      `/variables/stream/watch?moduleId=${encodeURIComponent(serviceType)}&flushMs=500`,
       (batch) => {
         if (batch) {
           for (const v of batch) {

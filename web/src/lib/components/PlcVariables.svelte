@@ -39,7 +39,7 @@
   onMount(() => {
     const tickInterval = setInterval(() => { now = Date.now(); }, 1000);
     const unsub = subscribe<Variable[]>(
-      `/variables/stream/batch`,
+      `/variables/stream/watch?flushMs=500`,
       (batch) => {
         if (batch) {
           for (const v of batch) {

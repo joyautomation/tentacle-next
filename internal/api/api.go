@@ -184,6 +184,7 @@ func (m *Module) routes() http.Handler {
 		r.Get("/variables", m.handleListVariables)
 		r.Get("/variables/stream", m.handleStreamVariables)
 		r.Get("/variables/stream/batch", m.handleStreamVariableBatch)
+		r.Get("/variables/stream/watch", m.handleStreamVariableWatch)
 		r.Get("/variables/{variableId}", m.handleGetVariable)
 		r.Get("/variables/{variableId}/stream", m.handleStreamVariable)
 		r.Put("/variables/{moduleId}/{variableId}/value", m.handleWriteVariable)

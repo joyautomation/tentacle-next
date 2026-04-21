@@ -50,7 +50,7 @@
   onMount(() => {
     const tickInterval = setInterval(() => { now = Date.now(); }, 1000);
     const unsub = subscribe<Variable[]>(
-      '/variables/stream/batch?moduleId=snmp',
+      '/variables/stream/watch?moduleId=snmp&flushMs=500',
       (batch) => {
         if (batch) {
           for (const v of batch) {

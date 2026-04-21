@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import { apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
@@ -11,7 +11,7 @@
 		PlcVariableSource
 	} from '$lib/types/plc';
 	import { workspaceTabs, workspaceVariableDrafts } from '../workspace-state.svelte';
-	import { startLiveValues, liveValuesVersion, getLiveValue } from '../live-values.svelte';
+	import { watchVariable, liveValuesVersion, getLiveValue } from '../live-values.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
 	import { PencilSquare } from '@joyautomation/salt/icons';
@@ -158,7 +158,10 @@
 		return true;
 	}
 
-	onMount(() => startLiveValues());
+	$effect(() => {
+		if (!name) return;
+		return watchVariable(name);
+	});
 	onDestroy(() => workspaceVariableDrafts.clear(name));
 
 	const currentValues = $derived.by(() => {
