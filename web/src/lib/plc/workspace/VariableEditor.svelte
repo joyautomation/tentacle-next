@@ -18,12 +18,13 @@
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 
 	type Props = {
+		tabId: string;
 		name: string;
 		plcConfig: PlcConfig | null;
 		templates: PlcTemplate[];
 	};
 
-	let { name, plcConfig, templates }: Props = $props();
+	let { tabId, name, plcConfig, templates }: Props = $props();
 
 	const current = $derived(plcConfig?.variables?.[name] ?? null);
 
@@ -281,7 +282,7 @@
 	});
 
 	$effect(() => {
-		workspaceTabs.setDirty(name, isDirty);
+		workspaceTabs.setDirty(tabId, isDirty);
 	});
 
 	// Publish the in-flight edit so the Inspector panel reflects changes
@@ -319,7 +320,7 @@
 				return;
 			}
 			saltState.addNotification({ message: `Saved "${name}"`, type: 'success' });
-			workspaceTabs.clearDirty(name);
+			workspaceTabs.clearDirty(tabId);
 			await invalidateAll();
 		} finally {
 			saving = false;
@@ -344,7 +345,7 @@
 				return;
 			}
 			saltState.addNotification({ message: `Deleted "${name}"`, type: 'success' });
-			workspaceTabs.close(name);
+			workspaceTabs.close(tabId);
 			await invalidateAll();
 		} finally {
 			deleting = false;

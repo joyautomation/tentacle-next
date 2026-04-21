@@ -23,25 +23,23 @@
 
 	const tabs = $derived<EditorTab[]>(
 		workspaceTabs.list.map((t) => ({
-			id: t.name,
+			id: t.id,
 			label: t.name,
 			kind: t.kind,
 			language: t.language
 		}))
 	);
 
-	function activate(name: string) {
-		workspaceTabs.activate(name);
-		const tab = workspaceTabs.list.find((t) => t.name === name);
+	function activate(id: string) {
+		workspaceTabs.activate(id);
+		const tab = workspaceTabs.list.find((t) => t.id === id);
 		if (!tab) return;
-		if (tab.kind === 'program') workspaceSelection.select('program', name);
-		else if (tab.kind === 'variable') workspaceSelection.select('variable', name);
-		else if (tab.kind === 'task') workspaceSelection.select('task', name);
+		workspaceSelection.select(tab.kind, tab.name);
 	}
 
-	function close(e: MouseEvent | KeyboardEvent, name: string) {
+	function close(e: MouseEvent | KeyboardEvent, id: string) {
 		e.stopPropagation();
-		workspaceTabs.close(name);
+		workspaceTabs.close(id);
 	}
 
 	function badgeLabel(tab: EditorTab): string {
@@ -77,7 +75,7 @@
 				class="close"
 				role="button"
 				tabindex="-1"
-				aria-label={`Close ${tab.id}`}
+				aria-label={`Close ${tab.label}`}
 				onclick={(e) => close(e, tab.id)}
 				onkeydown={(e) => {
 					if (e.key === 'Enter' || e.key === ' ') close(e, tab.id);
@@ -89,22 +87,24 @@
 	</Tabs>
 
 	<div class="tab-content">
-		{#each workspaceTabs.list as tab (tab.name)}
-			<div class="editor-host" class:hidden={workspaceTabs.active !== tab.name}>
+		{#each workspaceTabs.list as tab (tab.id)}
+			<div class="editor-host" class:hidden={workspaceTabs.active !== tab.id}>
 				{#if tab.kind === 'variable'}
-					<VariableEditor name={tab.name} {plcConfig} {templates} />
+					<VariableEditor tabId={tab.id} name={tab.name} {plcConfig} {templates} />
 				{:else if tab.kind === 'task'}
 					<TaskEditor
+						tabId={tab.id}
 						name={tab.name}
 						{tasks}
 						{programs}
-						onDirtyChange={(d) => workspaceTabs.setDirty(tab.name, d)}
+						onDirtyChange={(d) => workspaceTabs.setDirty(tab.id, d)}
 					/>
 				{:else}
 					<ProgramEditor
+						tabId={tab.id}
 						name={tab.name}
 						{variableNames}
-						onDirtyChange={(d) => workspaceTabs.setDirty(tab.name, d)}
+						onDirtyChange={(d) => workspaceTabs.setDirty(tab.id, d)}
 					/>
 				{/if}
 			</div>

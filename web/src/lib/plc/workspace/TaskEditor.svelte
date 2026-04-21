@@ -7,13 +7,14 @@
 	import type { PlcTaskConfig, ProgramListItem } from '$lib/types/plc';
 
 	type Props = {
+		tabId: string;
 		name: string;
 		tasks: Record<string, PlcTaskConfig>;
 		programs: ProgramListItem[];
 		onDirtyChange?: (dirty: boolean) => void;
 	};
 
-	let { name, tasks, programs, onDirtyChange }: Props = $props();
+	let { tabId, name, tasks, programs, onDirtyChange }: Props = $props();
 
 	const current = $derived(tasks[name] ?? null);
 
@@ -50,7 +51,7 @@
 	});
 
 	$effect(() => {
-		workspaceTabs.setDirty(name, dirty);
+		workspaceTabs.setDirty(tabId, dirty);
 		onDirtyChange?.(dirty);
 	});
 
@@ -101,7 +102,7 @@
 				return;
 			}
 			saltState.addNotification({ message: `Task "${name}" deleted`, type: 'success' });
-			workspaceTabs.close(name);
+			workspaceTabs.close(tabId);
 			await invalidateAll();
 		} finally {
 			deleting = false;

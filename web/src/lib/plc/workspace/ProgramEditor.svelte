@@ -30,12 +30,13 @@
 	}
 
 	type Props = {
+		tabId: string;
 		name: string;
 		variableNames: string[];
 		onDirtyChange?: (dirty: boolean) => void;
 	};
 
-	let { name, variableNames, onDirtyChange }: Props = $props();
+	let { tabId, name, variableNames, onDirtyChange }: Props = $props();
 
 	let loading = $state(false);
 	let saving = $state(false);
@@ -145,7 +146,7 @@
 				return;
 			}
 			saltState.addNotification({ message: `Function "${name}" deleted`, type: 'success' });
-			workspaceTabs.close(name);
+			workspaceTabs.close(tabId);
 			await invalidateAll();
 		} finally {
 			deleting = false;

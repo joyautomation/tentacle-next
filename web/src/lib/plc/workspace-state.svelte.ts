@@ -8,10 +8,15 @@ export type Selection = {
 export type EditorTabKind = 'program' | 'variable' | 'task';
 
 export type EditorTab = {
+	id: string; // composite `${kind}:${name}` so tabs of different kinds can share a name
 	name: string;
 	kind: EditorTabKind;
 	language?: string;
 };
+
+export function tabId(kind: EditorTabKind, name: string): string {
+	return `${kind}:${name}`;
+}
 
 // Kept as alias for incremental migration; prefer EditorTab.
 export type ProgramTab = EditorTab;
@@ -101,37 +106,38 @@ export const workspaceTabs = {
 	get dirty() {
 		return state.dirty;
 	},
-	open(tab: EditorTab) {
-		if (!state.tabs.some((t) => t.name === tab.name)) {
-			state.tabs = [...state.tabs, tab];
+	open(input: Omit<EditorTab, 'id'>) {
+		const id = tabId(input.kind, input.name);
+		if (!state.tabs.some((t) => t.id === id)) {
+			state.tabs = [...state.tabs, { id, ...input }];
 		}
-		state.activeTab = tab.name;
+		state.activeTab = id;
 	},
-	activate(name: string) {
-		if (state.tabs.some((t) => t.name === name)) {
-			state.activeTab = name;
+	activate(id: string) {
+		if (state.tabs.some((t) => t.id === id)) {
+			state.activeTab = id;
 		}
 	},
-	close(name: string) {
-		const idx = state.tabs.findIndex((t) => t.name === name);
+	close(id: string) {
+		const idx = state.tabs.findIndex((t) => t.id === id);
 		if (idx === -1) return;
-		const next = state.tabs.filter((t) => t.name !== name);
+		const next = state.tabs.filter((t) => t.id !== id);
 		state.tabs = next;
-		delete state.dirty[name];
-		if (state.activeTab === name) {
+		delete state.dirty[id];
+		if (state.activeTab === id) {
 			state.activeTab =
-				next[idx]?.name ?? next[idx - 1]?.name ?? next[next.length - 1]?.name ?? null;
+				next[idx]?.id ?? next[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
 		}
 	},
-	setDirty(name: string, dirty: boolean) {
+	setDirty(id: string, dirty: boolean) {
 		if (dirty) {
-			state.dirty[name] = true;
+			state.dirty[id] = true;
 		} else {
-			delete state.dirty[name];
+			delete state.dirty[id];
 		}
 	},
-	clearDirty(name: string) {
-		delete state.dirty[name];
+	clearDirty(id: string) {
+		delete state.dirty[id];
 	}
 };
 

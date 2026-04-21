@@ -3,6 +3,7 @@
 		workspaceDiagnostics,
 		workspaceTabs,
 		workspaceSelection,
+		tabId,
 		type WorkspaceDiagnostic
 	} from '$lib/plc/workspace-state.svelte';
 	import {
@@ -54,7 +55,7 @@
 	function gotoRow(row: Row) {
 		if (!row.programName) return;
 		workspaceSelection.select('program', row.programName);
-		workspaceTabs.activate(row.programName);
+		workspaceTabs.activate(tabId('program', row.programName));
 	}
 
 </script>
