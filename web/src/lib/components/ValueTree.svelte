@@ -1,13 +1,10 @@
 <script lang="ts">
-	import * as d3 from 'd3';
+	import TidyTreeView, { type TidyNode } from './TidyTreeView.svelte';
 
 	type Props = {
 		value: unknown;
 		label?: string;
-		editable?: boolean;
-		onChange?: (path: (string | number)[], newValue: unknown) => void;
 		secondary?: unknown;
-		secondaryLabel?: string;
 		onSelect?: (path: (string | number)[], leafType: LeafType) => void;
 		selectedPath?: (string | number)[] | null;
 	};
@@ -15,23 +12,18 @@
 	let {
 		value,
 		label = 'value',
-		editable = false,
-		onChange,
 		secondary,
-		secondaryLabel,
 		onSelect,
 		selectedPath = null
 	}: Props = $props();
 
 	type LeafType = 'number' | 'boolean' | 'string' | 'null' | 'complex';
 
-	type TreeDatum = {
-		name: string;
-		kind: 'root' | 'branch' | 'leaf';
-		path: (string | number)[];
+	type ValueNode = TidyNode & {
+		keyName: string;
 		raw: unknown;
 		leafType: LeafType;
-		children?: TreeDatum[];
+		children?: ValueNode[];
 	};
 
 	function leafTypeOf(v: unknown): LeafType {
@@ -52,31 +44,6 @@
 		return typeof v;
 	}
 
-	function build(
-		name: string,
-		v: unknown,
-		path: (string | number)[],
-		depth: number,
-		kind: 'root' | 'branch' | 'leaf' = 'leaf'
-	): TreeDatum {
-		if (v !== null && typeof v === 'object' && depth < 4) {
-			const entries = Array.isArray(v)
-				? v.map((item, i) => [i, item] as [string | number, unknown])
-				: Object.entries(v as Record<string, unknown>).filter(([k]) => k !== '_type');
-			return {
-				name,
-				kind: kind === 'root' ? 'root' : 'branch',
-				path,
-				raw: v,
-				leafType: 'complex',
-				children: entries.map(([k, val]) => build(String(k), val, [...path, k], depth + 1))
-			};
-		}
-		return { name, kind: 'leaf', path, raw: v, leafType: leafTypeOf(v) };
-	}
-
-	const tree = $derived(build(label, value, [], 0, 'root'));
-
 	function getAtPath(obj: unknown, path: (string | number)[]): unknown {
 		let cur: unknown = obj;
 		for (const k of path) {
@@ -87,46 +54,6 @@
 		return cur;
 	}
 
-	const layout = $derived.by(() => {
-		const root = d3.hierarchy<TreeDatum>(tree);
-		const dx = 24;
-		const dy = 140;
-		d3.tree<TreeDatum>().nodeSize([dx, dy])(root);
-
-		let minX = Infinity;
-		let maxX = -Infinity;
-		root.each((n) => {
-			if (n.x! < minX) minX = n.x!;
-			if (n.x! > maxX) maxX = n.x!;
-		});
-
-		const padT = 10;
-		const padB = 10;
-		const padL = 12;
-		const padR = 20;
-
-		const height = Math.max(40, maxX - minX + padT + padB);
-		const width = (root.height + 1) * dy + padL + padR;
-		const offsetX = -minX + padT;
-
-		const nodes = root.descendants().map((n) => ({
-			x: n.x! + offsetX,
-			y: n.y! + padL,
-			data: n.data
-		}));
-
-		const links = root.links().map((l) => {
-			const sx = l.source.x! + offsetX;
-			const sy = l.source.y! + padL;
-			const tx = l.target.x! + offsetX;
-			const ty = l.target.y! + padL;
-			const mx = (sy + ty) / 2;
-			return { d: `M${sy},${sx}C${mx},${sx} ${mx},${tx} ${ty},${tx}` };
-		});
-
-		return { nodes, links, width, height };
-	});
-
 	function leafDisplay(v: unknown): string {
 		if (v === null) return 'null';
 		if (v === undefined) return '—';
@@ -136,159 +63,88 @@
 		return String(v);
 	}
 
-	function commit(n: TreeDatum, raw: string) {
-		if (!onChange) return;
-		let parsed: unknown = raw;
-		if (n.leafType === 'number') {
-			const num = parseFloat(raw);
-			parsed = Number.isFinite(num) ? num : 0;
-		} else if (n.leafType === 'boolean') {
-			parsed = raw === 'true';
+	function build(
+		name: string,
+		v: unknown,
+		path: (string | number)[],
+		depth: number,
+		kind: 'root' | 'branch' | 'leaf' = 'leaf'
+	): ValueNode {
+		const id = path.length === 0 ? '$root' : path.join('/');
+		if (v !== null && typeof v === 'object' && depth < 4) {
+			const entries = Array.isArray(v)
+				? v.map((item, i) => [i, item] as [string | number, unknown])
+				: Object.entries(v as Record<string, unknown>).filter(([k]) => k !== '_type');
+			const resolvedKind = kind === 'root' ? 'root' : 'branch';
+			return {
+				id,
+				label: resolvedKind === 'root' ? name : `${name}: ${typeBadge(v)}`,
+				kind: resolvedKind,
+				path,
+				keyName: name,
+				raw: v,
+				leafType: 'complex',
+				children: entries.map(([k, val]) => build(String(k), val, [...path, k], depth + 1))
+			};
 		}
-		onChange(n.path, parsed);
+		return {
+			id,
+			label: `${name}: ${leafDisplay(v)}`,
+			kind: 'leaf',
+			path,
+			selectable: !!onSelect,
+			keyName: name,
+			raw: v,
+			leafType: leafTypeOf(v)
+		};
 	}
 
-	function pathsEqual(a: (string | number)[] | null, b: (string | number)[]): boolean {
-		if (!a) return false;
-		if (a.length !== b.length) return false;
-		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-		return true;
+	const tree = $derived(build(label, value, [], 0, 'root'));
+
+	function handleSelect(path: (string | number)[], node: TidyNode) {
+		const leafType = (node as ValueNode).leafType;
+		onSelect?.(path, leafType);
 	}
 </script>
 
-<div class="vt" style="width: {layout.width}px; height: {layout.height}px;">
-	<svg width={layout.width} height={layout.height} aria-hidden="true">
-		<g fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="1.25">
-			{#each layout.links as l (l.d)}
-				<path d={l.d} />
-			{/each}
-		</g>
-	</svg>
-
-	{#each layout.nodes as n (n.data.path.join('/') || 'root')}
-		{@const isSelected = pathsEqual(selectedPath, n.data.path)}
-		{@const isSelectable = n.data.kind === 'leaf' && onSelect && !editable}
-		<div
-			class="node"
-			class:is-root={n.data.kind === 'root'}
-			class:is-branch={n.data.kind === 'branch'}
-			class:is-leaf={n.data.kind === 'leaf'}
-			class:is-selectable={isSelectable}
-			class:is-selected={isSelected}
-			style="left: {n.y}px; top: {n.x}px;"
-		>
-			<span class="dot"></span>
-			{#if n.data.kind === 'root'}
-				<span class="label name">{n.data.name}</span>
-			{:else if n.data.kind === 'branch'}
-				<span class="label"
-					><span class="key">{n.data.name}</span>: <em>{typeBadge(n.data.raw)}</em></span
-				>
-			{:else if editable && n.data.leafType === 'boolean'}
-				<span class="label"><span class="key">{n.data.name}</span>:</span>
-				<select
-					class="leaf-input"
-					value={String(n.data.raw)}
-					onchange={(e) => commit(n.data, (e.currentTarget as HTMLSelectElement).value)}
-				>
-					<option value="false">false</option>
-					<option value="true">true</option>
-				</select>
-			{:else if editable && (n.data.leafType === 'number' || n.data.leafType === 'string')}
-				<span class="label"><span class="key">{n.data.name}</span>:</span>
-				<input
-					class="leaf-input"
-					type={n.data.leafType === 'number' ? 'number' : 'text'}
-					value={n.data.raw as string | number}
-					step="any"
-					oninput={(e) => commit(n.data, (e.currentTarget as HTMLInputElement).value)}
-				/>
-			{:else if isSelectable}
-				<button
-					type="button"
-					class="leaf-btn"
-					onclick={() => onSelect?.(n.data.path, n.data.leafType)}
-					title={secondary !== undefined ? `${label}: ${leafDisplay(n.data.raw)}\n${secondaryLabel ?? 'current'}: ${leafDisplay(getAtPath(secondary, n.data.path))}` : undefined}
-				>
-					<span class="key">{n.data.name}</span>:
-					<span class="leaf-val">{leafDisplay(n.data.raw)}</span>
-					{#if secondary !== undefined}
-						<span class="leaf-sep">/</span>
-						<span class="leaf-val secondary">{leafDisplay(getAtPath(secondary, n.data.path))}</span>
-					{/if}
-				</button>
-			{:else}
-				<span class="label"
-					><span class="key">{n.data.name}</span>:
-					<span class="leaf-val">{leafDisplay(n.data.raw)}</span>
-					{#if secondary !== undefined}
-						<span class="leaf-sep">/</span>
-						<span class="leaf-val secondary">{leafDisplay(getAtPath(secondary, n.data.path))}</span>
-					{/if}</span
-				>
-			{/if}
-		</div>
-	{/each}
-</div>
+<TidyTreeView
+	root={tree}
+	{selectedPath}
+	onSelect={onSelect ? handleSelect : undefined}
+>
+	{#snippet content(args: { node: TidyNode; selected: boolean })}
+		{@const node = args.node}
+		{@const vn = node as ValueNode}
+		{#if vn.kind === 'root'}
+			<span class="label">{vn.keyName}</span>
+		{:else if vn.kind === 'branch'}
+			<span class="label">
+				<span class="key">{vn.keyName}</span>:
+				<em>{typeBadge(vn.raw)}</em>
+			</span>
+		{:else}
+			<span class="leaf-label">
+				<span class="key">{vn.keyName}</span>:
+				<span class="leaf-val">{leafDisplay(vn.raw)}</span>
+				{#if secondary !== undefined}
+					<span class="leaf-sep">/</span>
+					<span class="leaf-val secondary">{leafDisplay(getAtPath(secondary, vn.path))}</span>
+				{/if}
+			</span>
+		{/if}
+	{/snippet}
+</TidyTreeView>
 
 <style lang="scss">
-	.vt {
-		position: relative;
-		color: var(--theme-text);
-		font: 11px var(--font-mono, monospace);
-	}
-
-	svg {
-		position: absolute;
-		inset: 0;
-		pointer-events: none;
-	}
-
-	.node {
-		position: absolute;
-		display: flex;
-		align-items: center;
-		gap: 0.3125rem;
-		transform: translateY(-50%);
-		white-space: nowrap;
-	}
-
-	.dot {
-		display: inline-block;
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--theme-text-muted);
-		flex-shrink: 0;
-	}
-
-	.is-root .dot {
-		background: var(--theme-primary);
-		width: 7px;
-		height: 7px;
-	}
-
-	.is-branch .dot {
-		background: var(--theme-text);
-		width: 6px;
-		height: 6px;
-	}
-
-	.label {
-		color: var(--theme-text);
-	}
-
-	.is-root .name {
-		font-weight: 600;
-	}
-
-	.key {
-		color: var(--theme-text);
-	}
-
 	.label em {
 		font-style: normal;
 		color: var(--theme-text-muted);
+	}
+
+	.leaf-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
 	}
 
 	.leaf-val {
@@ -304,42 +160,7 @@
 		opacity: 0.5;
 	}
 
-	.leaf-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.25rem;
-		background: transparent;
-		border: 1px solid transparent;
-		border-radius: 0.1875rem;
-		padding: 0.0625rem 0.3125rem;
+	.key {
 		color: var(--theme-text);
-		font: inherit;
-		cursor: pointer;
-		text-align: left;
-
-		&:hover {
-			border-color: var(--theme-border);
-			background: color-mix(in srgb, var(--theme-primary) 8%, transparent);
-		}
-	}
-
-	.is-selected .leaf-btn {
-		border-color: var(--theme-primary);
-		background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
-	}
-
-	.leaf-input {
-		background: var(--theme-background);
-		color: var(--theme-text);
-		border: 1px solid var(--theme-border);
-		border-radius: 0.1875rem;
-		padding: 0.0625rem 0.3125rem;
-		font: 11px var(--font-mono, monospace);
-		width: 6rem;
-
-		&:focus {
-			outline: none;
-			border-color: var(--theme-primary);
-		}
 	}
 </style>

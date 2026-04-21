@@ -1,11 +1,11 @@
 <script lang="ts">
-	import * as d3 from 'd3';
 	import { apiPut } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
 	import { slide } from 'svelte/transition';
 	import type { PlcConfig, PlcTemplate, PlcTemplateField } from '$lib/types/plc';
 	import { PencilSquare } from '@joyautomation/salt/icons';
+	import TidyTreeView, { type TidyNode } from '$lib/components/TidyTreeView.svelte';
 
 	type Props = {
 		template: PlcTemplate;
@@ -158,155 +158,56 @@
 
 	// ---- Tidy tree rendering -------------------------------------------------
 
-	type TreeDatum = {
-		name: string;
-		type?: string;
-		kind: 'root' | 'field' | 'nested-field';
-		fieldIdx?: number;
-		children?: TreeDatum[];
+	type SchemaNode = TidyNode & {
+		typeLabel?: string;
+		children?: SchemaNode[];
 	};
 
-	function buildTree(): TreeDatum {
-		const visit = (name: string, type: string | undefined, depth: number): TreeDatum[] => {
+	const tree = $derived.by<SchemaNode>(() => {
+		const visit = (
+			name: string,
+			type: string | undefined,
+			path: (string | number)[],
+			depth: number
+		): SchemaNode[] => {
 			const base = (type ?? '').replace(/\[\]$/, '').replace(/\{\}$/, '');
 			const nested = templateByName[base];
 			if (!nested || depth > 3) return [];
 			return nested.fields.map((nf) => ({
-				name: nf.name,
-				type: nf.type,
-				kind: 'nested-field' as const,
-				children: visit(nf.name, nf.type, depth + 1)
+				id: [...path, nf.name].join('/'),
+				label: `${nf.name}: ${nf.type}`,
+				kind: 'leaf',
+				path: [...path, nf.name],
+				typeLabel: nf.type,
+				children: visit(nf.name, nf.type, [...path, nf.name], depth + 1)
 			}));
 		};
 		return {
-			name: template.name,
+			id: '$root',
+			label: template.name,
 			kind: 'root',
-			children: fields.map((f, i) => ({
-				name: f.name,
-				type: f.type,
-				kind: 'field' as const,
-				fieldIdx: i,
-				children: visit(f.name, f.type, 1)
-			}))
+			path: [],
+			children: fields.map((f, i) => {
+				const nested = visit(f.name, f.type, [i], 1);
+				return {
+					id: `field:${i}`,
+					label: `${f.name}: ${f.type}`,
+					kind: nested.length > 0 ? 'branch' : 'leaf',
+					path: [i],
+					selectable: true,
+					typeLabel: f.type,
+					children: nested
+				};
+			})
 		};
-	}
-
-	let svgEl: SVGSVGElement | null = $state(null);
-
-	$effect(() => {
-		// Re-render on field/template change.
-		void fields;
-		void selectedIdx;
-		void template.name;
-		void expanded;
-		if (!svgEl) return;
-
-		const data = buildTree();
-		const root = d3.hierarchy<TreeDatum>(data);
-
-		const width = 560;
-		const marginTop = 10;
-		const marginRight = 120;
-		const marginBottom = 10;
-		const marginLeft = 40;
-
-		const dx = 22;
-		const dy = (width - marginRight - marginLeft) / (1 + root.height);
-
-		const tree = d3.tree<TreeDatum>().nodeSize([dx, dy]);
-		const diagonal = d3
-			.linkHorizontal<d3.HierarchyLink<TreeDatum>, d3.HierarchyNode<TreeDatum>>()
-			.x((d) => d.y!)
-			.y((d) => d.x!);
-
-		tree(root);
-
-		let left = root as d3.HierarchyNode<TreeDatum>;
-		let right = root as d3.HierarchyNode<TreeDatum>;
-		root.each((node) => {
-			if (node.x! < left.x!) left = node;
-			if (node.x! > right.x!) right = node;
-		});
-
-		const height = Math.max(80, right.x! - left.x! + marginTop + marginBottom);
-
-		const svg = d3.select(svgEl);
-		svg.selectAll('*').remove();
-		svg
-			.attr('width', width)
-			.attr('height', height)
-			.attr('viewBox', [-marginLeft, left.x! - marginTop, width, height].join(' '))
-			.attr('style', 'max-width: 100%; height: auto; font: 11px var(--font-mono, monospace);');
-
-		const gLink = svg
-			.append('g')
-			.attr('fill', 'none')
-			.attr('stroke', 'currentColor')
-			.attr('stroke-opacity', 0.25)
-			.attr('stroke-width', 1.25);
-
-		gLink
-			.selectAll('path')
-			.data(root.links())
-			.join('path')
-			.attr('d', diagonal as unknown as (d: d3.HierarchyLink<TreeDatum>) => string);
-
-		const gNode = svg
-			.append('g')
-			.attr('cursor', 'pointer')
-			.attr('pointer-events', 'all');
-
-		const nodes = gNode
-			.selectAll('g')
-			.data(root.descendants())
-			.join('g')
-			.attr('transform', (d) => `translate(${d.y},${d.x})`);
-
-		nodes
-			.append('circle')
-			.attr('r', (d) => (d.data.kind === 'root' ? 4 : 3))
-			.attr('fill', (d) => {
-				if (d.data.kind === 'root') return 'var(--theme-primary)';
-				if (d.data.kind === 'field' && d.data.fieldIdx === selectedIdx)
-					return 'var(--theme-primary)';
-				if (d.data.kind === 'nested-field') return 'var(--theme-text-muted)';
-				return 'var(--theme-text)';
-			})
-			.attr('stroke', (d) =>
-				d.data.kind === 'field' && d.data.fieldIdx === selectedIdx
-					? 'var(--theme-primary)'
-					: 'none'
-			)
-			.attr('stroke-width', 2);
-
-		nodes
-			.append('text')
-			.attr('dy', '0.31em')
-			.attr('x', 8)
-			.attr('text-anchor', 'start')
-			.attr('fill', 'var(--theme-text)')
-			.attr('font-weight', (d) =>
-				d.data.kind === 'root' || (d.data.kind === 'field' && d.data.fieldIdx === selectedIdx)
-					? 600
-					: 400
-			)
-			.text((d) => {
-				if (d.data.kind === 'root') return d.data.name;
-				return `${d.data.name}: ${d.data.type ?? ''}`;
-			})
-			.attr('paint-order', 'stroke')
-			.attr('stroke', 'var(--theme-background)')
-			.attr('stroke-width', 3)
-			.attr('stroke-linejoin', 'round');
-
-		nodes.on('click', (_event, d) => {
-			if (d.data.kind === 'field' && d.data.fieldIdx !== undefined) {
-				selectedIdx = d.data.fieldIdx;
-			} else if (d.data.kind === 'root') {
-				selectedIdx = null;
-			}
-		});
 	});
+
+	const selectedPath = $derived(selectedIdx !== null ? [selectedIdx] : null);
+
+	function handleSelect(path: (string | number)[]) {
+		const k = path[0];
+		if (typeof k === 'number') selectedIdx = k;
+	}
 </script>
 
 <div class="tpl-def" class:collapsed={!expanded}>
@@ -356,7 +257,23 @@
 			</label>
 
 			<div class="tree-wrap">
-				<svg bind:this={svgEl}></svg>
+				<TidyTreeView
+					root={tree}
+					{selectedPath}
+					onSelect={handleSelect}
+				>
+					{#snippet content(args: { node: TidyNode; selected: boolean })}
+						{@const sn = args.node as SchemaNode}
+						{#if sn.kind === 'root'}
+							<span class="label">{sn.label}</span>
+						{:else}
+							<span class="schema-leaf">
+								<span class="key">{sn.label.split(':')[0]}</span>:
+								<em>{sn.typeLabel}</em>
+							</span>
+						{/if}
+					{/snippet}
+				</TidyTreeView>
 			</div>
 
 	<div class="tree-actions">
@@ -560,6 +477,21 @@
 		overflow-x: auto;
 		padding: 0.25rem 0;
 		color: var(--theme-text);
+	}
+
+	.schema-leaf {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+
+		em {
+			font-style: normal;
+			color: var(--theme-text-muted);
+		}
+
+		.key {
+			color: var(--theme-text);
+		}
 	}
 
 	.tree-actions {

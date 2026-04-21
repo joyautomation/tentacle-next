@@ -404,7 +404,6 @@
 							value={templateDefaults}
 							secondary={currentValues}
 							label={selectedTemplate.name}
-							secondaryLabel="current"
 							selectedPath={selectedLeafPath}
 							onSelect={(path, leafType) => {
 								selectedLeafPath = path;
