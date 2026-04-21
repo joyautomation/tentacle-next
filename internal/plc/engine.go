@@ -8,16 +8,18 @@ import (
 	"sync"
 	"time"
 
+	itypes "github.com/joyautomation/tentacle/internal/types"
 	"go.starlark.net/starlark"
 )
 
 // Engine manages Starlark program compilation and execution.
 type Engine struct {
-	mu       sync.RWMutex
-	programs map[string]*compiledProgram
-	builtins starlark.StringDict
-	vars     *VariableStore
-	log      *slog.Logger
+	mu        sync.RWMutex
+	programs  map[string]*compiledProgram
+	builtins  starlark.StringDict
+	vars      *VariableStore
+	templates map[string]*itypes.PlcTemplate
+	log       *slog.Logger
 }
 
 // compiledProgram holds a parsed Starlark program and its entry function.
@@ -69,9 +71,10 @@ func NewTaskState() *TaskState {
 // NewEngine creates a new Starlark execution engine.
 func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 	e := &Engine{
-		programs: make(map[string]*compiledProgram),
-		vars:     vars,
-		log:      log,
+		programs:  make(map[string]*compiledProgram),
+		vars:      vars,
+		templates: make(map[string]*itypes.PlcTemplate),
+		log:       log,
 	}
 	e.builtins = e.makeBuiltins()
 	return e
