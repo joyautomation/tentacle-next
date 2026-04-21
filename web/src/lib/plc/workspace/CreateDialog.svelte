@@ -3,17 +3,18 @@
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
 	import { workspaceSelection, workspaceTabs } from '../workspace-state.svelte';
-	import type { PlcTaskConfig, ProgramListItem } from '$lib/types/plc';
+	import type { PlcTaskConfig, PlcTemplate, ProgramListItem } from '$lib/types/plc';
 
 	type Kind = 'variable' | 'task' | 'program';
 
 	type Props = {
 		kind: Kind;
 		programs: ProgramListItem[];
+		templates?: PlcTemplate[];
 		onClose: () => void;
 	};
 
-	let { kind, programs, onClose }: Props = $props();
+	let { kind, programs, templates = [], onClose }: Props = $props();
 
 	let saving = $state(false);
 
@@ -26,9 +27,29 @@
 	let taskEnabled = $state(true);
 
 	let varName = $state('');
-	let varDatatype = $state<'float' | 'int' | 'bool' | 'string'>('float');
-	let varDirection = $state<'local' | 'source' | 'sink'>('local');
+	let varDatatype = $state<string>('number');
+	let varDirection = $state<'internal' | 'output' | 'input'>('internal');
 	let varDefault = $state('');
+
+	const templateByName = $derived.by(() => {
+		const m: Record<string, PlcTemplate> = {};
+		for (const t of templates) m[t.name] = t;
+		return m;
+	});
+	const selectedTemplate = $derived(templateByName[varDatatype] ?? null);
+
+	function isPrimitiveDatatype(dt: string): boolean {
+		return dt === 'number' || dt === 'boolean' || dt === 'string';
+	}
+
+	function fieldZero(type: string): unknown {
+		if (type.endsWith('[]')) return [];
+		if (type.endsWith('{}')) return {};
+		if (type === 'bool' || type === 'boolean') return false;
+		if (type === 'string' || type === 'bytes') return '';
+		if (type === 'number') return 0;
+		return null;
+	}
 
 	const title = $derived(
 		kind === 'program' ? 'New Program' : kind === 'task' ? 'New Task' : 'New Variable'
@@ -43,15 +64,21 @@
 
 	function parseDefault(dt: string, raw: string): unknown {
 		const trimmed = raw.trim();
-		if (trimmed === '') {
-			if (dt === 'bool') return false;
-			if (dt === 'string') return '';
-			return 0;
-		}
-		if (dt === 'bool') return trimmed === 'true' || trimmed === '1';
+		if (dt === 'boolean') return trimmed === 'true' || trimmed === '1';
 		if (dt === 'string') return trimmed;
-		const n = Number(trimmed);
-		return Number.isFinite(n) ? n : 0;
+		if (dt === 'number') {
+			const n = Number(trimmed);
+			return Number.isFinite(n) ? n : 0;
+		}
+		return null;
+	}
+
+	function templateDefault(tpl: PlcTemplate): Record<string, unknown> {
+		const out: Record<string, unknown> = {};
+		for (const f of tpl.fields) {
+			out[f.name] = f.default !== undefined ? f.default : fieldZero(f.type);
+		}
+		return out;
 	}
 
 	async function submit() {
@@ -100,11 +127,14 @@
 				onClose();
 			} else {
 				const name = varName.trim();
+				const def = selectedTemplate
+					? templateDefault(selectedTemplate)
+					: parseDefault(varDatatype, varDefault);
 				const body = {
 					id: name,
 					datatype: varDatatype,
 					direction: varDirection,
-					default: parseDefault(varDatatype, varDefault)
+					default: def
 				};
 				const res = await apiPut(`/plcs/plc/variables/${encodeURIComponent(name)}`, body);
 				if (res.error) {
@@ -113,6 +143,7 @@
 				}
 				saltState.addNotification({ message: `Variable "${name}" created`, type: 'success' });
 				await invalidateAll();
+				workspaceTabs.open({ name, kind: 'variable' });
 				workspaceSelection.select('variable', name);
 				onClose();
 			}
@@ -207,28 +238,42 @@
 				<label class="field">
 					<span>Datatype</span>
 					<select bind:value={varDatatype}>
-						<option value="float">float</option>
-						<option value="int">int</option>
-						<option value="bool">bool</option>
-						<option value="string">string</option>
+						<optgroup label="Primitives">
+							<option value="number">number</option>
+							<option value="boolean">boolean</option>
+							<option value="string">string</option>
+						</optgroup>
+						{#if templates.length > 0}
+							<optgroup label="Templates">
+								{#each templates as tmpl (tmpl.name)}
+									<option value={tmpl.name}>{tmpl.name}</option>
+								{/each}
+							</optgroup>
+						{/if}
 					</select>
 				</label>
 				<label class="field">
 					<span>Direction</span>
 					<select bind:value={varDirection}>
-						<option value="local">local</option>
-						<option value="source">source</option>
-						<option value="sink">sink</option>
+						<option value="internal">internal</option>
+						<option value="output">output</option>
+						<option value="input">input</option>
 					</select>
 				</label>
-				<label class="field">
-					<span>Default</span>
-					<input
-						type="text"
-						bind:value={varDefault}
-						placeholder={varDatatype === 'bool' ? 'false' : '0'}
-					/>
-				</label>
+				{#if isPrimitiveDatatype(varDatatype)}
+					<label class="field">
+						<span>Default</span>
+						<input
+							type="text"
+							bind:value={varDefault}
+							placeholder={varDatatype === 'boolean' ? 'false' : '0'}
+						/>
+					</label>
+				{:else if selectedTemplate}
+					<p class="template-hint">
+						Uses template defaults. Edit field values after creating.
+					</p>
+				{/if}
 			{/if}
 
 			<div class="actions">
@@ -338,6 +383,13 @@
 				border-color: var(--theme-primary);
 			}
 		}
+	}
+
+	.template-hint {
+		margin: 0;
+		font-size: 0.75rem;
+		color: var(--theme-text-muted);
+		font-style: italic;
 	}
 
 	.actions {

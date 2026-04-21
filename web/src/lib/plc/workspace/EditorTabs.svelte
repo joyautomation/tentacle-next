@@ -1,31 +1,18 @@
 <script lang="ts">
 	import ProgramEditor from './ProgramEditor.svelte';
-	import PlcVariableConfig from '$lib/components/PlcVariableConfig.svelte';
+	import VariableEditor from './VariableEditor.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
 	import type { PlcConfig, PlcTemplate } from '$lib/types/plc';
-	import type { GatewayConfig, BrowseCache, GatewayBrowseState } from '$lib/types/gateway';
 
 	type Props = {
 		variableNames: string[];
 		plcConfig: PlcConfig | null;
-		gatewayConfig: GatewayConfig | null;
-		browseCaches: BrowseCache[];
-		browseStates: GatewayBrowseState[];
 		templates: PlcTemplate[];
-		error: string | null;
 	};
 
-	let {
-		variableNames,
-		plcConfig,
-		gatewayConfig,
-		browseCaches,
-		browseStates,
-		templates,
-		error
-	}: Props = $props();
+	let { variableNames, plcConfig, templates }: Props = $props();
 
 	type EditorTab = TabItem & { kind: EditorTabKind; language?: string };
 
@@ -43,6 +30,7 @@
 		const tab = workspaceTabs.list.find((t) => t.name === name);
 		if (!tab) return;
 		if (tab.kind === 'program') workspaceSelection.select('program', name);
+		else if (tab.kind === 'variable') workspaceSelection.select('variable', name);
 	}
 
 	function close(e: MouseEvent | KeyboardEvent, name: string) {
@@ -51,7 +39,7 @@
 	}
 
 	function badgeLabel(tab: EditorTab): string {
-		if (tab.kind === 'variables') return 'VAR';
+		if (tab.kind === 'variable') return 'VAR';
 		const lang = tab.language ?? '';
 		if (lang === 'starlark') return 'PY';
 		if (lang === 'st' || lang === 'structured-text') return 'ST';
@@ -69,7 +57,7 @@
 		ariaLabel="Open editors"
 	>
 		{#snippet tab({ tab }: { tab: EditorTab; active: boolean })}
-			<span class="badge" class:var-badge={tab.kind === 'variables'}>{badgeLabel(tab)}</span>
+			<span class="badge" class:var-badge={tab.kind === 'variable'}>{badgeLabel(tab)}</span>
 			<span class="name">{tab.label}</span>
 			{#if workspaceTabs.dirty[tab.id]}
 				<span class="dirty" title="Unsaved changes">●</span>
@@ -92,17 +80,8 @@
 	<div class="tab-content">
 		{#each workspaceTabs.list as tab (tab.name)}
 			<div class="editor-host" class:hidden={workspaceTabs.active !== tab.name}>
-				{#if tab.kind === 'variables'}
-					<div class="variables-host">
-						<PlcVariableConfig
-							{plcConfig}
-							{gatewayConfig}
-							{browseCaches}
-							{browseStates}
-							{templates}
-							{error}
-						/>
-					</div>
+				{#if tab.kind === 'variable'}
+					<VariableEditor name={tab.name} {plcConfig} {templates} />
 				{:else}
 					<ProgramEditor
 						name={tab.name}
@@ -185,11 +164,5 @@
 		&.hidden {
 			display: none;
 		}
-	}
-
-	.variables-host {
-		flex: 1;
-		min-height: 0;
-		overflow: auto;
 	}
 </style>

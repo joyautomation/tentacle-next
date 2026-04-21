@@ -30,11 +30,10 @@
 		workspaceTabs.open({ name: selection.id, kind: 'program', language: lang });
 	});
 
-	const VARIABLES_TAB_NAME = 'Variables';
-
 	$effect(() => {
 		if (selection?.kind !== 'variable') return;
-		workspaceTabs.open({ name: VARIABLES_TAB_NAME, kind: 'variables' });
+		if (!(selection.id in data.variables)) return;
+		workspaceTabs.open({ name: selection.id, kind: 'variable' });
 	});
 
 	let createKind = $state<'variable' | 'task' | 'program' | null>(null);
@@ -131,11 +130,7 @@
 										<EditorTabs
 											{variableNames}
 											plcConfig={data.plcConfig}
-											gatewayConfig={data.gatewayConfig}
-											browseCaches={data.browseCaches}
-											browseStates={data.browseStates}
 											templates={data.templates}
-											error={data.error}
 										/>
 									{:else if selection?.kind === 'task'}
 										<div class="placeholder-card">
@@ -232,6 +227,7 @@
 	<CreateDialog
 		kind={createKind}
 		programs={data.programs}
+		templates={data.templates}
 		onClose={() => (createKind = null)}
 	/>
 {/if}
