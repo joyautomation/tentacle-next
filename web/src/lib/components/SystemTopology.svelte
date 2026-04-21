@@ -117,6 +117,21 @@
       depth: 0
     });
 
+    // Orchestrator — always present in monolith mode (it's the reconcile loop itself).
+    // Not published on the /services heartbeat bus because it owns that bus.
+    if (monolith) {
+      nodes.push({
+        id: 'orchestrator',
+        name: 'Orchestrator',
+        type: 'orchestrator',
+        subtitle: apiConnected ? 'Reconcile Loop' : 'Disconnected',
+        connected: apiConnected,
+        enabled: true,
+        depth: 1,
+      });
+      links.push({ source: 'nats', target: 'orchestrator' });
+    }
+
     // Identify key services for topology wiring
     const apiService = services.find(s => s.serviceType === 'api');
     const caddyService = services.find(s => s.serviceType === 'caddy');
@@ -602,6 +617,7 @@
           case 'history': return 'HIST';
           case 'database': return 'DB';
           case 'device': return 'DEV';
+          case 'orchestrator': return 'ORCH';
           default: return d.name.slice(0, 4).toUpperCase();
         }
       });

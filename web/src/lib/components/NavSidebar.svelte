@@ -97,7 +97,7 @@
     'ethernetip-server': 'server',
     'modbus-server': 'server',
     profinet: 'server',
-    mqtt: 'server',
+    mqtt: 'client',
     history: 'data',
     network: 'data',
     nftables: 'data',
