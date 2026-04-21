@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, apiPut } from '$lib/api/client';
+	import { api, apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { state as saltState } from '@joyautomation/salt';
@@ -7,6 +7,7 @@
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 	import {
 		workspaceDiagnostics,
+		workspaceTabs,
 		workspaceView,
 		type DiagnosticSeverity
 	} from '$lib/plc/workspace-state.svelte';
@@ -38,6 +39,7 @@
 
 	let loading = $state(false);
 	let saving = $state(false);
+	let deleting = $state(false);
 	let error = $state<string | null>(null);
 	let serverSource = $state('');
 	let serverStSource = $state('');
@@ -132,6 +134,23 @@
 		draftSource = serverSource;
 		draftStSource = serverStSource;
 	}
+
+	async function del() {
+		if (!confirm(`Delete function "${name}"? This cannot be undone.`)) return;
+		deleting = true;
+		try {
+			const res = await apiDelete(`/plcs/plc/programs/${encodeURIComponent(name)}`);
+			if (res.error) {
+				saltState.addNotification({ message: res.error.error, type: 'error' });
+				return;
+			}
+			saltState.addNotification({ message: `Function "${name}" deleted`, type: 'success' });
+			workspaceTabs.close(name);
+			await invalidateAll();
+		} finally {
+			deleting = false;
+		}
+	}
 </script>
 
 <div class="program-editor">
@@ -160,6 +179,15 @@
 			{/if}
 			<button type="button" class="btn primary" onclick={save} disabled={!dirty || saving}>
 				{saving ? 'Saving…' : 'Save'}
+			</button>
+			<button
+				type="button"
+				class="btn danger"
+				onclick={del}
+				disabled={deleting || saving}
+				title="Delete function"
+			>
+				{deleting ? 'Deleting…' : 'Delete'}
 			</button>
 		</div>
 	</div>
@@ -278,6 +306,16 @@
 
 		&.subtle {
 			color: var(--theme-text-muted);
+		}
+
+		&.danger {
+			color: var(--theme-error, #e5484d);
+			border-color: color-mix(in srgb, var(--theme-error, #e5484d) 40%, transparent);
+
+			&:hover:not(:disabled) {
+				background: color-mix(in srgb, var(--theme-error, #e5484d) 12%, transparent);
+				border-color: var(--theme-error, #e5484d);
+			}
 		}
 
 		&.toggle {
