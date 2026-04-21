@@ -320,7 +320,7 @@ func (e *Engine) SetTemplates(templates map[string]*itypes.PlcTemplate) {
 	if vars == nil {
 		return
 	}
-	for _, rv := range vars.All() {
+	for id, rv := range vars.All() {
 		sv, ok := rv.Value.(*StructValue)
 		if !ok {
 			continue
@@ -329,34 +329,41 @@ func (e *Engine) SetTemplates(templates map[string]*itypes.PlcTemplate) {
 		if !ok {
 			continue
 		}
-		reconcileStructValue(sv, newTmpl)
+		if reconcileStructValue(sv, newTmpl) {
+			vars.MarkChanged(id)
+		}
 	}
 }
 
 // reconcileStructValue updates a StructValue in place to match a new
 // template schema: new fields get their default values, removed fields
 // are dropped. The template pointer is swapped so method lookups also
-// reflect the new schema.
-func reconcileStructValue(s *StructValue, tmpl *itypes.PlcTemplate) {
+// reflect the new schema. Returns true if any field was added or
+// removed, so the caller can flag the variable for re-publication.
+func reconcileStructValue(s *StructValue, tmpl *itypes.PlcTemplate) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.frozen {
-		return
+		return false
 	}
 	s.template = tmpl
+	changed := false
 	valid := make(map[string]bool, len(tmpl.Fields))
 	for i := range tmpl.Fields {
 		f := &tmpl.Fields[i]
 		valid[f.Name] = true
 		if _, exists := s.fields[f.Name]; !exists {
 			s.fields[f.Name] = defaultStarlarkValue(f)
+			changed = true
 		}
 	}
 	for name := range s.fields {
 		if !valid[name] {
 			delete(s.fields, name)
+			changed = true
 		}
 	}
+	return changed
 }
 
 func (e *Engine) getTemplate(name string) (*itypes.PlcTemplate, bool) {

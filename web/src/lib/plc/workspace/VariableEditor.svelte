@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
@@ -10,7 +10,7 @@
 		PlcVariableConfig,
 		PlcVariableSource
 	} from '$lib/types/plc';
-	import { workspaceTabs } from '../workspace-state.svelte';
+	import { workspaceTabs, workspaceVariableDrafts } from '../workspace-state.svelte';
 	import { startLiveValues, liveValuesVersion, getLiveValue } from '../live-values.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
@@ -159,6 +159,7 @@
 	}
 
 	onMount(() => startLiveValues());
+	onDestroy(() => workspaceVariableDrafts.clear(name));
 
 	const currentValues = $derived.by(() => {
 		void liveValuesVersion();
@@ -277,6 +278,18 @@
 
 	$effect(() => {
 		workspaceTabs.setDirty(name, isDirty);
+	});
+
+	// Publish the in-flight edit so the Inspector panel reflects changes
+	// before they're persisted. Cleared on save/revert/delete.
+	$effect(() => {
+		if (!current) return;
+		workspaceVariableDrafts.set(name, {
+			datatype,
+			direction,
+			description: description.trim() || undefined,
+			default: buildDefault()
+		});
 	});
 
 	let saving = $state(false);

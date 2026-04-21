@@ -155,6 +155,17 @@ func (vs *VariableStore) All() map[string]*RuntimeVariable {
 	return snapshot
 }
 
+// MarkChanged flags a variable's current value for re-publication on the
+// next cycle without changing it. Used when the value is mutated in
+// place (e.g. a StructValue gaining a new field from a template update).
+func (vs *VariableStore) MarkChanged(id string) {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	if v, ok := vs.vars[id]; ok {
+		v.changed = true
+	}
+}
+
 // Count returns the number of variables.
 func (vs *VariableStore) Count() int {
 	vs.mu.RLock()

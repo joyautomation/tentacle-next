@@ -42,6 +42,13 @@ function loadViewPrefs(): { showInlineValues: boolean } {
 	}
 }
 
+export type VariableDraft = {
+	datatype: string;
+	direction: string;
+	description?: string;
+	default?: unknown;
+};
+
 const state = $state<{
 	selection: Selection;
 	tabs: EditorTab[];
@@ -49,13 +56,15 @@ const state = $state<{
 	dirty: Record<string, boolean>;
 	diagnostics: Record<string, WorkspaceDiagnostic[]>;
 	view: { showInlineValues: boolean };
+	variableDrafts: Record<string, VariableDraft>;
 }>({
 	selection: null,
 	tabs: [],
 	activeTab: null,
 	dirty: {},
 	diagnostics: {},
-	view: loadViewPrefs()
+	view: loadViewPrefs(),
+	variableDrafts: {}
 });
 
 function persistView() {
@@ -137,6 +146,21 @@ export const workspaceView = {
 	toggleInlineValues() {
 		state.view.showInlineValues = !state.view.showInlineValues;
 		persistView();
+	}
+};
+
+export const workspaceVariableDrafts = {
+	get map() {
+		return state.variableDrafts;
+	},
+	get(name: string): VariableDraft | null {
+		return state.variableDrafts[name] ?? null;
+	},
+	set(name: string, draft: VariableDraft) {
+		state.variableDrafts[name] = draft;
+	},
+	clear(name: string) {
+		delete state.variableDrafts[name];
 	}
 };
 

@@ -11,7 +11,7 @@
 		taskStatsVersion,
 		getTaskStats
 	} from '$lib/plc/task-stats.svelte';
-	import { workspaceSelection } from '../workspace-state.svelte';
+	import { workspaceSelection, workspaceVariableDrafts } from '../workspace-state.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
 
 	function isStruct(v: unknown): boolean {
@@ -46,9 +46,20 @@
 	const selectedVariable = $derived.by(() => {
 		if (selection?.kind !== 'variable') return null;
 		void liveValuesVersion();
+		const persisted = variables[selection.id];
+		const draft = workspaceVariableDrafts.get(selection.id);
+		const config = draft
+			? {
+					...(persisted ?? {}),
+					datatype: draft.datatype,
+					direction: draft.direction,
+					description: draft.description ?? persisted?.description,
+					default: draft.default
+				} as PlcVariableConfig
+			: persisted;
 		return {
 			name: selection.id,
-			config: variables[selection.id],
+			config,
 			live: getLiveValue(selection.id) ?? null
 		};
 	});
