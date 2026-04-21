@@ -10,6 +10,7 @@
 		PlcVariableSource
 	} from '$lib/types/plc';
 	import { workspaceTabs } from '../workspace-state.svelte';
+	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 
 	type Props = {
 		name: string;
@@ -203,9 +204,6 @@
 		return parts.join(' · ');
 	}
 
-	function openTemplate(tplName: string) {
-		workspaceTabs.open({ name: tplName, kind: 'template' });
-	}
 </script>
 
 <div class="variable-editor">
@@ -282,20 +280,7 @@
 
 			{#if selectedTemplate}
 				<div class="template-block" transition:slide={{ duration: 150 }}>
-					<div class="template-head">
-						<button
-							type="button"
-							class="template-link"
-							onclick={() => openTemplate(selectedTemplate.name)}
-							title="Open template definition"
-						>
-							<span class="template-badge">Template</span>
-							<span class="template-name">{selectedTemplate.name}</span>
-						</button>
-						{#if selectedTemplate.description}
-							<span class="template-desc">{selectedTemplate.description}</span>
-						{/if}
-					</div>
+					<div class="section-label">Instance defaults</div>
 					<div class="field-grid">
 						{#each selectedTemplate.fields as field (field.name)}
 							<label class="field">
@@ -316,6 +301,8 @@
 						{/each}
 					</div>
 				</div>
+
+				<TemplateDefinitionEditor template={selectedTemplate} {templates} {plcConfig} />
 			{/if}
 
 			{#if current.source}
@@ -481,7 +468,6 @@
 		gap: 0.625rem;
 	}
 
-	.template-head,
 	.source-head {
 		display: flex;
 		align-items: baseline;
@@ -489,29 +475,14 @@
 		flex-wrap: wrap;
 	}
 
-	.template-link {
-		display: inline-flex;
-		align-items: baseline;
-		gap: 0.5rem;
-		padding: 0;
-		background: transparent;
-		border: 0;
-		cursor: pointer;
-		color: inherit;
-		border-radius: 0.25rem;
-		transition: background 0.12s ease;
-
-		&:hover {
-			background: color-mix(in srgb, var(--theme-primary) 10%, transparent);
-
-			.template-name {
-				color: var(--theme-primary);
-				text-decoration: underline;
-			}
-		}
+	.section-label {
+		font-size: 0.6875rem;
+		color: var(--theme-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-weight: 600;
 	}
 
-	.template-badge,
 	.source-badge {
 		padding: 0.0625rem 0.375rem;
 		font-size: 0.625rem;
@@ -523,13 +494,6 @@
 		letter-spacing: 0.04em;
 	}
 
-	.template-name {
-		font-family: var(--font-mono, monospace);
-		font-weight: 600;
-		color: var(--theme-text);
-	}
-
-	.template-desc,
 	.source-summary {
 		color: var(--theme-text-muted);
 		font-size: 0.8125rem;
