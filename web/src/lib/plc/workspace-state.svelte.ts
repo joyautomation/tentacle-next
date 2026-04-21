@@ -5,10 +5,16 @@ export type Selection = {
 	id: string;
 } | null;
 
-export type ProgramTab = {
+export type EditorTabKind = 'program' | 'variables';
+
+export type EditorTab = {
 	name: string;
-	language: string;
+	kind: EditorTabKind;
+	language?: string;
 };
+
+// Kept as alias for incremental migration; prefer EditorTab.
+export type ProgramTab = EditorTab;
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint';
 
@@ -38,7 +44,7 @@ function loadViewPrefs(): { showInlineValues: boolean } {
 
 const state = $state<{
 	selection: Selection;
-	tabs: ProgramTab[];
+	tabs: EditorTab[];
 	activeTab: string | null;
 	dirty: Record<string, boolean>;
 	diagnostics: Record<string, WorkspaceDiagnostic[]>;
@@ -86,7 +92,7 @@ export const workspaceTabs = {
 	get dirty() {
 		return state.dirty;
 	},
-	open(tab: ProgramTab) {
+	open(tab: EditorTab) {
 		if (!state.tabs.some((t) => t.name === tab.name)) {
 			state.tabs = [...state.tabs, tab];
 		}

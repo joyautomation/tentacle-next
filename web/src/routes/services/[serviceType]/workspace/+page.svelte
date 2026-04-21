@@ -27,7 +27,14 @@
 		if (selection?.kind !== 'program') return;
 		const lang = programsByName[selection.id];
 		if (!lang) return;
-		workspaceTabs.open({ name: selection.id, language: lang });
+		workspaceTabs.open({ name: selection.id, kind: 'program', language: lang });
+	});
+
+	const VARIABLES_TAB_NAME = 'Variables';
+
+	$effect(() => {
+		if (selection?.kind !== 'variable') return;
+		workspaceTabs.open({ name: VARIABLES_TAB_NAME, kind: 'variables' });
 	});
 
 	let createKind = $state<'variable' | 'task' | 'program' | null>(null);
@@ -121,7 +128,15 @@
 								<header class="panel-header">Editor</header>
 								<div class="panel-body no-pad">
 									{#if workspaceTabs.list.length > 0}
-										<EditorTabs {variableNames} />
+										<EditorTabs
+											{variableNames}
+											plcConfig={data.plcConfig}
+											gatewayConfig={data.gatewayConfig}
+											browseCaches={data.browseCaches}
+											browseStates={data.browseStates}
+											templates={data.templates}
+											error={data.error}
+										/>
 									{:else if selection?.kind === 'task'}
 										<div class="placeholder-card">
 											<div class="label">Task</div>
@@ -129,15 +144,6 @@
 											<div class="hint">
 												Task editing lives in the Inspector for now — UDT-style
 												editing in the Editor pane is coming.
-											</div>
-										</div>
-									{:else if selection?.kind === 'variable'}
-										<div class="placeholder-card">
-											<div class="label">Variable</div>
-											<div class="title">{selection.id}</div>
-											<div class="hint">
-												Variable config editing will appear in the Inspector soon.
-												For now, use the <a href="/services/plc/info">Variables tab</a>.
 											</div>
 										</div>
 									{:else}

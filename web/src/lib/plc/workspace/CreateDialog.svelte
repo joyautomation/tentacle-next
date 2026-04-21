@@ -78,7 +78,7 @@
 				}
 				saltState.addNotification({ message: `Program "${name}" created`, type: 'success' });
 				await invalidateAll();
-				workspaceTabs.open({ name, language: progLanguage });
+				workspaceTabs.open({ name, kind: 'program', language: progLanguage });
 				workspaceSelection.select('program', name);
 				onClose();
 			} else if (kind === 'task') {

@@ -1,20 +1,39 @@
 <script lang="ts">
 	import ProgramEditor from './ProgramEditor.svelte';
+	import PlcVariableConfig from '$lib/components/PlcVariableConfig.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
+	import type { EditorTabKind } from '../workspace-state.svelte';
+	import type { PlcConfig, PlcTemplate } from '$lib/types/plc';
+	import type { GatewayConfig, BrowseCache, GatewayBrowseState } from '$lib/types/gateway';
 
 	type Props = {
 		variableNames: string[];
+		plcConfig: PlcConfig | null;
+		gatewayConfig: GatewayConfig | null;
+		browseCaches: BrowseCache[];
+		browseStates: GatewayBrowseState[];
+		templates: PlcTemplate[];
+		error: string | null;
 	};
 
-	let { variableNames }: Props = $props();
+	let {
+		variableNames,
+		plcConfig,
+		gatewayConfig,
+		browseCaches,
+		browseStates,
+		templates,
+		error
+	}: Props = $props();
 
-	type EditorTab = TabItem & { language: string };
+	type EditorTab = TabItem & { kind: EditorTabKind; language?: string };
 
 	const tabs = $derived<EditorTab[]>(
 		workspaceTabs.list.map((t) => ({
 			id: t.name,
 			label: t.name,
+			kind: t.kind,
 			language: t.language
 		}))
 	);
@@ -22,7 +41,8 @@
 	function activate(name: string) {
 		workspaceTabs.activate(name);
 		const tab = workspaceTabs.list.find((t) => t.name === name);
-		if (tab) workspaceSelection.select('program', name);
+		if (!tab) return;
+		if (tab.kind === 'program') workspaceSelection.select('program', name);
 	}
 
 	function close(e: MouseEvent | KeyboardEvent, name: string) {
@@ -30,7 +50,9 @@
 		workspaceTabs.close(name);
 	}
 
-	function languageLabel(lang: string): string {
+	function badgeLabel(tab: EditorTab): string {
+		if (tab.kind === 'variables') return 'VAR';
+		const lang = tab.language ?? '';
 		if (lang === 'starlark') return 'PY';
 		if (lang === 'st' || lang === 'structured-text') return 'ST';
 		if (lang === 'ladder') return 'LD';
@@ -47,7 +69,7 @@
 		ariaLabel="Open editors"
 	>
 		{#snippet tab({ tab }: { tab: EditorTab; active: boolean })}
-			<span class="badge">{languageLabel(tab.language)}</span>
+			<span class="badge" class:var-badge={tab.kind === 'variables'}>{badgeLabel(tab)}</span>
 			<span class="name">{tab.label}</span>
 			{#if workspaceTabs.dirty[tab.id]}
 				<span class="dirty" title="Unsaved changes">●</span>
@@ -70,11 +92,24 @@
 	<div class="tab-content">
 		{#each workspaceTabs.list as tab (tab.name)}
 			<div class="editor-host" class:hidden={workspaceTabs.active !== tab.name}>
-				<ProgramEditor
-					name={tab.name}
-					{variableNames}
-					onDirtyChange={(d) => workspaceTabs.setDirty(tab.name, d)}
-				/>
+				{#if tab.kind === 'variables'}
+					<div class="variables-host">
+						<PlcVariableConfig
+							{plcConfig}
+							{gatewayConfig}
+							{browseCaches}
+							{browseStates}
+							{templates}
+							{error}
+						/>
+					</div>
+				{:else}
+					<ProgramEditor
+						name={tab.name}
+						{variableNames}
+						onDirtyChange={(d) => workspaceTabs.setDirty(tab.name, d)}
+					/>
+				{/if}
 			</div>
 		{/each}
 	</div>
@@ -98,6 +133,11 @@
 		font-family: var(--font-mono, monospace);
 		text-transform: none;
 		letter-spacing: 0;
+
+		&.var-badge {
+			color: var(--theme-text);
+			background: color-mix(in srgb, var(--theme-text) 12%, transparent);
+		}
 	}
 
 	.name {
@@ -145,5 +185,11 @@
 		&.hidden {
 			display: none;
 		}
+	}
+
+	.variables-host {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
 	}
 </style>
