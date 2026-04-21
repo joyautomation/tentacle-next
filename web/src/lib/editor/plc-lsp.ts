@@ -275,6 +275,18 @@ export function plcLsp(opts: PlcLspOptions): {
 			}, changeDelay) as unknown as number;
 		}
 
+		// flushDidChange sends any pending didChange immediately. Completion
+		// and hover requests must call this first — otherwise a request
+		// fired right after a keystroke races the 250ms debounce and the
+		// server answers against stale document text (no `.`, short line,
+		// out-of-range character offsets).
+		private flushDidChange() {
+			if (this.pending === null) return;
+			clearTimeout(this.pending);
+			this.pending = null;
+			this.sendDidChange();
+		}
+
 		private sendDidOpen() {
 			if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 			this.version = 1;
@@ -336,6 +348,11 @@ export function plcLsp(opts: PlcLspOptions): {
 		// ------- public surface consumed by completion/hover sources --------
 
 		async requestCompletion(ctx: CompletionContext): Promise<CompletionResult | null> {
+			// Flush pending didChange so the server sees the text the user
+			// is actually looking at. Without this, typing `.` and
+			// immediately asking for completion answers against the
+			// pre-dot document.
+			this.flushDidChange();
 			// CM gives us the cursor offset; find the word prefix that triggered
 			// completion. If there's no word boundary the user just typed a
 			// trigger char; we still ask the server (it returns the full list).
@@ -380,6 +397,7 @@ export function plcLsp(opts: PlcLspOptions): {
 		}
 
 		async requestHover(pos: number): Promise<Tooltip | null> {
+			this.flushDidChange();
 			const lspPos = this.lspFromPos(pos);
 			let hov: LspHover | null;
 			try {
