@@ -3,9 +3,13 @@
 package plc
 
 import (
+	"encoding/json"
 	"log/slog"
 	"testing"
+	"time"
 
+	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"go.starlark.net/starlark"
 )
@@ -145,5 +149,83 @@ func TestInitialVariableValueTemplate(t *testing.T) {
 	running, _ := sv.Attr("running")
 	if running != starlark.True {
 		t.Errorf("running = %v, want True", running)
+	}
+}
+
+// TestApplyConfigInstantiatesTemplateVariable is the end-to-end
+// integration test for Phase 3a: a template stored in the plc_templates
+// bucket + a template-typed variable in the config must flow through
+// applyConfig and land in the VariableStore as a live *StructValue that
+// programs compiled on the engine can dot-access and mutate.
+func TestApplyConfigInstantiatesTemplateVariable(t *testing.T) {
+	b := bus.NewChannelBus()
+	for bucket, cfg := range topics.BucketConfigs() {
+		if err := b.KVCreate(bucket, cfg); err != nil {
+			t.Fatalf("KVCreate %s: %v", bucket, err)
+		}
+	}
+
+	tmpl := itypes.PlcTemplate{
+		Name: "Motor",
+		Fields: []itypes.PlcTemplateField{
+			{Name: "speed", Type: "number", Default: 0.0},
+			{Name: "running", Type: "bool", Default: false},
+		},
+	}
+	data, _ := json.Marshal(tmpl)
+	if _, err := b.KVPut(topics.BucketPlcTemplates, "Motor", data); err != nil {
+		t.Fatalf("seed template: %v", err)
+	}
+
+	m := New("plc-test")
+	m.b = b
+	m.log = slog.Default()
+
+	cfg := &itypes.PlcConfigKV{
+		PlcID: "plc-test",
+		Variables: map[string]itypes.PlcVariableConfigKV{
+			"motor1": {
+				ID:       "motor1",
+				Datatype: "Motor",
+				Default: map[string]interface{}{
+					"speed":   1500.0,
+					"running": true,
+				},
+			},
+		},
+		Tasks:     map[string]itypes.PlcTaskConfigKV{},
+		UpdatedAt: time.Now().UnixMilli(),
+	}
+	m.applyConfig(cfg)
+	defer m.Stop()
+
+	sv, ok := m.variables.Get("motor1").(*StructValue)
+	if !ok {
+		t.Fatalf("motor1 is %T, want *StructValue", m.variables.Get("motor1"))
+	}
+	if v, _ := sv.Attr("speed"); mustFloat(t, v) != 1500 {
+		t.Errorf("motor1.speed = %v, want 1500", v)
+	}
+	if v, _ := sv.Attr("running"); v != starlark.True {
+		t.Errorf("motor1.running = %v, want True", v)
+	}
+
+	// Compile and run a program on the live engine to prove the struct
+	// is reachable from Starlark end-to-end.
+	prog := `
+def main():
+    m = get_var("motor1")
+    m.speed = m.speed + 100
+    set_var("motor1", m)
+`
+	if err := m.engine.Compile("bump", prog); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if err := m.engine.Execute("bump", NewTaskState()); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	after := m.variables.Get("motor1").(*StructValue)
+	if v, _ := after.Attr("speed"); mustFloat(t, v) != 1600 {
+		t.Errorf("after bump: speed = %v, want 1600", v)
 	}
 }
