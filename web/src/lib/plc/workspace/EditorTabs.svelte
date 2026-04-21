@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ProgramEditor from './ProgramEditor.svelte';
 	import VariableEditor from './VariableEditor.svelte';
+	import TemplateEditor from './TemplateEditor.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
@@ -40,6 +41,7 @@
 
 	function badgeLabel(tab: EditorTab): string {
 		if (tab.kind === 'variable') return 'VAR';
+		if (tab.kind === 'template') return 'TPL';
 		const lang = tab.language ?? '';
 		if (lang === 'starlark') return 'PY';
 		if (lang === 'st' || lang === 'structured-text') return 'ST';
@@ -57,7 +59,7 @@
 		ariaLabel="Open editors"
 	>
 		{#snippet tab({ tab }: { tab: EditorTab; active: boolean })}
-			<span class="badge" class:var-badge={tab.kind === 'variable'}>{badgeLabel(tab)}</span>
+			<span class="badge" class:var-badge={tab.kind === 'variable'} class:tpl-badge={tab.kind === 'template'}>{badgeLabel(tab)}</span>
 			<span class="name">{tab.label}</span>
 			{#if workspaceTabs.dirty[tab.id]}
 				<span class="dirty" title="Unsaved changes">●</span>
@@ -82,6 +84,8 @@
 			<div class="editor-host" class:hidden={workspaceTabs.active !== tab.name}>
 				{#if tab.kind === 'variable'}
 					<VariableEditor name={tab.name} {plcConfig} {templates} />
+				{:else if tab.kind === 'template'}
+					<TemplateEditor name={tab.name} {templates} />
 				{:else}
 					<ProgramEditor
 						name={tab.name}
@@ -116,6 +120,11 @@
 		&.var-badge {
 			color: var(--theme-text);
 			background: color-mix(in srgb, var(--theme-text) 12%, transparent);
+		}
+
+		&.tpl-badge {
+			color: var(--theme-primary);
+			background: color-mix(in srgb, var(--theme-primary) 18%, transparent);
 		}
 	}
 

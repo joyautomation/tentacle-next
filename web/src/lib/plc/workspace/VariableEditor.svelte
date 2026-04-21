@@ -202,6 +202,10 @@
 		const parts = [s.protocol, s.deviceId, s.tag].filter(Boolean);
 		return parts.join(' · ');
 	}
+
+	function openTemplate(tplName: string) {
+		workspaceTabs.open({ name: tplName, kind: 'template' });
+	}
 </script>
 
 <div class="variable-editor">
@@ -279,8 +283,15 @@
 			{#if selectedTemplate}
 				<div class="template-block" transition:slide={{ duration: 150 }}>
 					<div class="template-head">
-						<span class="template-badge">Template</span>
-						<span class="template-name">{selectedTemplate.name}</span>
+						<button
+							type="button"
+							class="template-link"
+							onclick={() => openTemplate(selectedTemplate.name)}
+							title="Open template definition"
+						>
+							<span class="template-badge">Template</span>
+							<span class="template-name">{selectedTemplate.name}</span>
+						</button>
 						{#if selectedTemplate.description}
 							<span class="template-desc">{selectedTemplate.description}</span>
 						{/if}
@@ -476,6 +487,28 @@
 		align-items: baseline;
 		gap: 0.5rem;
 		flex-wrap: wrap;
+	}
+
+	.template-link {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		padding: 0;
+		background: transparent;
+		border: 0;
+		cursor: pointer;
+		color: inherit;
+		border-radius: 0.25rem;
+		transition: background 0.12s ease;
+
+		&:hover {
+			background: color-mix(in srgb, var(--theme-primary) 10%, transparent);
+
+			.template-name {
+				color: var(--theme-primary);
+				text-decoration: underline;
+			}
+		}
 	}
 
 	.template-badge,

@@ -5,7 +5,7 @@ export type Selection = {
 	id: string;
 } | null;
 
-export type EditorTabKind = 'program' | 'variable';
+export type EditorTabKind = 'program' | 'variable' | 'template';
 
 export type EditorTab = {
 	name: string;
