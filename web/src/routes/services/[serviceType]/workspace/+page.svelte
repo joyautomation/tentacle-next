@@ -194,8 +194,8 @@
 					title="Show output"
 					aria-label="Show output"
 				>
-					<ChevronUp size="0.875rem" />
 					<span class="rail-label-h">Output</span>
+					<ChevronUp size="0.875rem" />
 				</button>
 			{/if}
 		</div>
@@ -288,6 +288,7 @@
 
 	.rail-bottom {
 		flex-direction: row;
+		justify-content: flex-end;
 		height: 1.75rem;
 		flex-shrink: 0;
 		padding: 0 0.625rem;
@@ -323,6 +324,7 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.5rem;
+		min-height: 20px;
 		padding: 0.5rem 0.75rem;
 		font-size: 0.75rem;
 		font-weight: 600;
