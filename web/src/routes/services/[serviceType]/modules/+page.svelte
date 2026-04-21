@@ -85,17 +85,17 @@
   }
 
   function getStateColor(state: string): string {
-    if (state === 'active') return 'var(--color-green-500, #22c55e)';
-    if (state === 'failed') return 'var(--color-red-500, #ef4444)';
+    if (state === 'active') return 'var(--green-500, #22c55e)';
+    if (state === 'failed') return 'var(--red-500, #ef4444)';
     if (state === 'inactive' || state === 'dead') return 'var(--theme-text-muted)';
-    return 'var(--color-amber-500, #f59e0b)';
+    return 'var(--amber-500, #f59e0b)';
   }
 
   function getReconcileBadge(state: string): { color: string; label: string } {
     if (state === 'ok') return { color: 'var(--badge-green-text)', label: 'ok' };
-    if (state === 'error') return { color: 'var(--color-red-500, #ef4444)', label: 'error' };
-    if (state === 'needs_config') return { color: 'var(--color-amber-500, #f59e0b)', label: 'needs config' };
-    if (state === 'downloading') return { color: 'var(--color-amber-500, #f59e0b)', label: 'downloading' };
+    if (state === 'error') return { color: 'var(--red-500, #ef4444)', label: 'error' };
+    if (state === 'needs_config') return { color: 'var(--amber-500, #f59e0b)', label: 'needs config' };
+    if (state === 'downloading') return { color: 'var(--amber-500, #f59e0b)', label: 'downloading' };
     return { color: 'var(--theme-text-muted)', label: state };
   }
 </script>
@@ -249,7 +249,7 @@
     }
 
     &.active {
-      border-color: color-mix(in srgb, var(--color-green-500, #22c55e) 30%, var(--theme-border));
+      border-color: color-mix(in srgb, var(--green-500, #22c55e) 30%, var(--theme-border));
     }
     &.available {
       opacity: 0.75;
@@ -280,7 +280,7 @@
   .module-desc { margin: 0 0 0.5rem; font-size: 0.8125rem; color: var(--theme-text-muted); }
 
   .module-error {
-    margin: 0.25rem 0 0.5rem; font-size: 0.75rem; color: var(--color-red-500, #ef4444);
+    margin: 0.25rem 0 0.5rem; font-size: 0.75rem; color: var(--red-500, #ef4444);
     font-family: 'IBM Plex Mono', monospace;
   }
 
@@ -311,9 +311,9 @@
       &:hover { filter: brightness(1.1); }
     }
     &.danger {
-      color: var(--color-red-500, #ef4444); border-color: color-mix(in srgb, var(--color-red-500, #ef4444) 30%, var(--theme-border));
+      color: var(--red-500, #ef4444); border-color: color-mix(in srgb, var(--red-500, #ef4444) 30%, var(--theme-border));
       margin-left: auto;
-      &:hover { background: color-mix(in srgb, var(--color-red-500, #ef4444) 10%, transparent); }
+      &:hover { background: color-mix(in srgb, var(--red-500, #ef4444) 10%, transparent); }
     }
   }
 
@@ -330,14 +330,14 @@
     }
   }
 
-  .toggle input:checked + .toggle-slider { background: var(--color-green-500, #22c55e); }
+  .toggle input:checked + .toggle-slider { background: var(--green-500, #22c55e); }
   .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
   .toggle input:disabled + .toggle-slider { opacity: 0.5; cursor: not-allowed; }
 
   .error-box {
     padding: 1rem; border-radius: var(--rounded-lg); background: var(--theme-surface);
-    border: 1px solid var(--color-red-500, #ef4444); margin-bottom: 1.5rem;
-    p { margin: 0; font-size: 0.875rem; color: var(--color-red-500, #ef4444); }
+    border: 1px solid var(--red-500, #ef4444); margin-bottom: 1.5rem;
+    p { margin: 0; font-size: 0.875rem; color: var(--red-500, #ef4444); }
   }
 
   .empty-state {

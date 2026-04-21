@@ -56,10 +56,10 @@
   function getNodeColor(type: NodeType): string {
     switch (type) {
       case 'nats':
-      case 'bus': return 'var(--color-purple-500, #a855f7)';
-      case 'device': return 'var(--color-amber-500, #f59e0b)';
-      case 'database': return 'var(--color-sky-500, #0ea5e9)';
-      default: return 'var(--color-teal-500, #14b8a6)';
+      case 'bus': return 'var(--purple-500, #a855f7)';
+      case 'device': return 'var(--orange-500, #f97316)';
+      case 'database': return 'var(--sky-500, #0ea5e9)';
+      default: return 'var(--teal-500, #14b8a6)';
     }
   }
 
@@ -542,11 +542,11 @@
         const srcId = typeof d.source === 'string' ? d.source : (d.source as NodeDatum).id;
         const tgt = nodes.find(n => n.id === tgtId);
         const src = nodes.find(n => n.id === srcId);
-        if (tgt?.type === 'mqtt' || src?.type === 'mqtt') return 'var(--color-amber-400, #fbbf24)';
+        if (tgt?.type === 'mqtt' || src?.type === 'mqtt') return 'var(--amber-400, #fbbf24)';
         if (tgt?.type === 'history' || src?.type === 'history' || tgt?.type === 'database' || src?.type === 'database') {
-          return 'var(--color-orange-500, #f97316)';
+          return 'var(--orange-500, #f97316)';
         }
-        return 'var(--color-sky-400, #38bdf8)';
+        return 'var(--sky-400, #38bdf8)';
       })
       .attr('stroke-width', 2)
       .attr('stroke-opacity', 0.7)
@@ -560,7 +560,7 @@
       .data(biLinks)
       .join('line')
       .attr('class', 'flow-line flow-bi-fwd')
-      .attr('stroke', 'var(--color-sky-400, #38bdf8)')
+      .attr('stroke', 'var(--sky-400, #38bdf8)')
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
       .attr('stroke-dasharray', '5 7');
@@ -571,7 +571,7 @@
       .data(biLinks)
       .join('line')
       .attr('class', 'flow-line flow-reverse flow-bi-rev')
-      .attr('stroke', 'var(--color-amber-400, #fbbf24)')
+      .attr('stroke', 'var(--amber-400, #fbbf24)')
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
       .attr('stroke-dasharray', '5 7');
@@ -639,7 +639,7 @@
     nodeGroups.append('text')
       .attr('text-anchor', 'middle')
       .attr('y', d => getNodeRadius(d.type) + 30)
-      .attr('fill', d => !d.connected ? '#ef4444' : !d.enabled ? 'var(--color-amber-500, #f59e0b)' : 'var(--theme-text-muted)')
+      .attr('fill', d => !d.connected ? '#ef4444' : !d.enabled ? 'var(--amber-500, #f59e0b)' : 'var(--theme-text-muted)')
       .attr('font-size', '10px')
       .attr('opacity', d => !d.connected ? 0.6 : !d.enabled ? 0.7 : 1)
       .text(d => d.subtitle || '');

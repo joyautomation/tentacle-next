@@ -259,11 +259,11 @@
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      background: var(--color-red-500, #ef4444);
+      background: var(--red-500, #ef4444);
     }
 
     &.connected .dot {
-      background: var(--color-green-500, #22c55e);
+      background: var(--green-500, #22c55e);
     }
   }
 
@@ -386,7 +386,7 @@
       display: block;
       font-size: 0.875rem;
       font-weight: 500;
-      color: var(--color-green-500, #22c55e);
+      color: var(--green-500, #22c55e);
     }
 
     .uptime-label {

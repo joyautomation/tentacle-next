@@ -388,8 +388,8 @@
     }
 
     &.fail {
-      background: color-mix(in srgb, var(--color-red-500, #ef4444) 10%, transparent);
-      color: var(--color-red-500, #ef4444);
+      background: color-mix(in srgb, var(--red-500, #ef4444) 10%, transparent);
+      color: var(--red-500, #ef4444);
     }
   }
 
@@ -423,8 +423,8 @@
 
     &.danger-outline {
       background: transparent;
-      color: var(--color-red-500, #ef4444);
-      border: 1px solid var(--color-red-500, #ef4444);
+      color: var(--red-500, #ef4444);
+      border: 1px solid var(--red-500, #ef4444);
     }
 
     &.btn-sm {

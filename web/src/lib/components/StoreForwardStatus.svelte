@@ -107,9 +107,9 @@
   }
 
   function getGaugeColor(pct: number): string {
-    if (pct < 50) return 'var(--color-green-500, #22c55e)';
-    if (pct < 80) return 'var(--color-amber-500, #f59e0b)';
-    return 'var(--color-red-500, #ef4444)';
+    if (pct < 50) return 'var(--green-500, #22c55e)';
+    if (pct < 80) return 'var(--amber-500, #f59e0b)';
+    return 'var(--red-500, #ef4444)';
   }
 
   function renderGauge() {
@@ -447,7 +447,7 @@
 
   .sf-drain-fill {
     height: 100%;
-    background: var(--color-sky-400, #38bdf8);
+    background: var(--sky-400, #38bdf8);
     border-radius: 3px;
     transition: width 0.5s ease;
     background-image: repeating-linear-gradient(
@@ -523,7 +523,7 @@
     gap: 0.5rem;
     font-size: 0.6875rem;
     font-family: inherit;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
     background: none;
     border: none;
     cursor: pointer;

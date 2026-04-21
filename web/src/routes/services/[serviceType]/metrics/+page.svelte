@@ -264,7 +264,7 @@
                           <svg class="chevron" class:expanded={expandedInstances[metric.name]} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M9 18l6-6-6-6"/>
                           </svg>
-                          <span class="freshness-dot" style="--dot-color: var(--color-purple-400, #c084fc); --dot-glow: none;"></span>
+                          <span class="freshness-dot" style="--dot-color: var(--purple-400, #c084fc); --dot-glow: none;"></span>
                           <span class="tree-label">{metric.name}</span>
                           <span class="leaf-type">template</span>
                         </button>
@@ -610,7 +610,7 @@
     svg {
       flex-shrink: 0;
       margin-top: 0.0625rem;
-      color: var(--color-amber-500, #f59e0b);
+      color: var(--amber-500, #f59e0b);
     }
 
     p {
@@ -624,13 +624,13 @@
     padding: 1rem;
     border-radius: var(--rounded-lg);
     background: var(--theme-surface);
-    border: 1px solid var(--color-red-500, #ef4444);
+    border: 1px solid var(--red-500, #ef4444);
     margin-bottom: 1.5rem;
 
     p {
       margin: 0;
       font-size: 0.875rem;
-      color: var(--color-red-500, #ef4444);
+      color: var(--red-500, #ef4444);
     }
   }
 

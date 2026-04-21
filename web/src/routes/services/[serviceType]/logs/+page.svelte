@@ -38,8 +38,8 @@
     }
 
     &.error {
-      border-color: var(--color-red-500, #ef4444);
-      p { color: var(--color-red-500, #ef4444); }
+      border-color: var(--red-500, #ef4444);
+      p { color: var(--red-500, #ef4444); }
     }
   }
 </style>

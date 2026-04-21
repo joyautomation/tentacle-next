@@ -120,7 +120,7 @@
   }
 
   .required {
-    color: var(--color-red-400, #f87171);
+    color: var(--red-400, #f87171);
   }
 
   .field-hint {

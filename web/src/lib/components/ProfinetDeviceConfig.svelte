@@ -422,7 +422,7 @@
   }
 
   .error-banner {
-    background: var(--color-red-500, #ef4444);
+    background: var(--red-500, #ef4444);
     color: white;
     padding: 0.75rem 1rem;
     border-radius: var(--rounded-lg);
@@ -451,7 +451,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--color-red-500, #ef4444);
+    background: var(--red-500, #ef4444);
     flex-shrink: 0;
 
     .connected & {
@@ -651,7 +651,7 @@
   .remove-btn {
     padding: 0.25rem 0.5rem;
     font-size: 0.6875rem;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--rounded-sm);
@@ -659,7 +659,7 @@
     margin-left: auto;
 
     &:hover {
-      border-color: var(--color-red-500, #ef4444);
+      border-color: var(--red-500, #ef4444);
     }
 
     &.small {
@@ -763,7 +763,7 @@
 
   .save-error {
     font-size: 0.8125rem;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
   }
 
   /* Variable picker modal */

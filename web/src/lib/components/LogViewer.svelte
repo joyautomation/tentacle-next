@@ -64,10 +64,10 @@
 
   function levelColor(level: string): string {
     switch (level) {
-      case 'error': return 'var(--color-red-500, #ef4444)';
-      case 'warn': return 'var(--color-yellow-500, #eab308)';
-      case 'info': return 'var(--color-sky-500, #0ea5e9)';
-      case 'debug': return 'var(--color-purple-500, #a855f7)';
+      case 'error': return 'var(--red-500, #ef4444)';
+      case 'warn': return 'var(--yellow-500, #eab308)';
+      case 'info': return 'var(--sky-500, #0ea5e9)';
+      case 'debug': return 'var(--purple-500, #a855f7)';
       default: return 'var(--theme-text-muted)';
     }
   }
@@ -315,7 +315,7 @@
     font-family: 'Space Grotesk', sans-serif;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
     background: none;
     border: 1px solid transparent;
     border-radius: var(--rounded);

@@ -319,7 +319,7 @@
 
   .install-error {
     font-size: 0.75rem;
-    color: var(--color-red-400, #f87171);
+    color: var(--red-400, #f87171);
     margin: 0.5rem 0 0;
   }
 
@@ -431,8 +431,8 @@
     }
 
     &.fail {
-      background: color-mix(in srgb, var(--color-red-500, #ef4444) 10%, transparent);
-      color: var(--color-red-500, #ef4444);
+      background: color-mix(in srgb, var(--red-500, #ef4444) 10%, transparent);
+      color: var(--red-500, #ef4444);
     }
   }
 

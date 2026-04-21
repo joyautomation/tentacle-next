@@ -45,9 +45,9 @@
 
   function actionColor(action: string): string {
     switch (action) {
-      case 'added': return 'var(--color-green-500)';
-      case 'modified': return 'var(--color-amber-500)';
-      case 'removed': return 'var(--color-red-500)';
+      case 'added': return 'var(--green-500)';
+      case 'modified': return 'var(--amber-500)';
+      case 'removed': return 'var(--red-500)';
       default: return 'var(--theme-border)';
     }
   }
@@ -237,9 +237,9 @@
     padding: 0 0.25rem;
     border-radius: 2px;
 
-    &.added { color: var(--color-green-500); }
-    &.modified { color: var(--color-amber-500); }
-    &.removed { color: var(--color-red-500); }
+    &.added { color: var(--green-500); }
+    &.modified { color: var(--amber-500); }
+    &.removed { color: var(--red-500); }
   }
 
   .kind-children {
@@ -308,13 +308,13 @@
     border-radius: 2px;
 
     &.added {
-      background: color-mix(in srgb, var(--color-green-500) 8%, transparent);
+      background: color-mix(in srgb, var(--green-500) 8%, transparent);
     }
     &.removed {
-      background: color-mix(in srgb, var(--color-red-500) 8%, transparent);
+      background: color-mix(in srgb, var(--red-500) 8%, transparent);
     }
     &.modified {
-      background: color-mix(in srgb, var(--color-amber-500) 8%, transparent);
+      background: color-mix(in srgb, var(--amber-500) 8%, transparent);
     }
   }
 
@@ -333,11 +333,11 @@
     word-break: break-all;
 
     &.old {
-      color: var(--color-red-500);
+      color: var(--red-500);
       text-decoration: line-through;
     }
     &.new {
-      color: var(--color-green-500);
+      color: var(--green-500);
     }
   }
 

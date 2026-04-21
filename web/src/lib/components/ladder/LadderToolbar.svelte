@@ -187,8 +187,8 @@
 
     &.danger:hover:not(:disabled) {
       background: var(--theme-error-200, #4a1515);
-      border-color: var(--color-red-500, #ef4444);
-      color: var(--color-red-400, #f87171);
+      border-color: var(--red-500, #ef4444);
+      color: var(--red-400, #f87171);
     }
 
     &.small {

@@ -230,9 +230,9 @@
 	}
 
 	&.off-mode {
-		background: color-mix(in srgb, var(--color-red-500, #ef4444) 15%, transparent);
-		color: var(--color-red-500, #ef4444);
-		border: 1px solid color-mix(in srgb, var(--color-red-500, #ef4444) 40%, transparent);
+		background: color-mix(in srgb, var(--red-500, #ef4444) 15%, transparent);
+		color: var(--red-500, #ef4444);
+		border: 1px solid color-mix(in srgb, var(--red-500, #ef4444) 40%, transparent);
 	}
 }
 

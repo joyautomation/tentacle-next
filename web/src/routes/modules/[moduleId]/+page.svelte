@@ -530,8 +530,8 @@
     transition: background 0.15s, border-color 0.15s;
 
     &:hover:not(:disabled) {
-      border-color: var(--color-red-500, #ef4444);
-      color: var(--color-red-500, #ef4444);
+      border-color: var(--red-500, #ef4444);
+      color: var(--red-500, #ef4444);
     }
 
     &:disabled {
@@ -621,8 +621,8 @@
     margin-bottom: 1.5rem;
     p { margin: 0; font-size: 0.875rem; color: var(--theme-text-muted); }
     &.error {
-      border-color: var(--color-red-500, #ef4444);
-      p { color: var(--color-red-500, #ef4444); }
+      border-color: var(--red-500, #ef4444);
+      p { color: var(--red-500, #ef4444); }
     }
   }
 </style>
