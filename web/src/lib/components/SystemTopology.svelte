@@ -117,19 +117,23 @@
       depth: 0
     });
 
-    // Orchestrator — always present. It's the reconcile loop that watches the
-    // desired-services KV and drives every other module, but it doesn't publish
-    // its own /services heartbeat, so render it explicitly.
-    nodes.push({
-      id: 'orchestrator',
-      name: 'Orchestrator',
-      type: 'orchestrator',
-      subtitle: apiConnected ? 'Reconcile Loop' : 'Disconnected',
-      connected: apiConnected,
-      enabled: true,
-      depth: 1,
-    });
-    links.push({ source: 'nats', target: 'orchestrator' });
+    // Orchestrator fallback — the orchestrator publishes its own heartbeat like
+    // every other module, so it normally renders through the services loop below.
+    // But if its heartbeat is missing (stale KV, bus desync), still show it as a
+    // static node so the topology isn't lying about what's running.
+    const orchestratorService = services.find(s => s.serviceType === 'orchestrator');
+    if (!orchestratorService) {
+      nodes.push({
+        id: 'orchestrator',
+        name: 'Orchestrator',
+        type: 'orchestrator',
+        subtitle: apiConnected ? 'Reconcile Loop' : 'Disconnected',
+        connected: apiConnected,
+        enabled: true,
+        depth: 1,
+      });
+      links.push({ source: 'nats', target: 'orchestrator' });
+    }
 
     // Identify key services for topology wiring
     const apiService = services.find(s => s.serviceType === 'api');
