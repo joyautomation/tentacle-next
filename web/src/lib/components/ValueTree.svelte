@@ -6,9 +6,22 @@
 		label?: string;
 		editable?: boolean;
 		onChange?: (path: (string | number)[], newValue: unknown) => void;
+		secondary?: unknown;
+		secondaryLabel?: string;
+		onSelect?: (path: (string | number)[], leafType: LeafType) => void;
+		selectedPath?: (string | number)[] | null;
 	};
 
-	let { value, label = 'value', editable = false, onChange }: Props = $props();
+	let {
+		value,
+		label = 'value',
+		editable = false,
+		onChange,
+		secondary,
+		secondaryLabel,
+		onSelect,
+		selectedPath = null
+	}: Props = $props();
 
 	type LeafType = 'number' | 'boolean' | 'string' | 'null' | 'complex';
 
@@ -64,6 +77,16 @@
 
 	const tree = $derived(build(label, value, [], 0, 'root'));
 
+	function getAtPath(obj: unknown, path: (string | number)[]): unknown {
+		let cur: unknown = obj;
+		for (const k of path) {
+			if (cur === null || cur === undefined) return undefined;
+			if (typeof cur !== 'object') return undefined;
+			cur = (cur as Record<string | number, unknown>)[k];
+		}
+		return cur;
+	}
+
 	const layout = $derived.by(() => {
 		const root = d3.hierarchy<TreeDatum>(tree);
 		const dx = 24;
@@ -104,8 +127,7 @@
 		return { nodes, links, width, height };
 	});
 
-	function leafDisplay(n: TreeDatum): string {
-		const v = n.raw;
+	function leafDisplay(v: unknown): string {
 		if (v === null) return 'null';
 		if (v === undefined) return '—';
 		if (typeof v === 'string') return `"${v}"`;
@@ -125,6 +147,13 @@
 		}
 		onChange(n.path, parsed);
 	}
+
+	function pathsEqual(a: (string | number)[] | null, b: (string | number)[]): boolean {
+		if (!a) return false;
+		if (a.length !== b.length) return false;
+		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+		return true;
+	}
 </script>
 
 <div class="vt" style="width: {layout.width}px; height: {layout.height}px;">
@@ -137,11 +166,15 @@
 	</svg>
 
 	{#each layout.nodes as n (n.data.path.join('/') || 'root')}
+		{@const isSelected = pathsEqual(selectedPath, n.data.path)}
+		{@const isSelectable = n.data.kind === 'leaf' && onSelect && !editable}
 		<div
 			class="node"
 			class:is-root={n.data.kind === 'root'}
 			class:is-branch={n.data.kind === 'branch'}
 			class:is-leaf={n.data.kind === 'leaf'}
+			class:is-selectable={isSelectable}
+			class:is-selected={isSelected}
 			style="left: {n.y}px; top: {n.x}px;"
 		>
 			<span class="dot"></span>
@@ -170,9 +203,28 @@
 					step="any"
 					oninput={(e) => commit(n.data, (e.currentTarget as HTMLInputElement).value)}
 				/>
+			{:else if isSelectable}
+				<button
+					type="button"
+					class="leaf-btn"
+					onclick={() => onSelect?.(n.data.path, n.data.leafType)}
+					title={secondary !== undefined ? `${label}: ${leafDisplay(n.data.raw)}\n${secondaryLabel ?? 'current'}: ${leafDisplay(getAtPath(secondary, n.data.path))}` : undefined}
+				>
+					<span class="key">{n.data.name}</span>:
+					<span class="leaf-val">{leafDisplay(n.data.raw)}</span>
+					{#if secondary !== undefined}
+						<span class="leaf-sep">/</span>
+						<span class="leaf-val secondary">{leafDisplay(getAtPath(secondary, n.data.path))}</span>
+					{/if}
+				</button>
 			{:else}
 				<span class="label"
-					><span class="key">{n.data.name}</span>: <span class="leaf-val">{leafDisplay(n.data)}</span></span
+					><span class="key">{n.data.name}</span>:
+					<span class="leaf-val">{leafDisplay(n.data.raw)}</span>
+					{#if secondary !== undefined}
+						<span class="leaf-sep">/</span>
+						<span class="leaf-val secondary">{leafDisplay(getAtPath(secondary, n.data.path))}</span>
+					{/if}</span
 				>
 			{/if}
 		</div>
@@ -241,6 +293,39 @@
 
 	.leaf-val {
 		color: var(--theme-primary);
+	}
+
+	.leaf-val.secondary {
+		color: var(--theme-text-muted);
+	}
+
+	.leaf-sep {
+		color: var(--theme-text-muted);
+		opacity: 0.5;
+	}
+
+	.leaf-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: 0.1875rem;
+		padding: 0.0625rem 0.3125rem;
+		color: var(--theme-text);
+		font: inherit;
+		cursor: pointer;
+		text-align: left;
+
+		&:hover {
+			border-color: var(--theme-border);
+			background: color-mix(in srgb, var(--theme-primary) 8%, transparent);
+		}
+	}
+
+	.is-selected .leaf-btn {
+		border-color: var(--theme-primary);
+		background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
 	}
 
 	.leaf-input {

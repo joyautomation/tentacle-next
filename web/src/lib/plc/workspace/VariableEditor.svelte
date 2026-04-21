@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
@@ -10,6 +11,7 @@
 		PlcVariableSource
 	} from '$lib/types/plc';
 	import { workspaceTabs } from '../workspace-state.svelte';
+	import { startLiveValues, liveValuesVersion, getLiveValue } from '../live-values.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
 	import { PencilSquare } from '@joyautomation/salt/icons';
@@ -130,6 +132,98 @@
 		if (ak.length !== bk.length) return false;
 		for (const k of ak) if (!deepEqual(ao[k], bo[k])) return false;
 		return true;
+	}
+
+	onMount(() => startLiveValues());
+
+	const currentValues = $derived.by(() => {
+		void liveValuesVersion();
+		const out: Record<string, unknown> = {};
+		if (!selectedTemplate) return out;
+		for (const f of selectedTemplate.fields) {
+			const lv = getLiveValue(`${name}.${f.name}`);
+			out[f.name] = lv?.value;
+		}
+		return out;
+	});
+
+	let selectedLeafPath = $state<(string | number)[] | null>(null);
+	let selectedLeafType = $state<'number' | 'boolean' | 'string' | 'null' | 'complex'>('string');
+
+	const selectedFieldName = $derived.by(() => {
+		if (!selectedLeafPath || selectedLeafPath.length === 0) return null;
+		const k = selectedLeafPath[0];
+		return typeof k === 'string' ? k : null;
+	});
+
+	const selectedFieldType = $derived.by(() => {
+		if (!selectedFieldName || !selectedTemplate) return null;
+		return selectedTemplate.fields.find((f) => f.name === selectedFieldName)?.type ?? null;
+	});
+
+	let currentInput = $state<string>('');
+	let writing = $state(false);
+	let lastSelectedKey = '';
+
+	$effect(() => {
+		if (!selectedFieldName) {
+			lastSelectedKey = '';
+			return;
+		}
+		const live = getLiveValue(`${name}.${selectedFieldName}`)?.value;
+		const key = `${selectedFieldName}::${JSON.stringify(live)}`;
+		if (key === lastSelectedKey) return;
+		lastSelectedKey = key;
+		if (typeof live === 'boolean') currentInput = live ? 'true' : 'false';
+		else if (live === undefined || live === null) currentInput = '';
+		else currentInput = String(live);
+	});
+
+	function defaultInputValue(): string {
+		if (!selectedFieldName) return '';
+		const v = templateDefaults[selectedFieldName];
+		if (typeof v === 'boolean') return v ? 'true' : 'false';
+		if (v === undefined || v === null) return '';
+		return String(v);
+	}
+
+	function commitDefault(raw: string) {
+		if (!selectedFieldName || selectedLeafType === 'complex') return;
+		let parsed: unknown = raw;
+		if (selectedLeafType === 'number') {
+			const n = parseFloat(raw);
+			parsed = Number.isFinite(n) ? n : 0;
+		} else if (selectedLeafType === 'boolean') {
+			parsed = raw === 'true';
+		}
+		templateDefaults = { ...templateDefaults, [selectedFieldName]: parsed };
+	}
+
+	async function writeCurrent() {
+		if (!selectedFieldName || selectedLeafType === 'complex') return;
+		let parsed: unknown = currentInput;
+		if (selectedLeafType === 'number') {
+			const n = parseFloat(currentInput);
+			if (!Number.isFinite(n)) {
+				saltState.addNotification({ message: 'Invalid number', type: 'error' });
+				return;
+			}
+			parsed = n;
+		} else if (selectedLeafType === 'boolean') {
+			parsed = currentInput === 'true';
+		}
+		writing = true;
+		try {
+			const id = `${name}.${selectedFieldName}`;
+			const res = await apiPut(`/variables/plc/${encodeURIComponent(id)}/value`, { value: parsed });
+			if (res.error) {
+				saltState.addNotification({ message: res.error.error, type: 'error' });
+				return;
+			}
+			saltState.addNotification({ message: `Wrote ${id}`, type: 'success' });
+		} finally {
+			writing = false;
+		}
 	}
 
 	const isDirty = $derived.by(() => {
@@ -304,19 +398,87 @@
 
 			{#if selectedTemplate}
 				<div class="template-block" transition:slide={{ duration: 150 }}>
-					<div class="section-label">Instance defaults</div>
+					<div class="section-label">Instance defaults · default / current</div>
 					<div class="tree-wrap">
 						<ValueTree
 							value={templateDefaults}
+							secondary={currentValues}
 							label={selectedTemplate.name}
-							editable
-							onChange={(path, newVal) => {
-								const key = path[0];
-								if (typeof key !== 'string') return;
-								templateDefaults = { ...templateDefaults, [key]: newVal };
+							secondaryLabel="current"
+							selectedPath={selectedLeafPath}
+							onSelect={(path, leafType) => {
+								selectedLeafPath = path;
+								selectedLeafType = leafType;
 							}}
 						/>
 					</div>
+
+					{#if selectedFieldName}
+						<div class="leaf-panel" transition:slide={{ duration: 150 }}>
+							<div class="leaf-head">
+								<span class="leaf-name">{selectedFieldName}</span>
+								{#if selectedFieldType}<span class="leaf-type">{selectedFieldType}</span>{/if}
+								<button class="btn small" onclick={() => (selectedLeafPath = null)} title="Close">×</button>
+							</div>
+							<div class="leaf-grid">
+								<label class="field">
+									<span>Default</span>
+									{#if selectedLeafType === 'boolean'}
+										<select
+											class="input"
+											value={defaultInputValue()}
+											onchange={(e) => commitDefault((e.currentTarget as HTMLSelectElement).value)}
+										>
+											<option value="false">false</option>
+											<option value="true">true</option>
+										</select>
+									{:else if selectedLeafType === 'number' || selectedLeafType === 'string'}
+										<input
+											class="input"
+											type={selectedLeafType === 'number' ? 'number' : 'text'}
+											value={defaultInputValue()}
+											step="any"
+											oninput={(e) => commitDefault((e.currentTarget as HTMLInputElement).value)}
+										/>
+									{:else}
+										<span class="muted">not editable</span>
+									{/if}
+								</label>
+								<label class="field">
+									<span>Current</span>
+									{#if selectedLeafType === 'boolean'}
+										<select class="input" bind:value={currentInput}>
+											<option value="false">false</option>
+											<option value="true">true</option>
+										</select>
+									{:else if selectedLeafType === 'number' || selectedLeafType === 'string'}
+										<input
+											class="input"
+											type={selectedLeafType === 'number' ? 'number' : 'text'}
+											bind:value={currentInput}
+											step="any"
+										/>
+									{:else}
+										<span class="muted">not editable</span>
+									{/if}
+								</label>
+								<div class="field">
+									<span>&nbsp;</span>
+									<button
+										class="btn primary"
+										onclick={writeCurrent}
+										disabled={writing || selectedLeafType === 'complex' || selectedLeafType === 'null'}
+									>
+										{writing ? 'Writing…' : 'Write'}
+									</button>
+								</div>
+							</div>
+							<p class="hint">
+								Default changes are staged — press <strong>Save</strong> above to commit them to the
+								variable definition. Current value writes send immediately to the PLC.
+							</p>
+						</div>
+					{/if}
 				</div>
 
 				<TemplateDefinitionEditor template={selectedTemplate} {templates} {plcConfig} />
@@ -529,6 +691,67 @@
 	.tree-wrap {
 		overflow-x: auto;
 		padding: 0.25rem 0;
+	}
+
+	.leaf-panel {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.625rem;
+		border: 1px solid var(--theme-border);
+		border-radius: 0.3125rem;
+		background: var(--theme-background);
+	}
+
+	.leaf-head {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+
+		.leaf-name {
+			font-family: var(--font-mono, monospace);
+			font-weight: 600;
+			color: var(--theme-text);
+		}
+
+		.leaf-type {
+			padding: 0.0625rem 0.375rem;
+			font-size: 0.6875rem;
+			color: var(--theme-text-muted);
+			background: color-mix(in srgb, var(--theme-text-muted) 12%, transparent);
+			border-radius: 0.1875rem;
+			font-family: var(--font-mono, monospace);
+		}
+
+		.btn.small {
+			margin-left: auto;
+			font-size: 0.875rem;
+			line-height: 1;
+			padding: 0.125rem 0.4375rem;
+		}
+	}
+
+	.leaf-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr auto;
+		gap: 0.625rem;
+		align-items: end;
+	}
+
+	.muted {
+		color: var(--theme-text-muted);
+		font-size: 0.8125rem;
+		padding: 0.375rem 0;
+	}
+
+	.hint {
+		margin: 0;
+		font-size: 0.75rem;
+		color: var(--theme-text-muted);
+
+		strong {
+			color: var(--theme-text);
+		}
 	}
 
 	.source-meta {
