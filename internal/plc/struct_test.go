@@ -3,6 +3,7 @@
 package plc
 
 import (
+	"encoding/json"
 	"log/slog"
 	"testing"
 
@@ -248,5 +249,82 @@ func TestAttrNamesSorted(t *testing.T) {
 		if n != want[i] {
 			t.Errorf("AttrNames[%d] = %q, want %q", i, n, want[i])
 		}
+	}
+}
+
+func TestStructMarshalJSONFlat(t *testing.T) {
+	e := newTestEngine(t)
+	e.SetTemplates(map[string]*itypes.PlcTemplate{"Motor": motorTemplate})
+	m, _ := e.NewStruct("Motor", map[string]starlark.Value{
+		"speed":   starlark.Float(1500),
+		"running": starlark.True,
+		"name":    starlark.String("pump-a"),
+	})
+
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got["_type"] != "Motor" {
+		t.Errorf("_type = %v, want Motor", got["_type"])
+	}
+	if got["speed"] != 1500.0 {
+		t.Errorf("speed = %v, want 1500", got["speed"])
+	}
+	if got["running"] != true {
+		t.Errorf("running = %v, want true", got["running"])
+	}
+	if got["name"] != "pump-a" {
+		t.Errorf("name = %v, want pump-a", got["name"])
+	}
+}
+
+func TestStructMarshalJSONNested(t *testing.T) {
+	fault := &itypes.PlcTemplate{
+		Name: "Fault",
+		Fields: []itypes.PlcTemplateField{
+			{Name: "code", Type: "number", Default: 0.0},
+		},
+	}
+	motor := &itypes.PlcTemplate{
+		Name: "MotorWithFault",
+		Fields: []itypes.PlcTemplateField{
+			{Name: "fault", Type: "Fault"},
+		},
+	}
+	e := newTestEngine(t)
+	e.SetTemplates(map[string]*itypes.PlcTemplate{
+		"Fault":          fault,
+		"MotorWithFault": motor,
+	})
+
+	f, _ := e.NewStruct("Fault", map[string]starlark.Value{"code": starlark.Float(42)})
+	m, _ := e.NewStruct("MotorWithFault", nil)
+	_ = m.SetField("fault", f)
+
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got["_type"] != "MotorWithFault" {
+		t.Errorf("outer _type = %v", got["_type"])
+	}
+	inner, ok := got["fault"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("fault = %v (%T), want object", got["fault"], got["fault"])
+	}
+	if inner["_type"] != "Fault" {
+		t.Errorf("inner _type = %v, want Fault", inner["_type"])
+	}
+	if inner["code"] != 42.0 {
+		t.Errorf("inner code = %v, want 42", inner["code"])
 	}
 }

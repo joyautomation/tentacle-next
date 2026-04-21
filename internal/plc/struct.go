@@ -3,6 +3,7 @@
 package plc
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -130,6 +131,23 @@ func (s *StructValue) Freeze() {
 	for _, v := range s.fields {
 		v.Freeze()
 	}
+}
+
+// MarshalJSON emits a struct value as a flat JSON object with a `_type`
+// discriminator, so downstream consumers (MQTT, history, HMI) can both
+// read field values directly and identify the template. Nested
+// StructValues recurse through their own MarshalJSON; arrays/records of
+// structs nest naturally via json.Marshal.
+func (s *StructValue) MarshalJSON() ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]interface{}, len(s.fields)+1)
+	out["_type"] = s.template.Name
+	for _, f := range s.template.Fields {
+		out[f.Name] = starlarkToGo(s.fields[f.Name])
+	}
+	return json.Marshal(out)
 }
 
 // ── HasAttrs / HasSetField ────────────────────────────────────────────────
