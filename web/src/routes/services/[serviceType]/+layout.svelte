@@ -21,6 +21,7 @@
     if (path.endsWith('/oids')) return 'oids';
     if (path.endsWith('/modules')) return 'modules';
     if (path.endsWith('/history')) return 'history';
+    if (path.endsWith('/trends')) return 'trends';
     return 'default';
   });
 </script>
@@ -176,6 +177,26 @@
       </a>
       <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
         Settings
+      </a>
+      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+        Logs
+      </a>
+    {:else if serviceType === 'telemetry'}
+      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+        Overview
+      </a>
+      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
+        Settings
+      </a>
+      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+        Logs
+      </a>
+    {:else if serviceType === 'history'}
+      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+        Overview
+      </a>
+      <a href="/services/{serviceType}/trends" class="tab" class:active={currentTab() === 'trends'}>
+        Trends
       </a>
       <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
         Logs

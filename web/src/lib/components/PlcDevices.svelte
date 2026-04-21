@@ -294,7 +294,7 @@
 
   .instance-dot {
     width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-    background: var(--color-purple-400, #c084fc);
+    background: var(--purple-400, #c084fc);
   }
 
   .tree-label { font-family: 'IBM Plex Mono', monospace; font-weight: 500; }
@@ -337,8 +337,8 @@
 
   .error-box {
     padding: 1rem; border-radius: var(--rounded-lg); background: var(--theme-surface);
-    border: 1px solid var(--color-red-500, #ef4444); margin-bottom: 1.5rem;
-    p { margin: 0; font-size: 0.875rem; color: var(--color-red-500, #ef4444); }
+    border: 1px solid var(--red-500, #ef4444); margin-bottom: 1.5rem;
+    p { margin: 0; font-size: 0.875rem; color: var(--red-500, #ef4444); }
   }
 
   .empty-state { padding: 3rem 2rem; text-align: center; p { color: var(--theme-text-muted); font-size: 0.875rem; } }

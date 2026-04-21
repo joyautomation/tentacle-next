@@ -108,7 +108,7 @@
       .join('circle')
       .attr('transform', d => `rotate(${(d.x * 180) / Math.PI - 90}) translate(${d.y},0)`)
       .attr('fill', d => d.children
-        ? 'var(--color-teal-500, #14b8a6)'
+        ? 'var(--teal-500, #14b8a6)'
         : 'var(--theme-text-muted)')
       .attr('r', d => d.children ? 3.5 : 2.5);
 

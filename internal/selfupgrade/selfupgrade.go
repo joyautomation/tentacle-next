@@ -22,18 +22,17 @@ import (
 )
 
 const (
-	defaultGhOrg  = "joyautomation"
-	defaultRepo   = "tentacle-next"
-	cacheTTL      = 1 * time.Hour
-	binaryName    = "tentacle"
-	httpTimeout   = 120 * time.Second
-	unitName      = "tentacle.service"
-	cacheFileName = "releases-cache.json"
+	defaultBaseURL = "https://joyautomation.com"
+	cacheTTL       = 1 * time.Hour
+	binaryName     = "tentacle"
+	httpTimeout    = 120 * time.Second
+	unitName       = "tentacle.service"
+	cacheFileName  = "releases-cache.json"
 )
 
 // UpgradeStatus tracks the progress of an in-flight upgrade.
 type UpgradeStatus struct {
-	State   string `json:"state"`   // "idle", "downloading", "extracting", "replacing", "restarting", "failed"
+	State   string `json:"state"` // "idle", "downloading", "extracting", "replacing", "restarting", "failed"
 	Error   string `json:"error,omitempty"`
 	Version string `json:"version,omitempty"`
 }
@@ -46,8 +45,8 @@ type ReleasesResponse struct {
 
 // diskCache is the JSON structure persisted to disk.
 type diskCache struct {
-	Releases    []ReleaseInfo `json:"releases"`
-	FetchedAt   time.Time     `json:"fetchedAt"`
+	Releases  []ReleaseInfo `json:"releases"`
+	FetchedAt time.Time     `json:"fetchedAt"`
 }
 
 var (
@@ -98,34 +97,40 @@ func writeDiskCache(dc *diskCache) error {
 	return os.WriteFile(cacheFilePath(), data, 0o644)
 }
 
-// OfflineError indicates that GitHub could not be reached.
+// OfflineError indicates that the release manifest could not be reached.
 type OfflineError struct {
 	Cause error
 }
 
 func (e *OfflineError) Error() string {
-	return "unable to reach GitHub — check your internet connection"
+	return "unable to reach release manifest — check your internet connection"
 }
 
 func (e *OfflineError) Unwrap() error { return e.Cause }
 
-// ReleaseInfo describes a single GitHub release.
+// ReleaseInfo describes a single published release.
 type ReleaseInfo struct {
-	Version    string `json:"version"`
-	TagName    string `json:"tagName"`
-	Name       string `json:"name"`
-	ReleaseURL string `json:"releaseUrl"`
-	PublishedAt string `json:"publishedAt"`
-	Current    bool   `json:"current"`
+	Version     string            `json:"version"`
+	TagName     string            `json:"tagName"`
+	Name        string            `json:"name"`
+	ReleaseURL  string            `json:"releaseUrl"`
+	PublishedAt string            `json:"publishedAt"`
+	Current     bool              `json:"current"`
+	Assets      map[string]string `json:"assets,omitempty"`
 }
 
-// ListReleases returns all published, non-prerelease, non-draft releases.
-// Results are cached to disk with a 1-hour TTL. On fetch failure, stale
-// cached data is returned instead of an error.
-func ListReleases(ghOrg, ghToken string) (*ReleasesResponse, error) {
-	if ghOrg == "" {
-		ghOrg = defaultGhOrg
+func resolveBaseURL(baseURL string) string {
+	if baseURL != "" {
+		return strings.TrimRight(baseURL, "/")
 	}
+	return defaultBaseURL
+}
+
+// ListReleases returns all published releases from the joyautomation.com
+// manifest. Results are cached to disk with a 1-hour TTL. On fetch failure,
+// stale cached data is returned instead of an error.
+func ListReleases(baseURL string) (*ReleasesResponse, error) {
+	base := resolveBaseURL(baseURL)
 
 	releasesMu.RLock()
 	dc, _ := readDiskCache()
@@ -139,9 +144,7 @@ func ListReleases(ghOrg, ghToken string) (*ReleasesResponse, error) {
 		}, nil
 	}
 
-	// Fetch from GitHub.
-	result, fetchErr := fetchReleasesFromGitHub(ghOrg, ghToken)
-
+	result, fetchErr := fetchReleases(base)
 	if fetchErr != nil {
 		// Serve stale cache on error instead of failing.
 		if dc != nil && len(dc.Releases) > 0 {
@@ -153,7 +156,6 @@ func ListReleases(ghOrg, ghToken string) (*ReleasesResponse, error) {
 		return nil, fetchErr
 	}
 
-	// Persist to disk.
 	now := time.Now()
 	newCache := &diskCache{Releases: result, FetchedAt: now}
 	releasesMu.Lock()
@@ -183,18 +185,15 @@ func stampCurrent(releases []ReleaseInfo) []ReleaseInfo {
 	return out
 }
 
-func fetchReleasesFromGitHub(ghOrg, ghToken string) ([]ReleaseInfo, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=50", ghOrg, defaultRepo)
+func fetchReleases(baseURL string) ([]ReleaseInfo, error) {
+	url := baseURL + "/api/releases/tentacle"
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "tentacle-selfupgrade")
-	if ghToken != "" {
-		req.Header.Set("Authorization", "Bearer "+ghToken)
-	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -202,61 +201,55 @@ func fetchReleasesFromGitHub(ghOrg, ghToken string) ([]ReleaseInfo, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 403 {
-		return nil, fmt.Errorf("GitHub API rate limit exceeded — try again later or set GITHUB_TOKEN")
-	}
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("manifest returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var releases []struct {
-		TagName     string `json:"tag_name"`
-		Name        string `json:"name"`
-		HTMLURL     string `json:"html_url"`
-		Draft       bool   `json:"draft"`
-		Prerelease  bool   `json:"prerelease"`
-		PublishedAt string `json:"published_at"`
+	var payload struct {
+		Releases []struct {
+			Version      string            `json:"version"`
+			TagName      string            `json:"tagName"`
+			ReleasedAt   string            `json:"releasedAt"`
+			Notes        string            `json:"notes"`
+			Assets       map[string]string `json:"assets"`
+			IsPrerelease bool              `json:"isPrerelease"`
+		} `json:"releases"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	var result []ReleaseInfo
-	for _, r := range releases {
-		if r.Draft || r.Prerelease {
+	releaseURLBase := baseURL + "/software/tentacle/releases"
+	result := make([]ReleaseInfo, 0, len(payload.Releases))
+	for _, r := range payload.Releases {
+		if r.IsPrerelease {
 			continue
 		}
-		ver := strings.TrimPrefix(r.TagName, "v")
 		result = append(result, ReleaseInfo{
-			Version:     ver,
+			Version:     r.Version,
 			TagName:     r.TagName,
-			Name:        r.Name,
-			ReleaseURL:  r.HTMLURL,
-			PublishedAt: r.PublishedAt,
+			Name:        r.TagName,
+			ReleaseURL:  releaseURLBase + "/" + r.Version,
+			PublishedAt: r.ReleasedAt,
+			Assets:      r.Assets,
 		})
 	}
-
 	return result, nil
 }
 
 // PerformUpgrade downloads the target version and replaces the running binary.
 // It must be called in a goroutine — after success it spawns a systemd restart script.
-func PerformUpgrade(targetVersion, ghOrg, ghToken, binaryPath string, log *slog.Logger) {
-	if ghOrg == "" {
-		ghOrg = defaultGhOrg
-	}
+func PerformUpgrade(targetVersion, baseURL, binaryPath string, log *slog.Logger) {
+	base := resolveBaseURL(baseURL)
 
 	setStatus("downloading", targetVersion, "")
 	log.Info("selfupgrade: starting", "version", targetVersion)
 
-	// Build download URL for the tar.gz archive.
 	arch := getArch()
-	archiveName := fmt.Sprintf("%s_%s_linux_%s.tar.gz", binaryName, targetVersion, arch)
-	downloadURL := fmt.Sprintf("https://github.com/%s/%s/releases/download/v%s/%s",
-		ghOrg, defaultRepo, targetVersion, archiveName)
+	assetKey := fmt.Sprintf("linux_%s", arch)
+	downloadURL := fmt.Sprintf("%s/downloads/tentacle/v%s/%s.tar.gz", base, targetVersion, assetKey)
 
-	// Download to a temp file.
 	tmpArchive, err := os.CreateTemp("", "tentacle-upgrade-*.tar.gz")
 	if err != nil {
 		setStatus("failed", targetVersion, "create temp file: "+err.Error())
@@ -265,16 +258,14 @@ func PerformUpgrade(targetVersion, ghOrg, ghToken, binaryPath string, log *slog.
 	defer os.Remove(tmpArchive.Name())
 	defer tmpArchive.Close()
 
-	if err := downloadFile(downloadURL, ghToken, tmpArchive, log); err != nil {
+	if err := downloadFile(downloadURL, tmpArchive, log); err != nil {
 		setStatus("failed", targetVersion, "download: "+err.Error())
 		return
 	}
 	tmpArchive.Close()
 
-	// Extract the tentacle binary from the archive.
 	setStatus("extracting", targetVersion, "")
 
-	// Create temp file in the same directory as binaryPath for atomic rename.
 	tmpBinary, err := os.CreateTemp("/usr/local/bin", ".tentacle-upgrade-*")
 	if err != nil {
 		setStatus("failed", targetVersion, "create temp binary: "+err.Error())
@@ -283,7 +274,6 @@ func PerformUpgrade(targetVersion, ghOrg, ghToken, binaryPath string, log *slog.
 	tmpBinaryPath := tmpBinary.Name()
 	tmpBinary.Close()
 	defer func() {
-		// Clean up temp binary on failure — on success it's been renamed.
 		os.Remove(tmpBinaryPath)
 	}()
 
@@ -297,19 +287,16 @@ func PerformUpgrade(targetVersion, ghOrg, ghToken, binaryPath string, log *slog.
 		return
 	}
 
-	// Atomic replace.
 	setStatus("replacing", targetVersion, "")
 	if err := os.Rename(tmpBinaryPath, binaryPath); err != nil {
 		setStatus("failed", targetVersion, "replace binary: "+err.Error())
 		return
 	}
 
-	// Invalidate disk cache so the next check fetches fresh data.
 	releasesMu.Lock()
 	os.Remove(cacheFilePath())
 	releasesMu.Unlock()
 
-	// Spawn restart script.
 	setStatus("restarting", targetVersion, "")
 	if err := spawnRestartScript(log); err != nil {
 		setStatus("failed", targetVersion, "restart: "+err.Error())
@@ -319,7 +306,7 @@ func PerformUpgrade(targetVersion, ghOrg, ghToken, binaryPath string, log *slog.
 	log.Info("selfupgrade: restart script launched", "version", targetVersion)
 }
 
-func downloadFile(url, ghToken string, dest *os.File, log *slog.Logger) error {
+func downloadFile(url string, dest *os.File, log *slog.Logger) error {
 	log.Info("selfupgrade: downloading", "url", url)
 
 	client := &http.Client{Timeout: httpTimeout}
@@ -329,9 +316,6 @@ func downloadFile(url, ghToken string, dest *os.File, log *slog.Logger) error {
 	}
 	req.Header.Set("User-Agent", "tentacle-selfupgrade")
 	req.Header.Set("Accept", "application/octet-stream")
-	if ghToken != "" {
-		req.Header.Set("Authorization", "Bearer "+ghToken)
-	}
 
 	resp, err := client.Do(req)
 	if err != nil {

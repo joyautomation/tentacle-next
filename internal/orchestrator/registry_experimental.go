@@ -10,14 +10,6 @@ func init() {
 	moduleRegistry = append(moduleRegistry,
 		otypes.ModuleRegistryEntry{
 			Repo:         "tentacle-next",
-			ModuleID:     "caddy",
-			Description:  "Caddy reverse proxy",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
 			ModuleID:     "opcua",
 			Description:  "OPC UA client",
 			Category:     "optional",
@@ -74,6 +66,8 @@ func init() {
 			RequiredConfig: []otypes.ConfigField{
 				{EnvVar: "HISTORY_DB_HOST", Description: "PostgreSQL host", Default: "localhost"},
 				{EnvVar: "HISTORY_DB_PORT", Description: "PostgreSQL port", Default: "5432"},
+				{EnvVar: "HISTORY_DB_USER", Description: "PostgreSQL user", Default: "postgres"},
+				{EnvVar: "HISTORY_DB_PASSWORD", Description: "PostgreSQL password", Default: "postgres"},
 				{EnvVar: "HISTORY_DB_NAME", Description: "Database name", Default: "tentacle"},
 			},
 		},

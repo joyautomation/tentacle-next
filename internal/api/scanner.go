@@ -106,6 +106,28 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 
 	cacheKey := gatewayID + ":" + deviceID
 
+	// cleanupBrowse unsubscribes all browse-related subscriptions.
+	// Safe to call multiple times (each sub's Unsubscribe is idempotent).
+	var subs []bus.Subscription
+	cleanupBrowse := func() {
+		for _, s := range subs {
+			_ = s.Unsubscribe()
+		}
+	}
+
+	// finishBrowse sets terminal state and triggers cleanup.
+	finishBrowse := func(status string, result json.RawMessage) {
+		m.browseMu.Lock()
+		defer m.browseMu.Unlock()
+		state := m.browseStates[browseID]
+		if state == nil || state.Status != "browsing" {
+			return // already terminal
+		}
+		state.Status = status
+		state.Result = result
+		go cleanupBrowse()
+	}
+
 	// Record browse as in-progress.
 	m.browseMu.Lock()
 	m.browseStates[browseID] = &BrowseState{
@@ -115,6 +137,7 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 		Protocol:  protocol,
 		Status:    "browsing",
 		StartedAt: time.Now().UnixMilli(),
+		cleanup:   cleanupBrowse,
 	}
 	m.browseMu.Unlock()
 
@@ -123,37 +146,37 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 	m.log.Info("api: subscribing to browse result", "subject", resultSubject)
 	resultSub, err := m.bus.Subscribe(resultSubject, func(_ string, data []byte, _ bus.ReplyFunc) {
 		m.log.Info("api: received browse result", "subject", resultSubject, "bytes", len(data))
-		m.browseMu.Lock()
-		defer m.browseMu.Unlock()
-
-		startedAt := m.browseStates[browseID].StartedAt
 
 		// Transform scanner result into frontend BrowseCache shape.
 		cacheJSON := transformBrowseResult(data, deviceID, protocol)
+
+		m.browseMu.Lock()
+		state := m.browseStates[browseID]
+		if state == nil || state.Status != "browsing" {
+			m.browseMu.Unlock()
+			return // cancelled or already terminal
+		}
 		m.browseCache[cacheKey] = cacheJSON
+		state.Status = "completed"
+		state.Result = cacheJSON
+		m.browseMu.Unlock()
 
 		// Persist to KV so cache survives restart.
 		if _, err := m.bus.KVPut(topics.BucketBrowseCache, cacheKey, cacheJSON); err != nil {
 			m.log.Warn("failed to persist browse cache to KV", "key", cacheKey, "error", err)
 		}
-		m.browseStates[browseID] = &BrowseState{
-			BrowseID:  browseID,
-			GatewayID: gatewayID,
-			DeviceID:  deviceID,
-			Protocol:  protocol,
-			Status:    "completed",
-			StartedAt: startedAt,
-			Result:    cacheJSON,
-		}
+
+		go cleanupBrowse()
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to subscribe to browse result: "+err.Error())
 		return
 	}
+	subs = append(subs, resultSub)
 
-	// Also subscribe to progress to detect failures.
+	// Subscribe to progress to detect failures.
 	progressSubject := fmt.Sprintf("%s.browse.progress.%s", protocol, browseID)
-	progressSub, _ := m.bus.Subscribe(progressSubject, func(_ string, data []byte, _ bus.ReplyFunc) {
+	progressSub, err := m.bus.Subscribe(progressSubject, func(_ string, data []byte, _ bus.ReplyFunc) {
 		var progress struct {
 			Phase string `json:"phase"`
 		}
@@ -161,37 +184,18 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 			return
 		}
 		if progress.Phase == "failed" {
-			m.browseMu.Lock()
-			defer m.browseMu.Unlock()
-			startedAt := m.browseStates[browseID].StartedAt
-			m.browseStates[browseID] = &BrowseState{
-				BrowseID:  browseID,
-				GatewayID: gatewayID,
-				DeviceID:  deviceID,
-				Protocol:  protocol,
-				Status:    "failed",
-				StartedAt: startedAt,
-			}
+			finishBrowse("failed", nil)
 		}
 	})
-
-	// Auto-cleanup subscriptions after 5 minutes.
-	go func() {
-		time.Sleep(5 * time.Minute)
-		resultSub.Unsubscribe()
-		if progressSub != nil {
-			progressSub.Unsubscribe()
-		}
-	}()
+	if err == nil {
+		subs = append(subs, progressSub)
+	}
 
 	// Send the browse request to the scanner (scanner replies immediately with browseId).
 	_, err = m.bus.Request(topics.Browse(protocol), enrichedBody, 10*time.Second)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "browse request failed: "+err.Error())
-		resultSub.Unsubscribe()
-		if progressSub != nil {
-			progressSub.Unsubscribe()
-		}
+		cleanupBrowse()
 		return
 	}
 
@@ -381,4 +385,43 @@ func (m *Module) handleScannerUnsubscribe(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
+}
+
+// handleCancelGatewayBrowse cancels an in-progress browse operation.
+// POST /api/v1/gateways/{gatewayId}/browse/{browseId}/cancel
+func (m *Module) handleCancelGatewayBrowse(w http.ResponseWriter, r *http.Request) {
+	browseID := chi.URLParam(r, "browseId")
+	m.log.Info("api: cancel browse requested", "browseId", browseID)
+
+	m.browseMu.Lock()
+	state := m.browseStates[browseID]
+	if state == nil {
+		m.browseMu.Unlock()
+		m.log.Warn("api: cancel browse: not found", "browseId", browseID)
+		writeError(w, http.StatusNotFound, "browse not found")
+		return
+	}
+	if state.Status != "browsing" {
+		m.browseMu.Unlock()
+		m.log.Info("api: cancel browse: already terminal", "browseId", browseID, "status", state.Status)
+		writeJSON(w, http.StatusOK, map[string]string{"status": state.Status})
+		return
+	}
+	state.Status = "cancelled"
+	protocol := state.Protocol
+	cleanup := state.cleanup
+	m.browseMu.Unlock()
+
+	// Tell the scanner to stop the browse.
+	cancelSubject := topics.BrowseCancel(protocol, browseID)
+	m.log.Info("api: publishing browse cancel", "subject", cancelSubject)
+	if err := m.bus.Publish(cancelSubject, []byte(`{}`)); err != nil {
+		m.log.Error("api: failed to publish browse cancel", "subject", cancelSubject, "error", err)
+	}
+
+	if cleanup != nil {
+		go cleanup()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }

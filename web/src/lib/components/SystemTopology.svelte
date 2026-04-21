@@ -21,7 +21,7 @@
 
   let { services, apiConnected, monolith = false }: Props = $props();
 
-  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
+  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'history' | 'database' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
 
   type NodeDatum = {
     id: string;
@@ -56,9 +56,10 @@
   function getNodeColor(type: NodeType): string {
     switch (type) {
       case 'nats':
-      case 'bus': return 'var(--color-purple-500, #a855f7)';
-      case 'device': return 'var(--color-amber-500, #f59e0b)';
-      default: return 'var(--color-teal-500, #14b8a6)';
+      case 'bus': return 'var(--purple-500, #a855f7)';
+      case 'device': return 'var(--orange-500, #f97316)';
+      case 'database': return 'var(--sky-500, #0ea5e9)';
+      default: return 'var(--teal-500, #14b8a6)';
     }
   }
 
@@ -75,9 +76,20 @@
       case 'mqtt':
       case 'plc':
       case 'snmp': return 35;
+      case 'database': return 28;
       case 'device': return 25;
       default: return 30;
     }
+  }
+
+  /** Parse a numeric metadata field that may arrive as number or string. */
+  function metaNum(v: unknown): number {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'string') {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+    return 0;
   }
 
   function formatUptime(startedAt: number): string {
@@ -104,6 +116,24 @@
       enabled: true,
       depth: 0
     });
+
+    // Orchestrator fallback — the orchestrator publishes its own heartbeat like
+    // every other module, so it normally renders through the services loop below.
+    // But if its heartbeat is missing (stale KV, bus desync), still show it as a
+    // static node so the topology isn't lying about what's running.
+    const orchestratorService = services.find(s => s.serviceType === 'orchestrator');
+    if (!orchestratorService) {
+      nodes.push({
+        id: 'orchestrator',
+        name: 'Orchestrator',
+        type: 'orchestrator',
+        subtitle: apiConnected ? 'Reconcile Loop' : 'Disconnected',
+        connected: apiConnected,
+        enabled: true,
+        depth: 1,
+      });
+      links.push({ source: 'nats', target: 'orchestrator' });
+    }
 
     // Identify key services for topology wiring
     const apiService = services.find(s => s.serviceType === 'api');
@@ -171,6 +201,26 @@
           } catch { /* ignore malformed devices metadata */ }
         }
 
+        // Add a database node downstream of history — shown whenever history is up.
+        // Active-flow detection below decides whether the edges animate.
+        if (service.serviceType === 'history') {
+          const dbNodeId = `history-db-${service.moduleId}`;
+          if (!nodes.some(n => n.id === dbNodeId)) {
+            const lastFlush = metaNum(service.metadata?.lastFlushTime);
+            const flushedRecently = lastFlush > 0 && Date.now() - lastFlush < 60_000;
+            nodes.push({
+              id: dbNodeId,
+              name: 'History DB',
+              type: 'database',
+              subtitle: flushedRecently ? 'Writing' : (lastFlush > 0 ? 'Idle' : 'No writes yet'),
+              connected: serviceEnabled,
+              enabled: serviceEnabled,
+              depth: 2,
+            });
+            links.push({ source: nodeId, target: dbNodeId });
+          }
+        }
+
         // Add device nodes downstream of SNMP
         if (service.serviceType === 'snmp' && service.metadata?.devices) {
           try {
@@ -216,6 +266,19 @@
       links.push({ source: 'web', target: caddyNode.id });
     }
 
+    // Build a lookup of history services so we can check last-flush activity per link.
+    const historyServiceByNodeId = new Map<string, Service>();
+    for (const s of services) {
+      if (s.serviceType === 'history') {
+        historyServiceByNodeId.set(`history-${s.moduleId}`, s);
+      }
+    }
+    const historyIsFlowing = (svc: Service | undefined) => {
+      if (!svc) return false;
+      const lastFlush = metaNum(svc.metadata?.lastFlushTime);
+      return lastFlush > 0 && Date.now() - lastFlush < 60_000;
+    };
+
     // Mark data-flow links as active and set flow direction
     // EtherNet/IP: data flows from device → EIP → NATS (inbound to NATS)
     // MQTT: data flows from NATS → MQTT (outbound from NATS)
@@ -225,7 +288,22 @@
       const tgtId = typeof l.target === 'string' ? l.target : (l.target as NodeDatum).id;
       const src = nodes.find(n => n.id === srcId);
       const tgt = nodes.find(n => n.id === tgtId);
-      if (src?.connected && tgt?.connected && src?.enabled && tgt?.enabled &&
+      if (!src || !tgt) continue;
+
+      // History edges (bus→history and history→database): animate only when the
+      // module has actually flushed a batch to the DB recently.
+      if (src.type === 'history' || tgt.type === 'history' || src.type === 'database' || tgt.type === 'database') {
+        const historyNodeId = src.type === 'history' ? src.id : (tgt.type === 'history' ? tgt.id : null);
+        const svc = historyNodeId ? historyServiceByNodeId.get(historyNodeId) : undefined;
+        if (src.connected && tgt.connected && src.enabled && tgt.enabled && historyIsFlowing(svc)) {
+          l.active = true;
+          // bus→history→database all flow source→target
+          l.flowDirection = 1;
+        }
+        continue;
+      }
+
+      if (src.connected && tgt.connected && src.enabled && tgt.enabled &&
           (dataFlowTypes.has(src.type) || dataFlowTypes.has(tgt.type))) {
         l.active = true;
         // Determine flow direction based on service types
@@ -266,6 +344,8 @@
     // Re-center NATS pin
     const natsNode = currentNodes.find(n => n.id === 'nats');
     if (natsNode) {
+      natsNode.x = width / 2;
+      natsNode.y = height / 2;
       natsNode.fx = width / 2;
       natsNode.fy = height / 2;
     }
@@ -369,6 +449,8 @@
     // Pin NATS to center
     const natsNode = nodes.find(n => n.id === 'nats');
     if (natsNode) {
+      natsNode.x = cx;
+      natsNode.y = cy;
       natsNode.fx = cx;
       natsNode.fy = cy;
     }
@@ -460,8 +542,11 @@
         const srcId = typeof d.source === 'string' ? d.source : (d.source as NodeDatum).id;
         const tgt = nodes.find(n => n.id === tgtId);
         const src = nodes.find(n => n.id === srcId);
-        if (tgt?.type === 'mqtt' || src?.type === 'mqtt') return 'var(--color-amber-400, #fbbf24)';
-        return 'var(--color-sky-400, #38bdf8)';
+        if (tgt?.type === 'mqtt' || src?.type === 'mqtt') return 'var(--amber-400, #fbbf24)';
+        if (tgt?.type === 'history' || src?.type === 'history' || tgt?.type === 'database' || src?.type === 'database') {
+          return 'var(--orange-500, #f97316)';
+        }
+        return 'var(--sky-400, #38bdf8)';
       })
       .attr('stroke-width', 2)
       .attr('stroke-opacity', 0.7)
@@ -475,7 +560,7 @@
       .data(biLinks)
       .join('line')
       .attr('class', 'flow-line flow-bi-fwd')
-      .attr('stroke', 'var(--color-sky-400, #38bdf8)')
+      .attr('stroke', 'var(--sky-400, #38bdf8)')
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
       .attr('stroke-dasharray', '5 7');
@@ -486,7 +571,7 @@
       .data(biLinks)
       .join('line')
       .attr('class', 'flow-line flow-reverse flow-bi-rev')
-      .attr('stroke', 'var(--color-amber-400, #fbbf24)')
+      .attr('stroke', 'var(--amber-400, #fbbf24)')
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.6)
       .attr('stroke-dasharray', '5 7');
@@ -532,7 +617,10 @@
           case 'network': return 'NET';
           case 'nftables': return 'NAT';
           case 'snmp': return 'SNMP';
+          case 'history': return 'HIST';
+          case 'database': return 'DB';
           case 'device': return 'DEV';
+          case 'orchestrator': return 'ORCH';
           default: return d.name.slice(0, 4).toUpperCase();
         }
       });
@@ -551,7 +639,7 @@
     nodeGroups.append('text')
       .attr('text-anchor', 'middle')
       .attr('y', d => getNodeRadius(d.type) + 30)
-      .attr('fill', d => !d.connected ? '#ef4444' : !d.enabled ? 'var(--color-amber-500, #f59e0b)' : 'var(--theme-text-muted)')
+      .attr('fill', d => !d.connected ? '#ef4444' : !d.enabled ? 'var(--amber-500, #f59e0b)' : 'var(--theme-text-muted)')
       .attr('font-size', '10px')
       .attr('opacity', d => !d.connected ? 0.6 : !d.enabled ? 0.7 : 1)
       .text(d => d.subtitle || '');
@@ -575,7 +663,7 @@
         d.fx = null;
         d.fy = null;
         // Navigate on click (not drag) — skip non-navigable nodes
-        const skipTypes = new Set(['device', 'web', 'nats', 'bus']);
+        const skipTypes = new Set(['device', 'database', 'web', 'nats', 'bus']);
         if (!dragMoved && !skipTypes.has(d.type)) {
           goto(`/services/${d.type}`);
         }

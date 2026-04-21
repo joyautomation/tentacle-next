@@ -120,16 +120,16 @@
     min-width: 1.4rem;
 
     &.added {
-      background: color-mix(in srgb, var(--color-green-500) 20%, transparent);
-      color: var(--color-green-500);
+      background: color-mix(in srgb, var(--green-500) 20%, transparent);
+      color: var(--green-500);
     }
     &.modified {
-      background: color-mix(in srgb, var(--color-amber-500) 20%, transparent);
-      color: var(--color-amber-500);
+      background: color-mix(in srgb, var(--amber-500) 20%, transparent);
+      color: var(--amber-500);
     }
     &.removed {
-      background: color-mix(in srgb, var(--color-red-500) 20%, transparent);
-      color: var(--color-red-500);
+      background: color-mix(in srgb, var(--red-500) 20%, transparent);
+      color: var(--red-500);
     }
     &.unchanged {
       background: color-mix(in srgb, var(--theme-text-muted) 20%, transparent);
@@ -163,13 +163,13 @@
     }
 
     &.added {
-      border-left: 3px solid var(--color-green-500);
+      border-left: 3px solid var(--green-500);
     }
     &.modified {
-      border-left: 3px solid var(--color-amber-500);
+      border-left: 3px solid var(--amber-500);
     }
     &.removed {
-      border-left: 3px solid var(--color-red-500);
+      border-left: 3px solid var(--red-500);
     }
     &.unchanged {
       border-left: 3px solid var(--theme-border);

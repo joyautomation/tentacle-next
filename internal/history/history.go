@@ -144,6 +144,9 @@ func (h *History) Start(ctx context.Context, b bus.Bus) error {
 	h.subs = append(h.subs, shutdownSub)
 	h.mu.Unlock()
 
+	// Query/usage/enabled/metrics request-reply responders.
+	h.registerQueryResponders(ctx, b)
+
 	// Start the periodic batch flusher.
 	h.stopFlusher = make(chan struct{})
 	go h.flushLoop()

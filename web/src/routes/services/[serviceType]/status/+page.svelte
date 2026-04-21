@@ -550,15 +550,15 @@
   }
 
   .text-green {
-    color: var(--color-green-500, #22c55e);
+    color: var(--green-500, #22c55e);
   }
 
   .text-red {
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
   }
 
   .text-amber {
-    color: var(--color-amber-500, #f59e0b);
+    color: var(--amber-500, #f59e0b);
   }
 
   .stats-grid {
@@ -598,8 +598,8 @@
     }
 
     &.error {
-      border-color: var(--color-red-500, #ef4444);
-      p { color: var(--color-red-500, #ef4444); }
+      border-color: var(--red-500, #ef4444);
+      p { color: var(--red-500, #ef4444); }
     }
   }
 

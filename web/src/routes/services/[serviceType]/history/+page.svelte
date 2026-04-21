@@ -242,16 +242,16 @@
     font-weight: 700;
 
     &.added {
-      background: color-mix(in srgb, var(--color-green-500) 20%, transparent);
-      color: var(--color-green-500);
+      background: color-mix(in srgb, var(--green-500) 20%, transparent);
+      color: var(--green-500);
     }
     &.modified {
-      background: color-mix(in srgb, var(--color-amber-500) 20%, transparent);
-      color: var(--color-amber-500);
+      background: color-mix(in srgb, var(--amber-500) 20%, transparent);
+      color: var(--amber-500);
     }
     &.removed {
-      background: color-mix(in srgb, var(--color-red-500) 20%, transparent);
-      color: var(--color-red-500);
+      background: color-mix(in srgb, var(--red-500) 20%, transparent);
+      color: var(--red-500);
     }
   }
 
@@ -300,10 +300,10 @@
   }
 
   .error {
-    color: var(--color-red-500);
+    color: var(--red-500);
     font-size: 0.875rem;
     padding: 0.5rem 0.75rem;
-    background: color-mix(in srgb, var(--color-red-500) 10%, transparent);
+    background: color-mix(in srgb, var(--red-500) 10%, transparent);
     border-radius: var(--rounded-md);
   }
 
@@ -360,16 +360,16 @@
     text-transform: uppercase;
 
     &.added {
-      background: color-mix(in srgb, var(--color-green-500) 20%, transparent);
-      color: var(--color-green-500);
+      background: color-mix(in srgb, var(--green-500) 20%, transparent);
+      color: var(--green-500);
     }
     &.modified {
-      background: color-mix(in srgb, var(--color-amber-500) 20%, transparent);
-      color: var(--color-amber-500);
+      background: color-mix(in srgb, var(--amber-500) 20%, transparent);
+      color: var(--amber-500);
     }
     &.removed {
-      background: color-mix(in srgb, var(--color-red-500) 20%, transparent);
-      color: var(--color-red-500);
+      background: color-mix(in srgb, var(--red-500) 20%, transparent);
+      color: var(--red-500);
     }
     &.unchanged {
       background: color-mix(in srgb, var(--theme-text-muted) 20%, transparent);
@@ -408,9 +408,9 @@
     font-size: 0.75rem;
     font-family: 'SF Mono', 'Fira Code', monospace;
 
-    &.added { background: color-mix(in srgb, var(--color-green-500) 8%, transparent); }
-    &.removed { background: color-mix(in srgb, var(--color-red-500) 8%, transparent); }
-    &.modified { background: color-mix(in srgb, var(--color-amber-500) 8%, transparent); }
+    &.added { background: color-mix(in srgb, var(--green-500) 8%, transparent); }
+    &.removed { background: color-mix(in srgb, var(--red-500) 8%, transparent); }
+    &.modified { background: color-mix(in srgb, var(--amber-500) 8%, transparent); }
   }
 
   .df-path {
@@ -428,12 +428,12 @@
   }
 
   .df-old {
-    color: var(--color-red-500);
+    color: var(--red-500);
     text-decoration: line-through;
   }
 
   .df-new {
-    color: var(--color-green-500);
+    color: var(--green-500);
   }
 
   .df-arrow {

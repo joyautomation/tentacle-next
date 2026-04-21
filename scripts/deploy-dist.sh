@@ -20,7 +20,7 @@ set -euo pipefail
 CONTAINER="tentacle-dist"
 IMAGE="images:ubuntu/24.04"
 REMOTE_BIN="/usr/local/bin/tentacle"
-REPO="joyautomation/tentacle-next"
+RELEASE_BASE="${TENTACLE_RELEASE_BASE:-https://joyautomation.com}"
 TENTACLE_PORT=4000
 TS_KEY_FILE="$HOME/.config/tentacle-next/tailscale-auth-key"
 KEEP=false
@@ -34,20 +34,18 @@ for arg in "$@"; do
 done
 
 # ---------------------------------------------------------------------------
-# Determine release version and asset URL
+# Determine release version and asset URL (via joyautomation.com manifest)
 # ---------------------------------------------------------------------------
 if [ -z "$VERSION" ]; then
   echo "==> Fetching latest release info..."
-  VERSION=$(gh release list --repo "$REPO" --limit 1 --json tagName --jq '.[0].tagName')
-  if [ -z "$VERSION" ]; then
-    echo "    ERROR: Could not determine latest release"
+  VERSION=$(curl -fsSL "$RELEASE_BASE/api/releases/tentacle/latest" | jq -r .tagName)
+  if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+    echo "    ERROR: Could not determine latest release from $RELEASE_BASE"
     exit 1
   fi
 fi
 echo "    Release: $VERSION"
 
-# Strip leading 'v' for the archive name
-VERSION_NUM="${VERSION#v}"
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)  ARCH="amd64" ;;
@@ -58,18 +56,16 @@ case "$ARCH" in
     ;;
 esac
 
-ASSET="tentacle_${VERSION_NUM}_linux_${ARCH}.tar.gz"
-echo "    Asset: $ASSET"
+ASSET="linux_${ARCH}.tar.gz"
+DOWNLOAD_URL="$RELEASE_BASE/downloads/tentacle/$VERSION/$ASSET"
+echo "    Download: $DOWNLOAD_URL"
 
 # Download to a temp directory
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
 echo "==> Downloading release asset..."
-gh release download "$VERSION" \
-  --repo "$REPO" \
-  --pattern "$ASSET" \
-  --dir "$TMPDIR"
+curl -fsSL -o "$TMPDIR/$ASSET" "$DOWNLOAD_URL"
 
 echo "==> Extracting binary..."
 tar -xzf "$TMPDIR/$ASSET" -C "$TMPDIR"

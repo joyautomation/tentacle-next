@@ -48,11 +48,29 @@ func (t *PlcTag) Close() {
 	}
 }
 
+// Abort cancels any in-progress read/write on the tag.
+// Safe to call from another goroutine while Read is blocking.
+func (t *PlcTag) Abort() {
+	if t == nil || t.handle < 0 {
+		return
+	}
+	C.plc_tag_abort(t.handle)
+}
+
 // Read reads the tag value from the PLC (synchronous).
 func (t *PlcTag) Read(timeout time.Duration) error {
 	rc := C.plc_tag_read(t.handle, C.int(timeout.Milliseconds()))
 	if rc != plctagStatusOK {
 		return fmt.Errorf("plc_tag_read failed: %s (rc=%d)", plctagError(int(rc)), rc)
+	}
+	return nil
+}
+
+// ReadStart kicks off an asynchronous read. Poll Status() for completion.
+func (t *PlcTag) ReadStart() error {
+	rc := C.plc_tag_read(t.handle, C.int(0))
+	if rc != plctagStatusOK && rc != plctagStatusPending {
+		return fmt.Errorf("plc_tag_read async start failed: %s (rc=%d)", plctagError(int(rc)), rc)
 	}
 	return nil
 }

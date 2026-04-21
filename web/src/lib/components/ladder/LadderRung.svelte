@@ -50,7 +50,7 @@
   }
 
   function wireColor(energized: boolean): string {
-    return energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text-muted, #666)';
+    return energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text-muted, #666)';
   }
 
   function handleElementClick(e: MouseEvent, elId: string, idx: number, type: 'condition' | 'output') {
@@ -125,7 +125,7 @@
       <text
         x={LAYOUT.RAIL_LEFT}
         y="8"
-        fill="var(--color-green-400, #4ade80)"
+        fill="var(--green-400, #4ade80)"
         font-size="10"
         font-family="monospace"
         font-style="italic"
@@ -200,22 +200,22 @@
         />
         <!-- Contact lines -->
         <line x1="0" y1={layoutEl.height / 2} x2={layoutEl.width * 0.3} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="1.5" />
         <line x1={layoutEl.width * 0.7} y1={layoutEl.height / 2} x2={layoutEl.width} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="1.5" />
         <!-- Vertical bars -->
         <line x1={layoutEl.width * 0.3} y1={layoutEl.height * 0.2} x2={layoutEl.width * 0.3} y2={layoutEl.height * 0.8}
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="2" />
         <line x1={layoutEl.width * 0.7} y1={layoutEl.height * 0.2} x2={layoutEl.width * 0.7} y2={layoutEl.height * 0.8}
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="2" />
         {#if el.type === 'NC'}
           <!-- Diagonal slash for NC -->
           <line x1={layoutEl.width * 0.35} y1={layoutEl.height * 0.75} x2={layoutEl.width * 0.65} y2={layoutEl.height * 0.25}
-            stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+            stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
             stroke-width="1.5" />
         {/if}
 
@@ -266,7 +266,7 @@
             x={layoutEl.width / 2}
             y={layoutEl.height + 22}
             text-anchor="middle"
-            fill={energized ? 'var(--color-green-400, #4ade80)' : 'var(--color-red-400, #f87171)'}
+            fill={energized ? 'var(--green-400, #4ade80)' : 'var(--red-400, #f87171)'}
             font-size="9"
             font-family="monospace"
             font-weight="bold"
@@ -287,33 +287,33 @@
         />
         <!-- Coil wires -->
         <line x1="0" y1={layoutEl.height / 2} x2={layoutEl.width * 0.25} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="1.5" />
         <line x1={layoutEl.width * 0.75} y1={layoutEl.height / 2} x2={layoutEl.width} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="1.5" />
         <!-- Coil parentheses (arcs) -->
         <path
           d="M {layoutEl.width * 0.35} {layoutEl.height * 0.2} C {layoutEl.width * 0.2} {layoutEl.height * 0.2}, {layoutEl.width * 0.2} {layoutEl.height * 0.8}, {layoutEl.width * 0.35} {layoutEl.height * 0.8}"
           fill="none"
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="2"
         />
         <path
           d="M {layoutEl.width * 0.65} {layoutEl.height * 0.2} C {layoutEl.width * 0.8} {layoutEl.height * 0.2}, {layoutEl.width * 0.8} {layoutEl.height * 0.8}, {layoutEl.width * 0.65} {layoutEl.height * 0.8}"
           fill="none"
-          stroke={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
           stroke-width="2"
         />
         {#if el.type === 'OTL'}
           <!-- L for latch -->
           <text x={layoutEl.width / 2} y={layoutEl.height / 2 + 4} text-anchor="middle"
-            fill={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+            fill={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
             font-size="12" font-family="monospace" font-weight="bold">L</text>
         {:else if el.type === 'OTU'}
           <!-- U for unlatch -->
           <text x={layoutEl.width / 2} y={layoutEl.height / 2 + 4} text-anchor="middle"
-            fill={energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
+            fill={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
             font-size="12" font-family="monospace" font-weight="bold">U</text>
         {/if}
 
@@ -362,7 +362,7 @@
             x={layoutEl.width / 2}
             y={layoutEl.height + 22}
             text-anchor="middle"
-            fill={energized ? 'var(--color-green-400, #4ade80)' : 'var(--color-red-400, #f87171)'}
+            fill={energized ? 'var(--green-400, #4ade80)' : 'var(--red-400, #f87171)'}
             font-size="9"
             font-family="monospace"
             font-weight="bold"
@@ -377,7 +377,7 @@
           x="0" y="0"
           width={layoutEl.width} height={layoutEl.height}
           fill="var(--theme-surface, #1a1a1a)"
-          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text-muted, #666)'}
+          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text-muted, #666)'}
           stroke-width={selected ? 2 : 1.5}
           rx="3"
         />
@@ -404,7 +404,7 @@
         <!-- Monitoring: ACC and DN -->
         {#if monitoring}
           <text x={layoutEl.width / 2} y="62" text-anchor="middle"
-            fill="var(--color-cyan-400, #22d3ee)" font-size="9" font-family="monospace">
+            fill="var(--cyan-400, #22d3ee)" font-size="9" font-family="monospace">
             ACC: {getTagValue(`${el.tag}.ACC`)} | DN: {getTagValue(`${el.tag}.DN`)}
           </text>
         {/if}
@@ -415,7 +415,7 @@
           x="0" y="0"
           width={layoutEl.width} height={layoutEl.height}
           fill="var(--theme-surface, #1a1a1a)"
-          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : energized ? 'var(--color-green-500, #22c55e)' : 'var(--theme-text-muted, #666)'}
+          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text-muted, #666)'}
           stroke-width={selected ? 2 : 1.5}
           rx="3"
         />
@@ -437,7 +437,7 @@
         </text>
         {#if monitoring}
           <text x={layoutEl.width / 2} y="62" text-anchor="middle"
-            fill="var(--color-cyan-400, #22d3ee)" font-size="9" font-family="monospace">
+            fill="var(--cyan-400, #22d3ee)" font-size="9" font-family="monospace">
             ACC: {getTagValue(`${el.tag}.ACC`)} | DN: {getTagValue(`${el.tag}.DN`)}
           </text>
         {/if}
@@ -460,7 +460,7 @@
 
     &.energized line,
     &.energized path {
-      filter: drop-shadow(0 0 3px var(--color-green-500, #22c55e));
+      filter: drop-shadow(0 0 3px var(--green-500, #22c55e));
     }
   }
 

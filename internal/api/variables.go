@@ -20,18 +20,36 @@ import (
 func (m *Module) handleListVariables(w http.ResponseWriter, r *http.Request) {
 	moduleID := r.URL.Query().Get("moduleId")
 
-	// Determine which module IDs to query.
+	// Determine which module IDs to query. Only scanner/protocol modules
+	// respond to variable requests — skip infrastructure modules like
+	// api, orchestrator, caddy, telemetry, etc.
+	variableServiceTypes := map[string]bool{
+		"ethernetip": true, "opcua": true, "snmp": true, "modbus": true,
+		"gateway": true, "plc": true, "network": true,
+	}
+
 	var moduleIDs []string
 	if moduleID != "" {
 		moduleIDs = []string{moduleID}
 	} else {
-		// Discover running scanner modules from heartbeats bucket.
 		keys, err := m.bus.KVKeys(topics.BucketHeartbeats)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list heartbeats: "+err.Error())
 			return
 		}
-		moduleIDs = keys
+		for _, key := range keys {
+			data, _, err := m.bus.KVGet(topics.BucketHeartbeats, key)
+			if err != nil {
+				continue
+			}
+			var hb ttypes.ServiceHeartbeat
+			if json.Unmarshal(data, &hb) != nil {
+				continue
+			}
+			if variableServiceTypes[hb.ServiceType] {
+				moduleIDs = append(moduleIDs, key)
+			}
+		}
 	}
 
 	type varResult struct {

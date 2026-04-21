@@ -1,4 +1,4 @@
-//go:build all
+//go:build caddy || all
 
 // Package caddy manages a Caddy reverse proxy instance.
 // It auto-installs Caddy, writes the Caddyfile (from structured config or raw

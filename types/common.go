@@ -116,6 +116,6 @@ type CommunicationEvent struct {
 
 // SanitizeForSubject replaces NATS-invalid characters in an identifier.
 func SanitizeForSubject(s string) string {
-	r := strings.NewReplacer(" ", "_", ".", "_", "*", "_", ">", "_", ";", "_", "=", "_")
+	r := strings.NewReplacer(" ", "_", ".", "_", ":", "_", "*", "_", ">", "_", ";", "_", "=", "_")
 	return r.Replace(s)
 }

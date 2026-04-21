@@ -114,7 +114,7 @@ test.describe('System page — releases', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('System page — upgrade flow', () => {
-  test('shows confirmation modal before upgrading', async ({ page }) => {
+  test('shows confirmation modal with disabled button until version typed', async ({ page }) => {
     await mockConfiguredSystem(page, {
       mode: 'systemd',
       systemService: SERVICE_STATUS_SYSTEMD,
@@ -135,7 +135,34 @@ test.describe('System page — upgrade flow', () => {
 
     await expect(page.getByText('Confirm Version Change')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Switch to v0\.0\.8/ })).toBeVisible();
+    // Button is disabled until version is typed
+    const switchBtn = page.getByRole('button', { name: /Switch to v0\.0\.8/ });
+    await expect(switchBtn).toBeDisabled();
+    // Type the version
+    await page.getByPlaceholder('0.0.8').fill('0.0.8');
+    await expect(switchBtn).toBeEnabled();
+  });
+
+  test('shows warning for versions without self-update feature', async ({ page }) => {
+    await mockConfiguredSystem(page, {
+      mode: 'systemd',
+      systemService: SERVICE_STATUS_SYSTEMD,
+    });
+    await page.route('**/api/v1/system/releases', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(releasesResponse([
+          { version: '0.0.9', tagName: 'v0.0.9', name: 'v0.0.9', releaseUrl: '', publishedAt: '2026-04-12T00:00:00Z', current: true },
+          { version: '0.0.8', tagName: 'v0.0.8', name: 'v0.0.8', releaseUrl: '', publishedAt: '2026-04-10T00:00:00Z', current: false },
+        ])),
+      }),
+    );
+    await page.goto('/system');
+
+    // Switch to v0.0.8 — should show warning
+    await page.getByRole('button', { name: 'Switch' }).first().click({ timeout: 10_000 });
+    await expect(page.getByText('does not include the self-update feature')).toBeVisible();
   });
 
   test('cancel closes confirmation modal', async ({ page }) => {
@@ -196,6 +223,7 @@ test.describe('System page — upgrade flow', () => {
     await page.goto('/system');
 
     await page.getByRole('button', { name: 'Switch' }).first().click({ timeout: 10_000 });
+    await page.getByPlaceholder('0.0.8').fill('0.0.8');
     await page.getByRole('button', { name: /Switch to v0\.0\.8/ }).click();
 
     await expect(page.getByText('Downloading new version')).toBeVisible({ timeout: 5_000 });
@@ -222,6 +250,7 @@ test.describe('System page — upgrade flow', () => {
     await page.goto('/system');
 
     await page.getByRole('button', { name: 'Switch' }).first().click({ timeout: 10_000 });
+    await page.getByPlaceholder('0.0.8').fill('0.0.8');
     await page.getByRole('button', { name: /Switch to v0\.0\.8/ }).click();
 
     await expect(page.getByText('Upgrade failed')).toBeVisible({ timeout: 5_000 });

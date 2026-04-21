@@ -18,6 +18,7 @@
     "@fontsource/ibm-plex-mono": "^5.0.0",
     "@fontsource/righteous": "^5.0.0",
     "@fontsource/space-grotesk": "^5.0.0",
+    "@joyautomation/cortex": "^0.0.2",
     "@joyautomation/salt": "^0.1.5"
   },
   "devDependencies": {

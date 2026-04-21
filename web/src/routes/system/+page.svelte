@@ -38,6 +38,7 @@
   let loadingReleases = $state(false);
   let showConfirm = $state(false);
   let confirmVersion = $state('');
+  let confirmInput = $state('');
   let phase = $state<'idle' | 'upgrading' | 'restarting' | 'success' | 'failed'>('idle');
   let mode = $state('unknown');
 
@@ -103,8 +104,18 @@
     return `${days}d ago`;
   }
 
+  function lacksUpgradeFeature(version: string): boolean {
+    // v0.0.8 and earlier don't have the self-update feature
+    const parts = baseSemver(version).split('.').map(Number);
+    const [major, minor, patch] = [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+    return major === 0 && minor === 0 && patch <= 8;
+  }
+
+  let confirmMatches = $derived(confirmInput === confirmVersion);
+
   function promptUpgrade(version: string) {
     confirmVersion = version;
+    confirmInput = '';
     showConfirm = true;
   }
 
@@ -333,9 +344,25 @@
         replace the running binary, and restart the service.
         The UI will be briefly unavailable during the restart.
       </p>
+      {#if lacksUpgradeFeature(confirmVersion)}
+        <div class="modal-notice">
+          Version v{confirmVersion} does not include the self-update feature. Once switched, you will need to update manually to return to a newer version.
+        </div>
+      {/if}
+      <label class="confirm-label" for="confirm-version-input">
+        Type <strong>{confirmVersion}</strong> to confirm:
+      </label>
+      <input
+        id="confirm-version-input"
+        class="confirm-input"
+        type="text"
+        bind:value={confirmInput}
+        placeholder={confirmVersion}
+        autocomplete="off"
+      />
       <div class="modal-actions">
         <button class="modal-cancel-btn" onclick={() => { showConfirm = false; }}>Cancel</button>
-        <button class="modal-apply-btn" onclick={startUpgrade}>
+        <button class="modal-apply-btn" onclick={startUpgrade} disabled={!confirmMatches}>
           Switch to v{confirmVersion}
         </button>
       </div>
@@ -626,7 +653,43 @@
     font-size: 0.875rem;
     color: var(--theme-text-muted);
     line-height: 1.5;
+    margin-bottom: 1rem;
+  }
+
+  .modal-notice {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 0.75rem 1rem;
+    border-radius: var(--rounded);
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    color: var(--theme-text);
+    margin-bottom: 1rem;
+  }
+
+  .confirm-label {
+    display: block;
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    margin-bottom: 0.375rem;
+  }
+
+  .confirm-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-family: 'IBM Plex Mono', monospace;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded);
+    background: var(--theme-surface);
+    color: var(--theme-text);
     margin-bottom: 1.25rem;
+    box-sizing: border-box;
+
+    &:focus {
+      outline: none;
+      border-color: var(--theme-primary);
+    }
   }
 
   .modal-actions {
@@ -660,6 +723,7 @@
     color: white;
     cursor: pointer;
 
-    &:hover { background: var(--theme-primary-hover); }
+    &:hover:not(:disabled) { background: var(--theme-primary-hover); }
+    &:disabled { opacity: 0.4; cursor: not-allowed; }
   }
 </style>

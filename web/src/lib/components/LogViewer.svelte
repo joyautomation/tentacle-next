@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { subscribe } from '$lib/api/subscribe';
+  import { apiPost } from '$lib/api/client';
+  import { state as saltState } from '@joyautomation/salt';
 
   interface LogEntry {
     timestamp: string;
@@ -62,10 +64,10 @@
 
   function levelColor(level: string): string {
     switch (level) {
-      case 'error': return 'var(--color-red-500, #ef4444)';
-      case 'warn': return 'var(--color-yellow-500, #eab308)';
-      case 'info': return 'var(--color-sky-500, #0ea5e9)';
-      case 'debug': return 'var(--color-purple-500, #a855f7)';
+      case 'error': return 'var(--red-500, #ef4444)';
+      case 'warn': return 'var(--yellow-500, #eab308)';
+      case 'info': return 'var(--sky-500, #0ea5e9)';
+      case 'debug': return 'var(--purple-500, #a855f7)';
       default: return 'var(--theme-text-muted)';
     }
   }
@@ -88,6 +90,25 @@
     if (!flushScheduled) {
       flushScheduled = true;
       requestAnimationFrame(flushPendingLogs);
+    }
+  }
+
+  let reportingId: number | null = $state(null);
+
+  async function reportError(entry: LogEntry) {
+    reportingId = entry._id ?? null;
+    const result = await apiPost('/telemetry/report-error', {
+      message: entry.message,
+      level: entry.level,
+      serviceType: entry.serviceType,
+      moduleId: entry.moduleId,
+      timestamp: typeof entry.timestamp === 'number' ? entry.timestamp : new Date(entry.timestamp).getTime(),
+    });
+    reportingId = null;
+    if (result.error) {
+      saltState.addNotification({ message: 'Failed to report error: ' + result.error.error, type: 'error' });
+    } else {
+      saltState.addNotification({ message: 'Error reported. Thank you!', type: 'success' });
     }
   }
 
@@ -147,6 +168,16 @@
             <span class="log-logger">[{entry.logger}]</span>
           {/if}
           <span class="log-message">{entry.message}</span>
+          {#if entry.level === 'error'}
+            <button
+              class="report-btn"
+              onclick={() => reportError(entry)}
+              disabled={reportingId === entry._id}
+              title="Report this error"
+            >
+              {reportingId === entry._id ? '...' : 'Report'}
+            </button>
+          {/if}
         </div>
       {/each}
     {/if}
@@ -273,5 +304,36 @@
     color: var(--theme-text);
     white-space: pre-wrap;
     word-break: break-all;
+  }
+
+  .report-btn {
+    flex-shrink: 0;
+    opacity: 0;
+    padding: 0 0.375rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    font-family: 'Space Grotesk', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--red-500, #ef4444);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--rounded);
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+
+    .log-line:hover & {
+      opacity: 1;
+    }
+
+    &:hover {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   }
 </style>

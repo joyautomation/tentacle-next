@@ -6,7 +6,7 @@
   import { fly, slide } from 'svelte/transition';
   import { untrack } from 'svelte';
   import { state as saltState } from '@joyautomation/salt';
-  import { ArrowPath, ChevronRight, ExclamationTriangle, PencilSquare, Signal } from '@joyautomation/salt/icons';
+  import { ArrowPath, ChevronRight, ExclamationTriangle, PencilSquare, Signal, XMark } from '@joyautomation/salt/icons';
   import { mapDatatype, type RbeState, type InstanceInfo, type ActiveSection } from './utils';
   import TemplateDefaultsTab from './TemplateDefaultsTab.svelte';
   import InstancesTab from './InstancesTab.svelte';
@@ -270,6 +270,12 @@
     for (const [did, info] of localBrowseSubs) {
       toSubscribe.set(did, info);
     }
+    // Don't re-subscribe for devices that were locally cancelled
+    for (const [did, progress] of liveProgress) {
+      if (progress.status === 'cancelled') {
+        toSubscribe.delete(did);
+      }
+    }
 
     for (const [deviceId, info] of toSubscribe) {
       const cleanup = subscribe<{
@@ -278,12 +284,11 @@
       }>(
         `/gateways/gateway/browse/${info.browseId}/progress`,
         (p) => {
-          const isTerminal = p.phase === 'completed' || p.phase === 'failed' ||
-            (p.totalCount > 0 && p.discoveredCount >= p.totalCount);
+          const isTerminal = p.phase === 'completed' || p.phase === 'failed' || p.phase === 'cancelled';
           const updated = new Map(liveProgress);
           updated.set(deviceId, {
             deviceId, browseId: info.browseId, protocol: info.protocol,
-            status: isTerminal ? (p.phase === 'failed' ? 'failed' : 'completed') as 'completed' | 'failed' : 'browsing',
+            status: isTerminal ? (p.phase === 'failed' ? 'failed' : p.phase === 'cancelled' ? 'cancelled' : 'completed') as 'completed' | 'failed' | 'cancelled' : 'browsing',
             phase: p.phase,
             discoveredCount: p.discoveredCount,
             totalCount: p.totalCount,
@@ -1221,6 +1226,35 @@
     }
   }
 
+  async function cancelBrowse(deviceId: string) {
+    const info = localBrowseSubs.get(deviceId);
+    if (!info) return;
+    try {
+      await apiPost(`/gateways/gateway/browse/${info.browseId}/cancel`);
+    } catch {
+      // Cancellation is best-effort
+    }
+    // Remove from local subs so SSE is torn down and not re-created
+    const next = new Map(localBrowseSubs);
+    next.delete(deviceId);
+    localBrowseSubs = next;
+    // Set cancelled status in liveProgress (overrides stale browseStates server prop)
+    const updated = new Map(liveProgress);
+    updated.set(deviceId, {
+      deviceId, browseId: info.browseId, protocol: info.protocol,
+      status: 'cancelled', phase: 'cancelled', discoveredCount: 0, totalCount: 0,
+      message: 'Cancelled', startedAt: '', updatedAt: new Date().toISOString(),
+    });
+    liveProgress = updated;
+    // Refresh server state, then clear the cancelled indicator
+    setTimeout(() => {
+      invalidateAll();
+      const cleared = new Map(liveProgress);
+      cleared.delete(deviceId);
+      liveProgress = cleared;
+    }, 500);
+  }
+
   // ── Unified save ──
   async function saveChanges() {
     saving = true;
@@ -1440,6 +1474,8 @@
 
     return result;
   });
+
+  const browsableDevices = $derived(sideNavDevices.filter(d => !d.autoManaged));
 </script>
 
 <div class="tag-config">
@@ -1511,6 +1547,11 @@
                 {:else if browseState.discoveredCount > 0}
                   <span class="side-browse-count">{browseState.discoveredCount}</span>
                 {/if}
+                {#if browseState.status === 'browsing'}
+                  <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
+                    <XMark size="0.85rem" />
+                  </button>
+                {/if}
               {:else}
                 <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
                   <ArrowPath size="1rem" />
@@ -1554,34 +1595,79 @@
       <div class="tc-main">
         <!-- Mobile/tablet selector -->
         <div class="tc-top-bar">
-          <select
-            class="tc-tpl-select"
-            value={activeSection?.kind === 'template' ? `t::${activeSection.templateName}` : activeSection?.kind === 'atomic' ? `a::${activeSection.deviceId}` : ''}
-            onchange={(e) => {
-              const val = (e.target as HTMLSelectElement).value;
-              if (val.startsWith('t::')) {
-                activeSection = { kind: 'template', templateName: val.slice(3) };
-                activeTab = 'instances';
-              } else if (val.startsWith('a::')) {
-                activeSection = { kind: 'atomic', deviceId: val.slice(3) };
-              }
-            }}
-          >
-            {#if mergedTemplates.length > 0}
-              <optgroup label="Templates">
-                {#each mergedTemplates as tmpl}
-                  <option value={`t::${tmpl.name}`}>{dirtySidebarSections.has(`t::${tmpl.name}`) ? '● ' : ''}{tmpl.name} ({tmpl.totalInstanceCount}){tmpl.hasConflict ? ' ⚠' : ''}</option>
-                {/each}
-              </optgroup>
-            {/if}
-            {#each sideNavDevices as device}
-              {#if device.atomicCount > 0}
-                <optgroup label="{device.deviceId} ({device.protocol})">
-                  <option value={`a::${device.deviceId}`}>{dirtySidebarSections.has(`a::${device.deviceId}`) ? '● ' : ''}Atomic Tags ({device.atomicCount})</option>
+          <label class="tc-top-label">
+            <span class="tc-top-label-text">Type</span>
+            <select
+              class="tc-tpl-select"
+              value={activeSection?.kind === 'template' ? `t::${activeSection.templateName}` : activeSection?.kind === 'atomic' ? `a::${activeSection.deviceId}` : ''}
+              onchange={(e) => {
+                const val = (e.target as HTMLSelectElement).value;
+                if (val.startsWith('t::')) {
+                  activeSection = { kind: 'template', templateName: val.slice(3) };
+                  activeTab = 'instances';
+                } else if (val.startsWith('a::')) {
+                  activeSection = { kind: 'atomic', deviceId: val.slice(3) };
+                }
+              }}
+            >
+              {#if mergedTemplates.length > 0}
+                <optgroup label="Templates">
+                  {#each mergedTemplates as tmpl}
+                    <option value={`t::${tmpl.name}`}>{dirtySidebarSections.has(`t::${tmpl.name}`) ? '● ' : ''}{tmpl.name} ({tmpl.totalInstanceCount}){tmpl.hasConflict ? ' ⚠' : ''}</option>
+                  {/each}
                 </optgroup>
               {/if}
-            {/each}
-          </select>
+              {#each sideNavDevices as device}
+                {#if device.atomicCount > 0}
+                  <optgroup label="{device.deviceId} ({device.protocol})">
+                    <option value={`a::${device.deviceId}`}>{dirtySidebarSections.has(`a::${device.deviceId}`) ? '● ' : ''}Atomic Tags ({device.atomicCount})</option>
+                  </optgroup>
+                {/if}
+              {/each}
+            </select>
+          </label>
+          {#if browsableDevices.length > 0}
+            <div class="tc-top-devices">
+              <span class="tc-top-label-text">Devices</span>
+              <div class="tc-top-devices-list">
+                {#each browsableDevices as device}
+                  {@const browseState = activeBrowseStates.get(device.deviceId)}
+                  {@const isBusy = browseState?.status === 'browsing' || (liveProgress.has(device.deviceId) && liveProgress.get(device.deviceId)?.status === 'completed')}
+                  {@const cache = browseCaches.find(c => c.deviceId === device.deviceId)}
+                  {@const pct = isBusy && browseState && browseState.totalCount > 0 ? Math.round((browseState.discoveredCount / browseState.totalCount) * 100) : 0}
+                  <div class="top-browse-row">
+                    <span class="top-browse-name">{device.deviceId}</span>
+                    <span class="top-browse-proto">{device.protocol}</span>
+                    <span class="top-browse-actions">
+                      {#if isBusy && browseState}
+                        {#if browseState.totalCount > 0}
+                          <span class="top-browse-count">{browseState.discoveredCount}/{browseState.totalCount}</span>
+                        {:else if browseState.discoveredCount > 0}
+                          <span class="top-browse-count">{browseState.discoveredCount}</span>
+                        {/if}
+                        <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
+                          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--theme-border)" stroke-width="2.5" />
+                          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--badge-teal-text)" stroke-width="2.5"
+                            stroke-dasharray={`${browseState.status === 'completed' ? 50.3 : pct * 0.503} ${browseState.status === 'completed' ? 0 : 50.3 - pct * 0.503}`}
+                            stroke-dashoffset="12.6" stroke-linecap="round"
+                            class:spinning={browseState.status === 'browsing' && browseState.totalCount === 0} />
+                        </svg>
+                        {#if browseState.status === 'browsing'}
+                          <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
+                            <XMark size="0.85rem" />
+                          </button>
+                        {/if}
+                      {:else}
+                        <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
+                          <ArrowPath size="1rem" />
+                        </button>
+                      {/if}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
         </div>
 
         {#if activeSection?.kind === 'template' && activeTemplate}
@@ -1732,8 +1818,8 @@
 
   .error-box {
     padding: 1rem; border-radius: var(--rounded-lg); background: var(--theme-surface);
-    border: 1px solid var(--color-red-500, #ef4444); margin: 1.5rem 2rem;
-    p { margin: 0; font-size: 0.875rem; color: var(--color-red-500, #ef4444); }
+    border: 1px solid var(--red-500, #ef4444); margin: 1.5rem 2rem;
+    p { margin: 0; font-size: 0.875rem; color: var(--red-500, #ef4444); }
   }
 
   .empty-state { padding: 3rem 2rem; text-align: center; p { color: var(--theme-text-muted); font-size: 0.875rem; } }
@@ -1794,6 +1880,16 @@
     cursor: pointer; flex-shrink: 0;
     :global(svg) { flex-shrink: 0; }
     &:hover { color: var(--theme-text); background: var(--theme-surface-hover); border-color: var(--theme-primary); }
+  }
+
+  .side-cancel-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: var(--rounded-full);
+    border: none; padding: 0;
+    background: transparent; color: var(--theme-text-muted);
+    cursor: pointer; flex-shrink: 0;
+    :global(svg) { flex-shrink: 0; }
+    &:hover { color: var(--theme-danger); }
   }
 
   .circular-progress {
@@ -1870,16 +1966,58 @@
 
   // ── Top bar (tablet/mobile) ──
   .tc-top-bar {
-    display: none; padding: 0.625rem 1rem; gap: 0.625rem; align-items: center;
+    display: none; padding: 0.625rem 1rem; gap: 0.625rem;
+    flex-direction: column; align-items: stretch;
     background: var(--theme-surface); border-bottom: 1px solid var(--theme-border);
+  }
+
+  .tc-top-label {
+    display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0;
+  }
+  .tc-top-label-text {
+    font-size: 0.6875rem; font-weight: 700; text-transform: uppercase;
+    color: var(--theme-text-muted); letter-spacing: 0.04em; flex-shrink: 0;
+    font-family: 'IBM Plex Mono', monospace;
   }
 
   .tc-tpl-select {
     font-family: 'IBM Plex Mono', monospace; font-size: 0.8125rem; font-weight: 600;
     background: var(--theme-input-bg); border: 1px solid var(--theme-border);
     color: var(--theme-text); padding: 0.4rem 0.75rem; border-radius: var(--rounded-md);
-    flex: 1; max-width: 320px; outline: none;
+    flex: 1; min-width: 0; outline: none;
     &:focus { border-color: var(--theme-primary); }
+  }
+
+  .tc-top-devices {
+    display: flex; flex-direction: column; gap: 0.375rem;
+  }
+  .tc-top-devices-list {
+    display: flex; flex-direction: column; gap: 0.25rem;
+    max-height: 8.5rem; overflow-y: auto;
+    border: 1px solid var(--theme-border); border-radius: var(--rounded-md);
+    background: color-mix(in srgb, var(--theme-surface) 80%, var(--theme-border));
+  }
+  .top-browse-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 0.625rem;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+    border-bottom: 1px solid var(--theme-border);
+    &:last-child { border-bottom: none; }
+  }
+  .top-browse-name {
+    flex: 1; min-width: 0; color: var(--theme-text); font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .top-browse-proto {
+    font-size: 0.5625rem; font-weight: 700; text-transform: uppercase;
+    padding: 0.05rem 0.3rem; border-radius: var(--rounded-sm);
+    background: var(--badge-teal-bg); color: var(--badge-teal-text); flex-shrink: 0;
+  }
+  .top-browse-actions {
+    display: flex; align-items: center; gap: 0.375rem; flex-shrink: 0;
+  }
+  .top-browse-count {
+    font-size: 0.625rem; color: var(--theme-text-muted); white-space: nowrap;
   }
 
   // ── Header + tabs ──
@@ -1935,6 +2073,7 @@
     border-bottom: 1px solid var(--theme-border);
     background: var(--theme-surface);
     padding: 0 1.25rem;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
 
   .tc-tab {
@@ -1943,7 +2082,7 @@
     color: var(--theme-text-muted); cursor: pointer;
     border: none; background: none; font-family: inherit;
     border-bottom: 2px solid transparent; margin-bottom: -1px;
-    border-radius: 0; outline: none;
+    border-radius: 0; outline: none; white-space: nowrap; flex-shrink: 0;
     &:hover { color: var(--theme-text); }
     &.active { color: var(--theme-primary); border-bottom-color: var(--theme-primary); }
   }
@@ -1980,7 +2119,7 @@
   @media (max-width: 640px) {
     .tc-header { padding: 0.625rem 0.875rem; }
     .tc-tabs { padding: 0 0.875rem; }
-    .tc-tab { flex: 1; text-align: center; font-size: 0.75rem; padding: 0.625rem 0.5rem; }
+    .tc-tab { font-size: 0.75rem; padding: 0.625rem 0.5rem; }
     .save-bar { margin: 0 0.75rem; }
     .tc-subtitle { display: none; }
   }

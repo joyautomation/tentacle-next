@@ -112,14 +112,14 @@
 
   function categoryColor(category: string): string {
     switch (category) {
-      case 'data': return 'var(--color-cyan-500, #06b6d4)';
-      case 'command': return 'var(--color-yellow-500, #eab308)';
-      case 'logs': return 'var(--color-purple-500, #a855f7)';
-      case 'shutdown': return 'var(--color-red-500, #ef4444)';
-      case 'status': return 'var(--color-green-500, #22c55e)';
-      case 'variables': return 'var(--color-sky-500, #0ea5e9)';
-      case 'browse': return 'var(--color-orange-500, #f97316)';
-      case 'subscribe': return 'var(--color-teal-500, #14b8a6)';
+      case 'data': return 'var(--cyan-500, #06b6d4)';
+      case 'command': return 'var(--yellow-500, #eab308)';
+      case 'logs': return 'var(--purple-500, #a855f7)';
+      case 'shutdown': return 'var(--red-500, #ef4444)';
+      case 'status': return 'var(--green-500, #22c55e)';
+      case 'variables': return 'var(--sky-500, #0ea5e9)';
+      case 'browse': return 'var(--orange-500, #f97316)';
+      case 'subscribe': return 'var(--teal-500, #14b8a6)';
       default: return 'var(--theme-text-muted)';
     }
   }
@@ -336,8 +336,8 @@
     cursor: pointer;
 
     &:hover {
-      color: var(--color-red-500, #ef4444);
-      border-color: var(--color-red-500, #ef4444);
+      color: var(--red-500, #ef4444);
+      border-color: var(--red-500, #ef4444);
     }
   }
 
@@ -372,8 +372,8 @@
   }
 
   .pause-btn.active {
-    color: var(--color-yellow-500, #eab308);
-    border-color: var(--color-yellow-500, #eab308);
+    color: var(--yellow-500, #eab308);
+    border-color: var(--yellow-500, #eab308);
   }
 
   .traffic-output {

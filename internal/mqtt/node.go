@@ -49,6 +49,10 @@ type SparkplugNode struct {
 	// STATE topic callback (for store-forward)
 	onHostState func(hostID string, online bool)
 
+	// Fired whenever state changes. Runs asynchronously; callers should
+	// re-read State() rather than relying on the argument ordering.
+	onStateChange func(state NodeState)
+
 	// Called before Birth() so the bridge can refresh device metrics and RBE.
 	onBeforeBirth func()
 }
@@ -68,6 +72,26 @@ func (n *SparkplugNode) State() NodeState {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.state
+}
+
+// IsBrokerReachable reports whether the underlying MQTT client currently
+// has an open session to the broker (independent of Sparkplug NBIRTH).
+func (n *SparkplugNode) IsBrokerReachable() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.client != nil && n.client.IsConnected()
+}
+
+// setStateLocked updates state and fires the OnStateChange callback
+// asynchronously if the state actually changed. Caller must hold n.mu.
+func (n *SparkplugNode) setStateLocked(s NodeState) {
+	if n.state == s {
+		return
+	}
+	n.state = s
+	if cb := n.onStateChange; cb != nil {
+		go cb(s)
+	}
 }
 
 // OnNodeCommand sets a callback for NCMD messages.
@@ -97,6 +121,15 @@ func (n *SparkplugNode) OnBeforeBirth(fn func()) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.onBeforeBirth = fn
+}
+
+// OnStateChange sets a callback fired whenever the node's state transitions.
+// The callback runs in a new goroutine, so the bridge should re-read State()
+// rather than trust the argument order across concurrent transitions.
+func (n *SparkplugNode) OnStateChange(fn func(state NodeState)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.onStateChange = fn
 }
 
 // Connect creates the MQTT client and connects to the broker.
@@ -134,7 +167,12 @@ func (n *SparkplugNode) Connect() error {
 		SetConnectionLostHandler(func(c pahomqtt.Client, err error) {
 			n.log.Warn("mqtt: connection lost", "error", err)
 			n.mu.Lock()
-			n.state = StateDisconnected
+			// Don't set StateDisconnected — paho's auto-reconnect is still
+			// holding the client. StateDead signals "TCP down or reconnecting,
+			// NBIRTH pending"; IsBrokerReachable() returns false off the
+			// paho client's IsConnected(). When paho reconnects, onConnect
+			// runs and stays StateDead until Birth() succeeds.
+			n.setStateLocked(StateDead)
 			n.mu.Unlock()
 		}).
 		SetReconnectingHandler(func(c pahomqtt.Client, opts *pahomqtt.ClientOptions) {
@@ -162,7 +200,7 @@ func (n *SparkplugNode) Connect() error {
 	}
 
 	n.client = client
-	n.state = StateDead
+	n.setStateLocked(StateDead)
 
 	n.log.Info("mqtt: connected to broker", "broker", n.config.BrokerURL)
 	return nil
@@ -198,7 +236,7 @@ func (n *SparkplugNode) onConnect(c pahomqtt.Client) {
 
 	// Auto-publish NBIRTH on (re)connect
 	n.mu.Lock()
-	n.state = StateDead
+	n.setStateLocked(StateDead)
 	n.mu.Unlock()
 
 	n.Birth()
@@ -252,7 +290,7 @@ func (n *SparkplugNode) Birth() {
 		return
 	}
 
-	n.state = StateBorn
+	n.setStateLocked(StateBorn)
 	n.log.Info("mqtt: NBIRTH published", "metrics", len(metrics), "bdSeq", n.bdSeq)
 
 	// Publish DBIRTH for each device
@@ -404,7 +442,7 @@ func (n *SparkplugNode) Disconnect() {
 
 	n.client.Disconnect(250)
 	n.client = nil
-	n.state = StateDisconnected
+	n.setStateLocked(StateDisconnected)
 	n.log.Info("mqtt: disconnected")
 }
 
@@ -414,7 +452,7 @@ func (n *SparkplugNode) Rebirth() {
 	if n.state == StateBorn {
 		n.bdSeq = (n.bdSeq + 1) % 256
 	}
-	n.state = StateDead
+	n.setStateLocked(StateDead)
 	n.mu.Unlock()
 
 	n.Birth()

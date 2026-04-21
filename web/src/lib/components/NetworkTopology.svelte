@@ -50,8 +50,8 @@
 
   function getNodeColor(type: NodeType): string {
     switch (type) {
-      case 'nats': return 'var(--color-purple-500, #a855f7)';
-      default: return 'var(--color-teal-500, #14b8a6)';
+      case 'nats': return 'var(--purple-500, #a855f7)';
+      default: return 'var(--teal-500, #14b8a6)';
     }
   }
 

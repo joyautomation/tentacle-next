@@ -38,11 +38,11 @@
 
   function getActionColor(action: string): string {
     switch (action) {
-      case 'added': return 'var(--color-green-500, #22c55e)';
-      case 'modified': return 'var(--color-amber-500, #f59e0b)';
-      case 'removed': return 'var(--color-red-500, #ef4444)';
-      case 'hub': return 'var(--color-purple-500, #a855f7)';
-      case 'kind-group': return 'var(--color-teal-500, #14b8a6)';
+      case 'added': return 'var(--green-500, #22c55e)';
+      case 'modified': return 'var(--amber-500, #f59e0b)';
+      case 'removed': return 'var(--red-500, #ef4444)';
+      case 'hub': return 'var(--purple-500, #a855f7)';
+      case 'kind-group': return 'var(--teal-500, #14b8a6)';
       default: return 'var(--theme-text-muted, #6b7280)';
     }
   }
@@ -197,7 +197,7 @@
       .attr('font-weight', (d) => d.depth <= 1 ? '600' : '500')
       .attr('fill', (d) => {
         if (d.action === 'unchanged') return 'var(--theme-text-muted, #6b7280)';
-        if (d.action === 'removed') return 'var(--color-red-500, #ef4444)';
+        if (d.action === 'removed') return 'var(--red-500, #ef4444)';
         return 'var(--theme-text, #e5e7eb)';
       })
       .attr('fill-opacity', (d) => getNodeOpacity(d.action));

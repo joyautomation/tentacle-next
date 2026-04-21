@@ -66,6 +66,20 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 			{EnvVar: "GITOPS_REPO_URL", Description: "Git repository URL (SSH or HTTPS)", Required: true},
 		},
 	},
+	{
+		Repo:        "tentacle-next",
+		ModuleID:    "caddy",
+		Description: "Caddy reverse proxy",
+		Category:    "optional",
+		Runtime:     "embedded",
+	},
+	{
+		Repo:        "tentacle-next",
+		ModuleID:    "telemetry",
+		Description: "Anonymous usage & error reporting",
+		Category:    "optional",
+		Runtime:     "embedded",
+	},
 }
 
 // getRegistryEntry looks up a module by its moduleId.

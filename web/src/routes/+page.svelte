@@ -1,6 +1,7 @@
 <script lang="ts">
   import SystemTopology from '$lib/components/SystemTopology.svelte';
   import ServiceBanner from '$lib/components/ServiceBanner.svelte';
+  import TelemetryBanner from '$lib/components/TelemetryBanner.svelte';
   import { onMount } from 'svelte';
   import { api } from '$lib/api/client';
 
@@ -29,6 +30,7 @@
     let lastFingerprint = '';
 
     function fingerprint(svcs: typeof liveServices): string {
+      const now = Date.now();
       return svcs
         .map(s => {
           // Only include metadata that affects topology structure/visual state
@@ -38,6 +40,14 @@
             if (s.metadata.devices != null) parts.push(`d:${s.metadata.devices}`);
             if (s.metadata.mode != null) parts.push(`m:${s.metadata.mode}`);
             if (s.metadata.connected != null) parts.push(`c:${s.metadata.connected}`);
+            // History: include a derived "is-flowing" bit so flow animation toggles
+            // when batches start/stop landing, without re-rendering on every poll.
+            if (s.serviceType === 'history') {
+              const raw = s.metadata.lastFlushTime;
+              const lastFlush = typeof raw === 'number' ? raw : Number(raw);
+              const flowing = Number.isFinite(lastFlush) && lastFlush > 0 && now - lastFlush < 60_000;
+              parts.push(`f:${flowing}`);
+            }
           }
           return parts.join(':');
         })
@@ -75,6 +85,7 @@
 </script>
 
 <div class="page">
+  <TelemetryBanner {apiConnected} />
   {#if apiConnected}
     <ServiceBanner />
   {/if}

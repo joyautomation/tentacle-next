@@ -393,7 +393,7 @@
   }
 
   .error-banner {
-    background: var(--color-red-500, #ef4444);
+    background: var(--red-500, #ef4444);
     color: white;
     padding: 0.75rem 1rem;
     border-radius: var(--rounded-lg);
@@ -577,7 +577,7 @@
   .remove-btn {
     padding: 0.25rem 0.5rem;
     font-size: 0.6875rem;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--rounded-sm);
@@ -585,7 +585,7 @@
     margin-left: auto;
 
     &:hover {
-      border-color: var(--color-red-500, #ef4444);
+      border-color: var(--red-500, #ef4444);
     }
 
     &.small {
@@ -848,7 +848,7 @@
   }
 
   .dir-output {
-    color: var(--color-orange-400, #fb923c);
+    color: var(--orange-400, #fb923c);
   }
 
   .device-actions {
@@ -880,25 +880,25 @@
     padding: 0.375rem 0.75rem;
     font-size: 0.75rem;
     font-weight: 500;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--rounded-md);
     cursor: pointer;
 
     &:hover {
-      border-color: var(--color-red-500, #ef4444);
+      border-color: var(--red-500, #ef4444);
     }
 
     &.confirm {
-      border-color: var(--color-red-500, #ef4444);
-      background: var(--color-red-500, #ef4444);
+      border-color: var(--red-500, #ef4444);
+      background: var(--red-500, #ef4444);
       color: white;
     }
   }
 
   .confirm-text {
     font-size: 0.75rem;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
   }
 </style>
