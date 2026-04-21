@@ -189,6 +189,10 @@
 		background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
 	}
 
+	.is-selected .dot {
+		background: var(--theme-primary);
+	}
+
 	.node-static {
 		display: inline-flex;
 		align-items: center;
