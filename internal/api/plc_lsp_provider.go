@@ -38,6 +38,21 @@ func (p *plcLspProvider) Variable(name string) *lsp.VariableInfo {
 	return info
 }
 
+// VariableNames returns the names of all variables currently configured
+// for the PLC. Used by completion to populate variable-name suggestions
+// inside calls like `get_num("|")`.
+func (p *plcLspProvider) VariableNames() []string {
+	cfg, err := p.mod.getPlcConfig(p.plcID)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.Variables))
+	for name := range cfg.Variables {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Template returns the template definition (fields + methods) for a
 // given name, or nil when no template with that name exists.
 func (p *plcLspProvider) Template(name string) *lsp.TemplateInfo {

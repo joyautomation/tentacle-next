@@ -25,6 +25,11 @@ import (
 // We return IsIncomplete=false so the client caches the list until the
 // next trigger; filtering by prefix happens client-side.
 func completeStarlark(source string, pos Position, provider SymbolProvider) CompletionList {
+	// Inside a variable-name string argument (e.g. `get_num("|")`), return
+	// the list of known PLC variables instead of the builtin-heavy default.
+	if list, ok := argumentCompletion(source, pos, provider); ok {
+		return list
+	}
 	// Member access (`expr.`) short-circuits the general list: if we can
 	// resolve the expression to a template, returning only its fields and
 	// methods is more useful than drowning the user in builtins.
@@ -201,6 +206,115 @@ func paramName(p syntax.Expr) string {
 func containsLine(n syntax.Node, line int) bool {
 	start, end := n.Span()
 	return int(start.Line) <= line && int(end.Line) >= line
+}
+
+// ─── Variable-name argument completion ─────────────────────────────────
+
+// variableArgFuncs lists the builtins whose first positional argument is a
+// PLC variable name. When the cursor sits inside the first string literal
+// of a call to one of these, completion suggests variable names.
+var variableArgFuncs = map[string]bool{
+	"get_var": true, "get_num": true, "get_bool": true, "get_str": true,
+	"set_var": true,
+	"NO":      true, "NC": true,
+	"OTE":     true, "OTL": true, "OTU": true,
+	"TON":     true, "TOF": true,
+	"CTU":     true, "CTD": true,
+	"RES":     true,
+}
+
+// argumentCompletion returns known PLC variable names when the cursor sits
+// inside the first string literal of a variable-name-taking builtin call
+// (e.g. `get_num("|")`, `set_var("|", 1)`).
+//
+// Text-based: the AST is usually broken mid-type, so we walk the current
+// line's string state forward to decide whether we're inside a string, and
+// then look at whatever precedes the opening quote to identify the call.
+func argumentCompletion(source string, pos Position, provider SymbolProvider) (CompletionList, bool) {
+	if provider == nil {
+		return CompletionList{}, false
+	}
+	line := lineAtIndex(source, pos.Line)
+	if pos.Character < 0 || pos.Character > len(line) {
+		return CompletionList{}, false
+	}
+	inStr, _, openCol := stringContextAt(line, pos.Character)
+	if !inStr {
+		return CompletionList{}, false
+	}
+	before := strings.TrimRight(line[:openCol], " \t")
+	if !strings.HasSuffix(before, "(") {
+		return CompletionList{}, false
+	}
+	before = strings.TrimRight(before[:len(before)-1], " \t")
+	end := len(before)
+	start := end
+	for start > 0 && isIdentByte(before[start-1]) {
+		start--
+	}
+	if start == end {
+		return CompletionList{}, false
+	}
+	funcName := before[start:end]
+	if !variableArgFuncs[funcName] {
+		return CompletionList{}, false
+	}
+
+	names := provider.VariableNames()
+	sort.Strings(names)
+	items := make([]CompletionItem, 0, len(names))
+	for _, name := range names {
+		detail := "variable"
+		if info := provider.Variable(name); info != nil {
+			if info.TemplateName != "" {
+				detail = info.TemplateName
+			} else if info.Datatype != "" {
+				detail = info.Datatype
+			}
+		}
+		items = append(items, CompletionItem{
+			Label:            name,
+			Kind:             CompletionKindVariable,
+			Detail:           detail,
+			InsertText:       name,
+			InsertTextFormat: InsertTextFormatPlainText,
+			SortText:         "0" + name,
+		})
+	}
+	return CompletionList{IsIncomplete: false, Items: items}, true
+}
+
+// stringContextAt reports whether col on line is inside a single-line
+// string literal. When inside, it also returns the quote character and the
+// 0-based column of the opening quote. Handles `\`-escaped quotes.
+func stringContextAt(line string, col int) (inside bool, quote byte, openCol int) {
+	if col > len(line) {
+		col = len(line)
+	}
+	var q byte
+	open := -1
+	for i := 0; i < col; i++ {
+		c := line[i]
+		if q != 0 {
+			if c == '\\' && i+1 < col {
+				i++
+				continue
+			}
+			if c == q {
+				q = 0
+				open = -1
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			q = c
+			open = i
+		}
+	}
+	if q == 0 {
+		return false, 0, -1
+	}
+	return true, q, open
 }
 
 // ─── Member access completion ───────────────────────────────────────────

@@ -93,6 +93,13 @@ type fakeProvider struct {
 
 func (f *fakeProvider) Variable(name string) *VariableInfo { return f.vars[name] }
 func (f *fakeProvider) Template(name string) *TemplateInfo { return f.templates[name] }
+func (f *fakeProvider) VariableNames() []string {
+	names := make([]string, 0, len(f.vars))
+	for name := range f.vars {
+		names = append(names, name)
+	}
+	return names
+}
 
 func newMotorProvider() *fakeProvider {
 	tmpl := &TemplateInfo{
@@ -188,6 +195,127 @@ func TestCompletionWithoutProviderSkipsMemberCompletion(t *testing.T) {
 	}
 	if !seen["get_var"] {
 		t.Errorf("expected builtin list when provider is nil, got %v", completionLabels(list))
+	}
+}
+
+// ─── Variable-name argument completion ─────────────────────────────────
+
+func newVarsProvider() *fakeProvider {
+	return &fakeProvider{
+		vars: map[string]*VariableInfo{
+			"counter": {Name: "counter", Datatype: "number"},
+			"running": {Name: "running", Datatype: "bool"},
+			"motor1":  {Name: "motor1", Datatype: "Motor", TemplateName: "Motor"},
+		},
+		templates: map[string]*TemplateInfo{
+			"Motor": {Name: "Motor"},
+		},
+	}
+}
+
+func TestCompletionGetVarArgReturnsVariableNames(t *testing.T) {
+	src := `def main():
+    get_var("")`
+	// Cursor sits between the quotes on line 1: col 13.
+	list := completeStarlark(src, Position{Line: 1, Character: 13}, newVarsProvider())
+	labels := completionLabels(list)
+	seen := map[string]bool{}
+	for _, l := range labels {
+		seen[l] = true
+	}
+	for _, want := range []string{"counter", "running", "motor1"} {
+		if !seen[want] {
+			t.Errorf("expected %q in argument completion, got %v", want, labels)
+		}
+	}
+	if seen["get_var"] {
+		t.Errorf("argument completion should not include builtins, got %v", labels)
+	}
+}
+
+func TestCompletionGetNumArgReturnsVariableNames(t *testing.T) {
+	src := `get_num("`
+	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider())
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	if !seen["counter"] {
+		t.Errorf("expected counter in get_num arg completion, got %v", completionLabels(list))
+	}
+	if seen["get_var"] {
+		t.Errorf("argument completion should not include builtins, got %v", completionLabels(list))
+	}
+}
+
+func TestCompletionSetVarArgReturnsVariableNames(t *testing.T) {
+	src := `set_var("`
+	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider())
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	if !seen["counter"] {
+		t.Errorf("expected counter in set_var arg completion, got %v", completionLabels(list))
+	}
+}
+
+func TestCompletionLadderTagArgReturnsVariableNames(t *testing.T) {
+	src := `NO("`
+	list := completeStarlark(src, Position{Line: 0, Character: 4}, newVarsProvider())
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	if !seen["running"] {
+		t.Errorf("expected running in NO() arg completion, got %v", completionLabels(list))
+	}
+}
+
+func TestCompletionArgDetailShowsType(t *testing.T) {
+	src := `get_num("`
+	list := completeStarlark(src, Position{Line: 0, Character: 9}, newVarsProvider())
+	var motorDetail, counterDetail string
+	for _, it := range list.Items {
+		if it.Label == "motor1" {
+			motorDetail = it.Detail
+		}
+		if it.Label == "counter" {
+			counterDetail = it.Detail
+		}
+	}
+	if motorDetail != "Motor" {
+		t.Errorf("expected motor1 detail=Motor, got %q", motorDetail)
+	}
+	if counterDetail != "number" {
+		t.Errorf("expected counter detail=number, got %q", counterDetail)
+	}
+}
+
+func TestCompletionOutsideStringFallsThrough(t *testing.T) {
+	src := `get_num(`
+	list := completeStarlark(src, Position{Line: 0, Character: 8}, newVarsProvider())
+	// Cursor is after `(` but not inside a string — should return the
+	// full builtin list.
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	if !seen["get_var"] {
+		t.Errorf("expected builtins when cursor isn't in a string, got %v", completionLabels(list))
+	}
+}
+
+func TestCompletionSecondArgDoesNotOfferVariables(t *testing.T) {
+	// set_var's second arg is a value, not a variable name.
+	src := `set_var("counter", "`
+	list := completeStarlark(src, Position{Line: 0, Character: 20}, newVarsProvider())
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	if seen["counter"] {
+		t.Errorf("variable names should not populate non-first string args, got %v", completionLabels(list))
 	}
 }
 

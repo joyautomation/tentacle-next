@@ -50,4 +50,8 @@ type TemplateInfo struct {
 type SymbolProvider interface {
 	Variable(name string) *VariableInfo
 	Template(name string) *TemplateInfo
+	// VariableNames returns all configured PLC variable names for the
+	// current PLC. Order is unspecified; callers that need stable ordering
+	// should sort.
+	VariableNames() []string
 }
