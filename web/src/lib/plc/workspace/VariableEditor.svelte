@@ -11,6 +11,7 @@
 	} from '$lib/types/plc';
 	import { workspaceTabs } from '../workspace-state.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
+	import ValueTree from '$lib/components/ValueTree.svelte';
 
 	type Props = {
 		name: string;
@@ -281,24 +282,17 @@
 			{#if selectedTemplate}
 				<div class="template-block" transition:slide={{ duration: 150 }}>
 					<div class="section-label">Instance defaults</div>
-					<div class="field-grid">
-						{#each selectedTemplate.fields as field (field.name)}
-							<label class="field">
-								<span>{field.name} <em class="field-type">{field.type}</em></span>
-								{#if field.type === 'bool' || field.type === 'boolean'}
-									<select bind:value={templateDefaults[field.name]} class="input">
-										<option value={false}>false</option>
-										<option value={true}>true</option>
-									</select>
-								{:else if field.type === 'number'}
-									<input type="number" bind:value={templateDefaults[field.name]} class="input" step="any" />
-								{:else if field.type === 'string'}
-									<input type="text" bind:value={templateDefaults[field.name]} class="input" />
-								{:else}
-									<input type="text" value={JSON.stringify(templateDefaults[field.name] ?? null)} class="input" readonly title="Nested template/collection — set from Starlark" />
-								{/if}
-							</label>
-						{/each}
+					<div class="tree-wrap">
+						<ValueTree
+							value={templateDefaults}
+							label={selectedTemplate.name}
+							editable
+							onChange={(path, newVal) => {
+								const key = path[0];
+								if (typeof key !== 'string') return;
+								templateDefaults = { ...templateDefaults, [key]: newVal };
+							}}
+						/>
 					</div>
 				</div>
 
@@ -504,18 +498,9 @@
 		color: var(--theme-text);
 	}
 
-	.field-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-		gap: 0.5rem;
-	}
-
-	.field-type {
-		font-family: var(--font-mono, monospace);
-		font-style: normal;
-		color: var(--theme-text-muted);
-		font-size: 0.6875rem;
-		margin-left: 0.25rem;
+	.tree-wrap {
+		overflow-x: auto;
+		padding: 0.25rem 0;
 	}
 
 	.source-meta {
