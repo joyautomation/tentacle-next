@@ -73,6 +73,7 @@ func (t *taskRunner) run() {
 			t.stats.record(time.Since(start), err)
 			if err != nil {
 				t.log.Error("task execution error", "error", err)
+				t.engine.ReportError(t.progRef, err)
 			}
 		}
 	}

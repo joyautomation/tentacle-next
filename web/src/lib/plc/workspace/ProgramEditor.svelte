@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { api, apiPut, apiDelete } from '$lib/api/client';
+	import { api, apiPut, apiPost, apiDelete } from '$lib/api/client';
+	import { subscribe as subscribeSSE } from '$lib/api/subscribe';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 	import { fly } from 'svelte/transition';
@@ -67,6 +68,14 @@
 	let saving = $state(false);
 	let deleting = $state(false);
 	let error = $state<string | null>(null);
+
+	// Test-mode session state. When non-null, the live engine is running
+	// the draft candidate; an auto-revert fires on error or timeout.
+	type TestSessionInfo = { program: string; startedAt: number; expiresAt: number };
+	let testSession = $state<TestSessionInfo | null>(null);
+	let testStarting = $state(false);
+	let testRemaining = $state(0);
+	const TEST_TIMEOUT_SECONDS = 120;
 	let serverSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let serverStSource = $state('');
 	let language = $state<string>(isNew ? initialLanguage : 'starlark');
@@ -147,7 +156,65 @@
 
 	onMount(() => {
 		const stop = startLiveValues();
-		return () => stop();
+		const stopEvents = isNew
+			? () => {}
+			: subscribeSSE<TestEventMsg>('/plcs/plc/programs/test/events', (ev) => {
+					if (!ev || ev.program !== name) return;
+					if (ev.reason === 'started') {
+						// Session info comes back on the POST response; the
+						// 'started' event is fan-out for other clients.
+						return;
+					}
+					// Terminal events: session is over, surface to the user.
+					testSession = null;
+					testRemaining = 0;
+					const msg =
+						ev.reason === 'error'
+							? `Test reverted: ${ev.error || 'runtime error'}`
+							: ev.reason === 'timeout'
+								? 'Test session expired — reverted to live source'
+								: 'Test session stopped';
+					saltState.addNotification({
+						message: msg,
+						type: ev.reason === 'error' ? 'error' : 'info'
+					});
+				});
+		// Poll current status once so an active session survives navigation.
+		if (!isNew) {
+			void fetchTestStatus();
+		}
+		return () => {
+			stop();
+			stopEvents();
+		};
+	});
+
+	type TestEventMsg = { program: string; reason: string; error?: string; at: number };
+
+	async function fetchTestStatus() {
+		const res = await api<{ session?: TestSessionInfo | null }>(
+			`/plcs/plc/programs/${encodeURIComponent(name)}/test`
+		);
+		if (!res.error && res.data?.session) {
+			testSession = res.data.session;
+		}
+	}
+
+	// Countdown tick while a test session is active.
+	$effect(() => {
+		if (!testSession) {
+			testRemaining = 0;
+			return;
+		}
+		const tick = () => {
+			testRemaining = Math.max(
+				0,
+				Math.ceil((testSession!.expiresAt - Date.now()) / 1000)
+			);
+		};
+		tick();
+		const id = window.setInterval(tick, 500);
+		return () => window.clearInterval(id);
 	});
 
 	onDestroy(() => {
@@ -251,6 +318,67 @@
 		draftStSource = serverStSource;
 	}
 
+	// canTest gates the Test button: only Starlark (engine-level hot-swap),
+	// must be dirty, must not have blocking errors, and no active session.
+	const canTest = $derived.by(() => {
+		if (isNew) return false;
+		if (language !== 'starlark') return false;
+		if (!dirty) return false;
+		if (errorCount > 0) return false;
+		if (testStarting) return false;
+		if (testSession) return false;
+		return true;
+	});
+
+	const testBlockedReason = $derived.by(() => {
+		if (isNew) return 'Save first before testing';
+		if (language !== 'starlark') return 'Test mode is Starlark-only for now';
+		if (!dirty) return 'Make an edit to test';
+		if (errorCount > 0) return `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before testing`;
+		return undefined;
+	});
+
+	async function startTest() {
+		if (!canTest) return;
+		testStarting = true;
+		try {
+			const res = await apiPost<{ ok: boolean; session?: TestSessionInfo; error?: string }>(
+				`/plcs/plc/programs/${encodeURIComponent(name)}/test`,
+				{ source: draftSource, timeoutSeconds: TEST_TIMEOUT_SECONDS }
+			);
+			if (res.error) {
+				saltState.addNotification({ message: res.error.error, type: 'error' });
+				return;
+			}
+			if (res.data?.ok && res.data.session) {
+				testSession = res.data.session;
+				saltState.addNotification({
+					message: `Test session started (${TEST_TIMEOUT_SECONDS}s watchdog)`,
+					type: 'success'
+				});
+			} else if (res.data?.error) {
+				saltState.addNotification({ message: res.data.error, type: 'error' });
+			}
+		} finally {
+			testStarting = false;
+		}
+	}
+
+	async function stopTest() {
+		if (!testSession) return;
+		const res = await apiPost<{ ok: boolean }>(
+			`/plcs/plc/programs/${encodeURIComponent(name)}/test/stop`,
+			{}
+		);
+		if (res.error) {
+			saltState.addNotification({ message: res.error.error, type: 'error' });
+			return;
+		}
+		// The SSE 'stopped' event will clear testSession — fall back in case
+		// the event arrives late so the UI isn't stuck.
+		testSession = null;
+	}
+
 	async function del() {
 		// A never-saved tab just closes — nothing to delete server-side.
 		if (isNew) {
@@ -300,6 +428,25 @@
 			>
 				{showInlineValues ? 'Hide Values' : 'Show Values'}
 			</button>
+			{#if testSession}
+				<span class="test-status" title="Test session auto-reverts on error or timeout">
+					<span class="test-dot"></span>
+					Testing · {testRemaining}s
+				</span>
+				<button type="button" class="btn warn" onclick={stopTest}>
+					Stop Test
+				</button>
+			{:else if !isNew && language === 'starlark'}
+				<button
+					type="button"
+					class="btn test"
+					onclick={startTest}
+					disabled={!canTest}
+					title={testBlockedReason ?? 'Hot-swap the draft into the engine with auto-revert on error'}
+				>
+					{testStarting ? 'Starting…' : 'Test'}
+				</button>
+			{/if}
 			{#if dirty && !isNew}
 				<button type="button" class="btn subtle" onclick={revert} disabled={saving}>
 					Revert
@@ -341,7 +488,7 @@
 				<div class="diff-pane pending-pane">
 					{#if showDiff}
 						<div class="pane-label pending">
-							{hasPending ? 'Pending (saved)' : 'Pending (unsaved)'}
+							{testSession ? 'Testing (candidate)' : 'Draft (unsaved)'}
 						</div>
 					{/if}
 					<div class="editor-wrap">
@@ -492,6 +639,26 @@
 			}
 		}
 
+		&.test {
+			color: var(--theme-warning, #d97706);
+			border-color: color-mix(in srgb, var(--theme-warning, #d97706) 40%, transparent);
+
+			&:hover:not(:disabled) {
+				background: color-mix(in srgb, var(--theme-warning, #d97706) 12%, transparent);
+				border-color: var(--theme-warning, #d97706);
+			}
+		}
+
+		&.warn {
+			color: var(--theme-warning, #d97706);
+			background: color-mix(in srgb, var(--theme-warning, #d97706) 14%, transparent);
+			border-color: var(--theme-warning, #d97706);
+
+			&:hover:not(:disabled) {
+				background: color-mix(in srgb, var(--theme-warning, #d97706) 22%, transparent);
+			}
+		}
+
 		&.toggle {
 			color: var(--theme-text-muted);
 			font-size: 0.75rem;
@@ -577,6 +744,31 @@
 		&.pending {
 			color: var(--theme-warning, #d97706);
 		}
+	}
+
+	.test-status {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--theme-warning, #d97706);
+		padding: 0.1875rem 0.5rem;
+		border-radius: 0.25rem;
+		background: color-mix(in srgb, var(--theme-warning, #d97706) 12%, transparent);
+	}
+
+	.test-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		background: var(--theme-warning, #d97706);
+		animation: pulse 1.4s ease-in-out infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50% { opacity: 0.5; transform: scale(0.8); }
 	}
 
 	.status {

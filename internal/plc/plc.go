@@ -9,6 +9,7 @@ package plc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -42,6 +43,7 @@ type Module struct {
 	tasks     map[string]*taskRunner
 	pub       *publisher
 	bridge    *scannerBridge
+	testMgr   *TestSessionManager
 
 	persist *persister
 
@@ -245,6 +247,14 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.subs = append(m.subs, statsSub)
 	m.mu.Unlock()
 
+	// Handle test-session commands (start/stop/status).
+	testSub, _ := b.Subscribe(topics.PlcTest(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		m.handleTestRequest(data, reply)
+	})
+	m.mu.Lock()
+	m.subs = append(m.subs, testSub)
+	m.mu.Unlock()
+
 	// Handle variable write commands. The API publishes {"value": X} to
 	// {plcID}.command.{variableID}; variableID may contain dots for
 	// nested struct field paths (e.g. motor1.test).
@@ -306,6 +316,11 @@ func (m *Module) Stop() error {
 			sub.Unsubscribe()
 		}
 	}
+	if m.testMgr != nil {
+		m.testMgr.Close()
+		m.testMgr = nil
+	}
+
 	m.subs = nil
 	m.config = nil
 	m.engine = nil
@@ -354,6 +369,13 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 		m.bridge = nil
 	}
 
+	// Tear down any active test session manager — it holds an error
+	// observer on the old engine that must be released.
+	if m.testMgr != nil {
+		m.testMgr.Close()
+		m.testMgr = nil
+	}
+
 	m.config = config
 	m.variables.Clear()
 	m.engine = nil
@@ -367,6 +389,14 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	m.engine = NewEngine(m.variables, m.log)
 	templates := m.loadTemplates()
 	m.engine.SetTemplates(templates)
+
+	// Wire test-session manager. onEvent publishes terminal events to the
+	// bus so API subscribers (SSE streams) can forward to the UI.
+	m.testMgr = NewTestSessionManager(m.engine, m.log, func(ev TestEvent) {
+		if data, err := json.Marshal(ev); err == nil {
+			_ = m.b.Publish(topics.PlcTestEvents(m.plcID), data)
+		}
+	})
 
 	// Register variables. Persisted snapshots override config defaults
 	// so values survive restart/redeploy; a variable missing from the
@@ -654,6 +684,80 @@ func (m *Module) handleVariableCommand(subject string, data []byte) {
 		return
 	}
 	m.variables.MarkChanged(rootID)
+}
+
+// testCommand is the request body decoded from PlcTest messages. The Op
+// selects one of start/stop/status; other fields apply only to start.
+type testCommand struct {
+	Op             string `json:"op"`
+	Program        string `json:"program"`
+	Source         string `json:"source,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// testResponse is the reply envelope for PlcTest requests.
+type testResponse struct {
+	OK        bool             `json:"ok"`
+	Error     string           `json:"error,omitempty"`
+	Session   *TestSessionInfo `json:"session,omitempty"`
+	LastEvent *TestEvent       `json:"lastEvent,omitempty"`
+}
+
+// handleTestRequest services the test-session command topic. Callers
+// multiplex start/stop/status via the request body's Op field.
+func (m *Module) handleTestRequest(data []byte, reply bus.ReplyFunc) {
+	if reply == nil {
+		return
+	}
+
+	respond := func(r testResponse) {
+		payload, err := json.Marshal(r)
+		if err != nil {
+			m.log.Error("plc: failed to marshal test response", "error", err)
+			return
+		}
+		reply(payload)
+	}
+
+	var cmd testCommand
+	if err := json.Unmarshal(data, &cmd); err != nil {
+		respond(testResponse{OK: false, Error: fmt.Sprintf("invalid body: %v", err)})
+		return
+	}
+	if cmd.Program == "" {
+		respond(testResponse{OK: false, Error: "program is required"})
+		return
+	}
+
+	m.mu.RLock()
+	mgr := m.testMgr
+	m.mu.RUnlock()
+	if mgr == nil {
+		respond(testResponse{OK: false, Error: "test manager not initialized (config not applied yet)"})
+		return
+	}
+
+	switch cmd.Op {
+	case "start":
+		timeout := time.Duration(cmd.TimeoutSeconds) * time.Second
+		info, err := mgr.Start(cmd.Program, cmd.Source, timeout)
+		if err != nil {
+			respond(testResponse{OK: false, Error: err.Error()})
+			return
+		}
+		respond(testResponse{OK: true, Session: &info})
+	case "stop":
+		_ = mgr.Stop(cmd.Program)
+		respond(testResponse{OK: true, LastEvent: mgr.LastEvent(cmd.Program)})
+	case "status":
+		respond(testResponse{
+			OK:        true,
+			Session:   mgr.Active(cmd.Program),
+			LastEvent: mgr.LastEvent(cmd.Program),
+		})
+	default:
+		respond(testResponse{OK: false, Error: fmt.Sprintf("unknown op %q", cmd.Op)})
+	}
 }
 
 // handleTaskStatsRequest returns per-task scan-time statistics.

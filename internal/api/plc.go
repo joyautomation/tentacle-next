@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/plc"
 	"github.com/joyautomation/tentacle/internal/plc/lsp"
 	"github.com/joyautomation/tentacle/internal/topics"
@@ -664,7 +665,149 @@ func (m *Module) handleCancelPlcProgram(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, existing)
 }
 
-// ─── PLC Browse Import ─────────────────────────────────────────────────────
+// ─── Online Edit: Test Mode ────────────────────────────────────────────────
+//
+// Test mode hot-swaps a candidate source into the live engine. If a task
+// raises an error during the session — or a watchdog timer expires — the
+// PLC module auto-reverts to the pre-test source. The live KV record is
+// never touched; test mode is ephemeral.
+//
+//   POST   /programs/{name}/test        — start session { source, timeoutSeconds? }
+//   POST   /programs/{name}/test/stop   — end session (revert now)
+//   GET    /programs/{name}/test        — session status + last event
+//   GET    /plcs/{plcId}/programs/test/events — SSE stream of test events
+
+type testStartRequest struct {
+	Source         string `json:"source"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// plcTestCommand is the wire format the PLC module decodes on PlcTest.
+// Mirrors plc.testCommand — duplicated here to avoid the api package
+// importing the plc package (which the build tags keep independent).
+type plcTestCommand struct {
+	Op             string `json:"op"`
+	Program        string `json:"program"`
+	Source         string `json:"source,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+func (m *Module) doTestRequest(plcID string, cmd plcTestCommand) ([]byte, int, error) {
+	body, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	resp, err := m.bus.Request(topics.PlcTest(plcID), body, busTimeout)
+	if err != nil {
+		return nil, http.StatusBadGateway, err
+	}
+	// Peek at ok=false so we can surface the engine error with a 4xx.
+	var env struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &env); err == nil && !env.OK {
+		return resp, http.StatusBadRequest, fmt.Errorf("%s", env.Error)
+	}
+	return resp, http.StatusOK, nil
+}
+
+func (m *Module) handleStartPlcProgramTest(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+	name := chi.URLParam(r, "name")
+
+	var body testStartRequest
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
+		return
+	}
+	if body.Source == "" {
+		writeError(w, http.StatusBadRequest, "source is required")
+		return
+	}
+
+	resp, status, err := m.doTestRequest(plcID, plcTestCommand{
+		Op:             "start",
+		Program:        name,
+		Source:         body.Source,
+		TimeoutSeconds: body.TimeoutSeconds,
+	})
+	if err != nil && status != http.StatusBadRequest {
+		writeError(w, status, fmt.Sprintf("start test session: %v", err))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(resp)
+}
+
+func (m *Module) handleStopPlcProgramTest(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+	name := chi.URLParam(r, "name")
+
+	resp, status, err := m.doTestRequest(plcID, plcTestCommand{Op: "stop", Program: name})
+	if err != nil && status != http.StatusBadRequest {
+		writeError(w, status, fmt.Sprintf("stop test session: %v", err))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(resp)
+}
+
+func (m *Module) handleGetPlcProgramTest(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+	name := chi.URLParam(r, "name")
+
+	resp, status, err := m.doTestRequest(plcID, plcTestCommand{Op: "status", Program: name})
+	if err != nil && status != http.StatusBadRequest {
+		writeError(w, status, fmt.Sprintf("get test session: %v", err))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(resp)
+}
+
+// handleStreamPlcProgramTestEvents forwards test-session events from the
+// bus to an SSE stream. One shared stream per PLC — the client filters by
+// program name client-side.
+func (m *Module) handleStreamPlcProgramTestEvents(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+	sse, ok := newSSEWriter(w)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	events := make(chan json.RawMessage, 32)
+	sub, err := m.bus.Subscribe(topics.PlcTestEvents(plcID), func(_ string, data []byte, _ bus.ReplyFunc) {
+		select {
+		case events <- append(json.RawMessage(nil), data...):
+		default:
+			// Drop if the client is too slow — test events are low-volume
+			// and a lost revert notification is still surfaced by the
+			// next GET /test poll.
+		}
+	})
+	if err != nil {
+		m.log.Warn("plc: failed to subscribe to test events", "error", err)
+		return
+	}
+	defer sub.Unsubscribe()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev := <-events:
+			if err := sse.WriteEvent("test", ev); err != nil {
+				return
+			}
+		}
+	}
+}
+
 
 type plcImportItem struct {
 	VariableID     string      `json:"variableId"`

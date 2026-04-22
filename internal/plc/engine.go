@@ -23,7 +23,15 @@ type Engine struct {
 	vars      *VariableStore
 	templates map[string]*itypes.PlcTemplate
 	log       *slog.Logger
+
+	errMu     sync.Mutex
+	errObs    map[int]ErrorObserver
+	errObsSeq int
 }
+
+// ErrorObserver is invoked when a running task reports a program-level error.
+// Observers must not block — heavy work should be offloaded to a goroutine.
+type ErrorObserver func(program string, err error)
 
 // compiledProgram holds a parsed Starlark program's global namespace.
 // Any top-level callable can be used as a task entry function.
@@ -302,4 +310,39 @@ func (e *Engine) ProgramCount() int {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return len(e.programs)
+}
+
+// AddErrorObserver registers fn to be called whenever a task reports a
+// runtime error. Returns a remove func the caller uses to deregister.
+func (e *Engine) AddErrorObserver(fn ErrorObserver) (remove func()) {
+	e.errMu.Lock()
+	defer e.errMu.Unlock()
+	if e.errObs == nil {
+		e.errObs = make(map[int]ErrorObserver)
+	}
+	id := e.errObsSeq
+	e.errObsSeq++
+	e.errObs[id] = fn
+	return func() {
+		e.errMu.Lock()
+		delete(e.errObs, id)
+		e.errMu.Unlock()
+	}
+}
+
+// ReportError fans out a task execution error to all registered observers.
+// Called by task runners after Execute returns a non-nil error.
+func (e *Engine) ReportError(program string, err error) {
+	if err == nil {
+		return
+	}
+	e.errMu.Lock()
+	obs := make([]ErrorObserver, 0, len(e.errObs))
+	for _, fn := range e.errObs {
+		obs = append(obs, fn)
+	}
+	e.errMu.Unlock()
+	for _, fn := range obs {
+		fn(program, err)
+	}
 }
