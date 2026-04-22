@@ -80,6 +80,13 @@ var moduleRegistry = []otypes.ModuleRegistryEntry{
 		Category:    "optional",
 		Runtime:     "embedded",
 	},
+	{
+		Repo:        "tentacle-next",
+		ModuleID:    "hmi",
+		Description: "HMI app & screen builder",
+		Category:    "optional",
+		Runtime:     "embedded",
+	},
 }
 
 // getRegistryEntry looks up a module by its moduleId.

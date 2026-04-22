@@ -7,6 +7,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/ethernetip"
 	"github.com/joyautomation/tentacle/internal/gateway"
 	"github.com/joyautomation/tentacle/internal/gitops"
+	"github.com/joyautomation/tentacle/internal/hmi"
 	"github.com/joyautomation/tentacle/internal/module"
 	"github.com/joyautomation/tentacle/internal/mqtt"
 	"github.com/joyautomation/tentacle/internal/network"
@@ -25,6 +26,7 @@ func stableFactories() map[string]orchestrator.ModuleFactory {
 		"gitops":     func(id string) module.Module { return gitops.New(id) },
 		"caddy":      func(id string) module.Module { return caddy.New(id) },
 		"telemetry":  func(id string) module.Module { return telemetry.New(id) },
+		"hmi":        func(id string) module.Module { return hmi.New(id) },
 	}
 }
 
@@ -46,6 +48,8 @@ func stableModuleByName(name string) module.Module {
 		return caddy.New("caddy")
 	case "telemetry":
 		return telemetry.New("telemetry")
+	case "hmi":
+		return hmi.New("hmi")
 	case "api":
 		return nil // api is a core module, started directly in runMonolith
 	case "orchestrator":

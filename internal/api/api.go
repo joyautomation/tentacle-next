@@ -306,6 +306,20 @@ func (m *Module) routes() http.Handler {
 		// System
 		r.Post("/system/factory-reset", m.handleFactoryReset)
 
+		// HMI
+		r.Get("/hmi/apps", m.handleListHmiApps)
+		r.Post("/hmi/apps", m.handleCreateHmiApp)
+		r.Get("/hmi/apps/{appId}", m.handleGetHmiApp)
+		r.Put("/hmi/apps/{appId}", m.handlePutHmiApp)
+		r.Delete("/hmi/apps/{appId}", m.handleDeleteHmiApp)
+		r.Post("/hmi/apps/{appId}/screens", m.handleCreateHmiScreen)
+		r.Put("/hmi/apps/{appId}/screens/{screenId}", m.handlePutHmiScreen)
+		r.Delete("/hmi/apps/{appId}/screens/{screenId}", m.handleDeleteHmiScreen)
+		r.Post("/hmi/apps/{appId}/components", m.handleCreateHmiComponent)
+		r.Put("/hmi/apps/{appId}/components/{componentId}", m.handlePutHmiComponent)
+		r.Delete("/hmi/apps/{appId}/components/{componentId}", m.handleDeleteHmiComponent)
+		r.Get("/hmi/udts", m.handleListHmiUdts)
+
 		// Orchestrator
 		r.Get("/orchestrator/desired-services", m.handleListDesiredServices)
 		r.Put("/orchestrator/desired-services/{moduleId}", m.handleSetDesiredService)

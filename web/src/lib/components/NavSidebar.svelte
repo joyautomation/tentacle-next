@@ -15,6 +15,7 @@
     Squares2x2,
     PlusCircle,
     RocketLaunch,
+    PaintBrush,
     ArrowPath,
     ArrowDownTray,
     ArrowUpTray,
@@ -309,6 +310,17 @@
       >
         <RocketLaunch size="1.25rem" />
         <span>Setup</span>
+      </a>
+    </li>
+    <li>
+      <a
+        href="/hmi"
+        class="sidebar-item"
+        class:active={$page.url.pathname.startsWith('/hmi')}
+        onclick={close}
+      >
+        <PaintBrush size="1.25rem" />
+        <span>HMI</span>
       </a>
     </li>
 

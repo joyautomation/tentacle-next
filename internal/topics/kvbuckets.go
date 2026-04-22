@@ -36,6 +36,9 @@ const (
 	// PROFINET IO Controller scanner config bucket.
 	BucketScannerProfinetController = "scanner_config_profinetcontroller"
 
+	// HMI app configuration bucket (apps, screens, components).
+	BucketHmiConfig = "hmi_config"
+
 	// Config metadata tracks the source of each config write (gui, cli, gitops)
 	// to prevent feedback loops in bidirectional sync.
 	BucketConfigMetadata = "config_metadata"
@@ -79,6 +82,7 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketPlcPrograms:               {History: 10},
 		BucketProfinetConfig:            {History: 5},
 		BucketScannerProfinetController: {History: 1},
+		BucketHmiConfig:                 {History: 5},
 		BucketConfigMetadata:    {History: 1},
 	}
 }
