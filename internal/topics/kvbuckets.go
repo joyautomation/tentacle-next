@@ -30,6 +30,7 @@ const (
 	BucketPlcConfig    = "plc_config"
 	BucketPlcPrograms  = "plc_programs"
 	BucketPlcTemplates = "plc_templates"
+	BucketPlcTests     = "plc_tests"
 
 	// BucketPlcValues persists the last-known runtime value of every
 	// PLC variable so values survive restart/redeploy. Keyed by
@@ -84,6 +85,7 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketPlcConfig:                 {History: 5},
 		BucketPlcPrograms:               {History: 10},
 		BucketPlcTemplates:              {History: 10},
+		BucketPlcTests:                  {History: 10},
 		BucketPlcValues:                 {History: 1},
 		BucketProfinetConfig:            {History: 5},
 		BucketScannerProfinetController: {History: 1},

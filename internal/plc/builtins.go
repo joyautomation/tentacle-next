@@ -105,12 +105,11 @@ func (e *Engine) builtinSetVar(thread *starlark.Thread, fn *starlark.Builtin, ar
 // ─── Logging Built-ins ──────────────────────────────────────────────────────
 
 // makeLogBuiltin returns a Starlark function that emits to slog at the given level.
-// Args are stringified and joined with spaces (Python print-style).
+// Args are stringified and joined with spaces (Python print-style). If the calling
+// thread carries a *testLogBuffer local, the formatted line is also appended to
+// it so unit-test runs can surface their output in the UI.
 func (e *Engine) makeLogBuiltin(level slog.Level) func(*starlark.Thread, *starlark.Builtin, starlark.Tuple, []starlark.Tuple) (starlark.Value, error) {
 	return func(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-		if e.log == nil {
-			return starlark.None, nil
-		}
 		parts := make([]string, 0, len(args))
 		for _, a := range args {
 			if s, ok := a.(starlark.String); ok {
@@ -120,7 +119,12 @@ func (e *Engine) makeLogBuiltin(level slog.Level) func(*starlark.Thread, *starla
 			}
 		}
 		msg := strings.Join(parts, " ")
-		e.log.Log(context.Background(), level, msg, "program", thread.Name)
+		if buf, ok := thread.Local("test_log_buffer").(*testLogBuffer); ok && buf != nil {
+			buf.append(level.String() + " " + msg)
+		}
+		if e.log != nil {
+			e.log.Log(context.Background(), level, msg, "program", thread.Name)
+		}
 		return starlark.None, nil
 	}
 }

@@ -1,11 +1,11 @@
-export type SelectionKind = 'variable' | 'task' | 'program';
+export type SelectionKind = 'variable' | 'task' | 'program' | 'test';
 
 export type Selection = {
 	kind: SelectionKind;
 	id: string;
 } | null;
 
-export type EditorTabKind = 'program' | 'variable' | 'task';
+export type EditorTabKind = 'program' | 'variable' | 'task' | 'test';
 
 export type EditorTab = {
 	id: string; // composite `${kind}:${name}` so tabs of different kinds can share a name

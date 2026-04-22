@@ -4,6 +4,7 @@
     PlcVariableConfig,
     PlcTaskConfig,
     ProgramListItem,
+    TestListItem,
   } from "$lib/types/plc";
   import { workspaceSelection, workspaceTabs } from "../workspace-state.svelte";
   import { ChevronRight, Plus } from "@joyautomation/salt/icons";
@@ -12,10 +13,13 @@
     variables: Record<string, PlcVariableConfig>;
     tasks: Record<string, PlcTaskConfig>;
     programs: ProgramListItem[];
+    tests: TestListItem[];
     onCreate?: (kind: "variable" | "task") => void;
+    onRunAllTests?: () => void;
+    testsRunning?: boolean;
   };
 
-  let { variables, tasks, programs, onCreate }: Props = $props();
+  let { variables, tasks, programs, tests, onCreate, onRunAllTests, testsRunning }: Props = $props();
 
   function newProgramTab() {
     // Functions are created in-editor: a blank tab opens, the user types
@@ -24,10 +28,15 @@
     workspaceTabs.openNew("program", "starlark");
   }
 
+  function newTestTab() {
+    workspaceTabs.openNew("test", "starlark");
+  }
+
   let sections = $state({
     variables: true,
     tasks: true,
     programs: true,
+    tests: true,
   });
 
   let filter = $state("");
@@ -56,6 +65,22 @@
       )
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
+
+  const testEntries = $derived(
+    tests
+      .filter(
+        (t) => !filter || t.name.toLowerCase().includes(filter.toLowerCase()),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  );
+
+  function testDotClass(t: TestListItem): string {
+    const status = t.lastResult?.status;
+    if (status === "pass") return "pass";
+    if (status === "fail") return "fail";
+    if (status === "error") return "error";
+    return "unknown";
+  }
 
   function toggle(key: keyof typeof sections) {
     sections[key] = !sections[key];
@@ -245,6 +270,72 @@
             </li>
           {:else}
             <li class="empty">No functions</li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <section class="section">
+      <div class="section-header-row">
+        <button
+          type="button"
+          class="section-header"
+          onclick={() => toggle("tests")}
+          aria-expanded={sections.tests}
+        >
+          <span class="chevron" class:open={sections.tests}
+            ><ChevronRight size="0.75rem" /></span
+          >
+          <span class="label">Tests</span>
+          <span class="count">{testEntries.length}</span>
+        </button>
+        {#if tests.length > 0}
+          <button
+            type="button"
+            class="add-btn"
+            onclick={() => onRunAllTests?.()}
+            disabled={testsRunning}
+            title="Run all tests"
+            aria-label="Run all tests"
+          >
+            <span class="play-icon" aria-hidden="true">▶</span>
+          </button>
+        {/if}
+        <button
+          type="button"
+          class="add-btn"
+          onclick={newTestTab}
+          title="New test"
+          aria-label="New test"
+        >
+          <Plus size="0.875rem" />
+        </button>
+      </div>
+      {#if sections.tests}
+        <ul class="items" transition:slide={{ duration: 150 }}>
+          {#each testEntries as test (test.name)}
+            <li>
+              <button
+                type="button"
+                class="item"
+                class:selected={workspaceSelection.isSelected("test", test.name)}
+                onclick={() => workspaceSelection.select("test", test.name)}
+                title={test.lastResult?.message ?? "never run"}
+              >
+                <span
+                  class="status-dot"
+                  class:pass={testDotClass(test) === "pass"}
+                  class:fail={testDotClass(test) === "fail"}
+                  class:error={testDotClass(test) === "error"}
+                ></span>
+                <span class="name">{test.name}</span>
+                {#if test.lastResult}
+                  <span class="meta">{test.lastResult.durationMs}ms</span>
+                {/if}
+              </button>
+            </li>
+          {:else}
+            <li class="empty">No tests</li>
           {/each}
         </ul>
       {/if}
@@ -466,5 +557,28 @@
     color: var(--theme-text-muted);
     font-size: 0.75rem;
     font-style: italic;
+  }
+
+  .status-dot {
+    flex-shrink: 0;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--theme-border);
+
+    &.pass {
+      background: var(--theme-success, #10b981);
+    }
+    &.fail {
+      background: var(--theme-danger, #ef4444);
+    }
+    &.error {
+      background: var(--theme-warning, #f59e0b);
+    }
+  }
+
+  .play-icon {
+    font-size: 0.625rem;
+    line-height: 1;
   }
 </style>

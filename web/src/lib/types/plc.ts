@@ -80,6 +80,32 @@ export interface ProgramListItem {
   pendingUpdatedBy?: string;
 }
 
+export interface PlcTestResult {
+  name: string;
+  status: 'pass' | 'fail' | 'error';
+  message?: string;
+  logs?: string[];
+  durationMs: number;
+  startedAt: number;
+}
+
+export interface PlcTest {
+  name: string;
+  description?: string;
+  source: string;
+  updatedAt: number;
+  updatedBy?: string;
+  lastResult?: PlcTestResult;
+}
+
+export interface TestListItem {
+  name: string;
+  description?: string;
+  updatedAt: number;
+  updatedBy?: string;
+  lastResult?: PlcTestResult;
+}
+
 export interface PlcTemplateField {
   name: string;
   type: string;

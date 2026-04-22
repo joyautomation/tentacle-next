@@ -124,3 +124,25 @@ type PlcFunctionReturn struct {
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
 }
+
+// PlcTestKV stores a unit test in the plc_tests KV bucket. Tests are
+// Starlark scripts that can call program functions and use the built-in
+// assert_* helpers to verify behavior.
+type PlcTestKV struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Source      string           `json:"source"`
+	UpdatedAt   int64            `json:"updatedAt"`
+	UpdatedBy   string           `json:"updatedBy,omitempty"`
+	LastResult  *PlcTestResult   `json:"lastResult,omitempty"`
+}
+
+// PlcTestResult captures the outcome of a single test run.
+type PlcTestResult struct {
+	Name       string   `json:"name"`
+	Status     string   `json:"status"` // "pass", "fail", "error"
+	Message    string   `json:"message,omitempty"`
+	Logs       []string `json:"logs,omitempty"`
+	DurationMs int64    `json:"durationMs"`
+	StartedAt  int64    `json:"startedAt"`
+}

@@ -5,7 +5,8 @@ import type {
 	PlcVariableConfig,
 	PlcTaskConfig,
 	PlcTemplate,
-	ProgramListItem
+	ProgramListItem,
+	TestListItem
 } from '$lib/types/plc';
 
 export interface LogEntry {
@@ -22,6 +23,7 @@ export interface WorkspaceLoadData {
 	variables: Record<string, PlcVariableConfig>;
 	tasks: Record<string, PlcTaskConfig>;
 	programs: ProgramListItem[];
+	tests: TestListItem[];
 	templates: PlcTemplate[];
 	plcConfig: PlcConfig | null;
 	initialLogs: LogEntry[];
@@ -36,6 +38,7 @@ export const load: PageLoad = async ({ params }): Promise<WorkspaceLoadData> => 
 		variables: {},
 		tasks: {},
 		programs: [],
+		tests: [],
 		templates: [],
 		plcConfig: null,
 		initialLogs: [],
@@ -44,10 +47,11 @@ export const load: PageLoad = async ({ params }): Promise<WorkspaceLoadData> => 
 
 	if (serviceType !== 'plc') return empty;
 
-	const [configResult, tasksResult, programsResult, logsResult, templatesResult] = await Promise.all([
+	const [configResult, tasksResult, programsResult, testsResult, logsResult, templatesResult] = await Promise.all([
 		api<PlcConfig>('/plcs/plc/config'),
 		api<Record<string, PlcTaskConfig>>('/plcs/plc/tasks'),
 		api<ProgramListItem[]>('/plcs/plc/programs'),
+		api<TestListItem[]>('/plcs/plc/tests'),
 		api<LogEntry[]>(`/services/${serviceType}/logs`),
 		api<PlcTemplate[]>('/plcs/plc/templates')
 	]);
@@ -57,6 +61,7 @@ export const load: PageLoad = async ({ params }): Promise<WorkspaceLoadData> => 
 		variables: configResult.data?.variables ?? {},
 		tasks: tasksResult.data ?? {},
 		programs: programsResult.data ?? [],
+		tests: testsResult.data ?? [],
 		templates: templatesResult.data ?? [],
 		plcConfig: configResult.data ?? null,
 		initialLogs: logsResult.data ?? [],

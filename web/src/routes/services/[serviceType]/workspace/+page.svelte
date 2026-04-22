@@ -11,6 +11,10 @@
 	import CreateDialog from '$lib/plc/workspace/CreateDialog.svelte';
 	import OutputPanel from '$lib/plc/workspace/OutputPanel.svelte';
 	import { ChevronLeft, ChevronRight, ChevronUp } from '@joyautomation/salt/icons';
+	import { apiPost } from '$lib/api/client';
+	import { invalidateAll } from '$app/navigation';
+	import { state as saltState } from '@joyautomation/salt';
+	import type { PlcTestResult } from '$lib/types/plc';
 	import type { WorkspaceLoadData } from './+page';
 
 	let { data }: { data: WorkspaceLoadData } = $props();
@@ -46,7 +50,34 @@
 		workspaceTabs.open({ name: selection.id, kind: 'task' });
 	});
 
+	$effect(() => {
+		if (selection?.kind !== 'test') return;
+		if (!data.tests.some((t) => t.name === selection.id)) return;
+		workspaceTabs.open({ name: selection.id, kind: 'test' });
+	});
+
 	let createKind = $state<'variable' | 'task' | null>(null);
+	let runningAllTests = $state(false);
+
+	async function runAllTests() {
+		runningAllTests = true;
+		try {
+			const res = await apiPost<PlcTestResult[]>('/plcs/plc/tests/run');
+			if (res.error) {
+				saltState.addNotification({ message: res.error.error, type: 'error' });
+				return;
+			}
+			const total = res.data?.length ?? 0;
+			const passed = res.data?.filter((r) => r.status === 'pass').length ?? 0;
+			saltState.addNotification({
+				message: `${passed}/${total} tests passed`,
+				type: passed === total ? 'success' : 'error'
+			});
+			await invalidateAll();
+		} finally {
+			runningAllTests = false;
+		}
+	}
 
 	function toggleLeft() {
 		layout.leftOpen = !layout.leftOpen;
@@ -122,7 +153,10 @@
 											variables={data.variables}
 											tasks={data.tasks}
 											programs={data.programs}
+											tests={data.tests}
 											onCreate={(kind) => (createKind = kind)}
+											onRunAllTests={runAllTests}
+											testsRunning={runningAllTests}
 										/>
 									</div>
 								</section>

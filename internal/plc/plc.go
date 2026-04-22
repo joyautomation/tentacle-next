@@ -255,6 +255,14 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.subs = append(m.subs, trySub)
 	m.mu.Unlock()
 
+	// Handle test-run commands.
+	testSub, _ := b.Subscribe(topics.PlcTest(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		m.handleTestRequest(data, reply)
+	})
+	m.mu.Lock()
+	m.subs = append(m.subs, testSub)
+	m.mu.Unlock()
+
 	// Handle variable write commands. The API publishes {"value": X} to
 	// {plcID}.command.{variableID}; variableID may contain dots for
 	// nested struct field paths (e.g. motor1.test).
@@ -701,6 +709,65 @@ type tryResponse struct {
 	Error     string          `json:"error,omitempty"`
 	Session   *TrySessionInfo `json:"session,omitempty"`
 	LastEvent *TryEvent       `json:"lastEvent,omitempty"`
+}
+
+// testRunCommand is the request body decoded from PlcTest messages.
+// A single run request names the test + supplies its source; the runner
+// does not read the KV bucket directly so tests can be executed without
+// round-tripping through NATS KV.
+type testRunCommand struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+// testRunResponse is the reply envelope for PlcTest run requests.
+type testRunResponse struct {
+	OK     bool                  `json:"ok"`
+	Error  string                `json:"error,omitempty"`
+	Result *itypes.PlcTestResult `json:"result,omitempty"`
+}
+
+// handleTestRequest services the test-run command topic. It executes the
+// supplied test source against the live engine and returns the result.
+// A terminal event is also published to PlcTestEvents so any streaming
+// subscribers see the same outcome.
+func (m *Module) handleTestRequest(data []byte, reply bus.ReplyFunc) {
+	if reply == nil {
+		return
+	}
+
+	respond := func(r testRunResponse) {
+		payload, err := json.Marshal(r)
+		if err != nil {
+			m.log.Error("plc: failed to marshal test response", "error", err)
+			return
+		}
+		reply(payload)
+	}
+
+	var cmd testRunCommand
+	if err := json.Unmarshal(data, &cmd); err != nil {
+		respond(testRunResponse{OK: false, Error: fmt.Sprintf("invalid body: %v", err)})
+		return
+	}
+	if cmd.Name == "" {
+		respond(testRunResponse{OK: false, Error: "name is required"})
+		return
+	}
+
+	m.mu.RLock()
+	engine := m.engine
+	m.mu.RUnlock()
+	if engine == nil {
+		respond(testRunResponse{OK: false, Error: "engine not initialized (config not applied yet)"})
+		return
+	}
+
+	result := engine.RunTest(cmd.Name, cmd.Source)
+	if ev, err := json.Marshal(result); err == nil {
+		_ = m.b.Publish(topics.PlcTestEvents(m.plcID), ev)
+	}
+	respond(testRunResponse{OK: true, Result: &result})
 }
 
 // handleTryRequest services the try-session command topic. Callers

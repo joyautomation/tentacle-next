@@ -811,6 +811,266 @@ func (m *Module) handleStreamPlcProgramTryEvents(w http.ResponseWriter, r *http.
 	}
 }
 
+// ─── Unit Tests ─────────────────────────────────────────────────────────────
+//
+// Tests are Starlark scripts persisted in the plc_tests KV bucket. A test
+// exercises live program code through the same cross-program call proxies
+// used at runtime and uses the assert_* builtins to verify behavior.
+//
+//   GET    /plcs/{plcId}/tests            — list
+//   GET    /plcs/{plcId}/tests/{name}     — get
+//   PUT    /plcs/{plcId}/tests/{name}     — create/update
+//   DELETE /plcs/{plcId}/tests/{name}     — delete
+//   POST   /plcs/{plcId}/tests/{name}/run — execute single test
+//   POST   /plcs/{plcId}/tests/run        — execute all tests
+//   GET    /plcs/{plcId}/tests/events     — SSE of test results
+
+func (m *Module) getPlcTest(name string) (*itypes.PlcTestKV, error) {
+	data, _, err := m.bus.KVGet(topics.BucketPlcTests, name)
+	if err != nil {
+		return nil, err
+	}
+	var t itypes.PlcTestKV
+	if err := json.Unmarshal(data, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (m *Module) putPlcTest(t *itypes.PlcTestKV) error {
+	t.UpdatedAt = time.Now().UnixMilli()
+	if t.UpdatedBy == "" {
+		t.UpdatedBy = "api"
+	}
+	data, err := json.Marshal(t)
+	if err != nil {
+		return err
+	}
+	_, err = m.bus.KVPut(topics.BucketPlcTests, t.Name, data)
+	return err
+}
+
+type testListItem struct {
+	Name        string                `json:"name"`
+	Description string                `json:"description,omitempty"`
+	UpdatedAt   int64                 `json:"updatedAt"`
+	UpdatedBy   string                `json:"updatedBy,omitempty"`
+	LastResult  *itypes.PlcTestResult `json:"lastResult,omitempty"`
+}
+
+func (m *Module) handleListPlcTests(w http.ResponseWriter, r *http.Request) {
+	keys, err := m.bus.KVKeys(topics.BucketPlcTests)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []testListItem{})
+		return
+	}
+	out := make([]testListItem, 0, len(keys))
+	for _, k := range keys {
+		t, err := m.getPlcTest(k)
+		if err != nil {
+			m.log.Warn("skipping plc test", "key", k, "err", err)
+			continue
+		}
+		out = append(out, testListItem{
+			Name:        t.Name,
+			Description: t.Description,
+			UpdatedAt:   t.UpdatedAt,
+			UpdatedBy:   t.UpdatedBy,
+			LastResult:  t.LastResult,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (m *Module) handleGetPlcTest(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	t, err := m.getPlcTest(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("test %q not found: %v", name, err))
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (m *Module) handlePutPlcTest(w http.ResponseWriter, r *http.Request) {
+	urlName := chi.URLParam(r, "name")
+
+	var t itypes.PlcTestKV
+	if err := readJSON(r, &t); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
+		return
+	}
+	if t.Name == "" {
+		t.Name = urlName
+	}
+	if t.Source == "" {
+		writeError(w, http.StatusBadRequest, "source is required")
+		return
+	}
+	if !isValidProgramName(t.Name) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("name %q is not a valid identifier", t.Name))
+		return
+	}
+
+	rename := urlName != t.Name
+	if rename {
+		if existing, _ := m.getPlcTest(t.Name); existing != nil {
+			writeError(w, http.StatusConflict, fmt.Sprintf("a test named %q already exists", t.Name))
+			return
+		}
+	}
+
+	if err := m.putPlcTest(&t); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put plc test: %v", err))
+		return
+	}
+	if rename {
+		if err := m.bus.KVDelete(topics.BucketPlcTests, urlName); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete old test %q after rename: %v", urlName, err))
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, &t)
+}
+
+func (m *Module) handleDeletePlcTest(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if err := m.bus.KVDelete(topics.BucketPlcTests, name); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete plc test: %v", err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// plcTestRunCommand mirrors plc.testRunCommand.
+type plcTestRunCommand struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+// doTestRunRequest issues a run command to the PLC module and returns the
+// unmarshalled result (or an error + matching HTTP status).
+func (m *Module) doTestRunRequest(plcID string, cmd plcTestRunCommand) (*itypes.PlcTestResult, int, error) {
+	body, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	resp, err := m.bus.Request(topics.PlcTest(plcID), body, busTimeout)
+	if err != nil {
+		return nil, http.StatusBadGateway, err
+	}
+	var env struct {
+		OK     bool                  `json:"ok"`
+		Error  string                `json:"error,omitempty"`
+		Result *itypes.PlcTestResult `json:"result,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &env); err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	if !env.OK {
+		return nil, http.StatusBadRequest, fmt.Errorf("%s", env.Error)
+	}
+	return env.Result, http.StatusOK, nil
+}
+
+// handleRunPlcTest executes a single test and persists its result on the
+// KV record so the next list call reflects the latest status.
+func (m *Module) handleRunPlcTest(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+	name := chi.URLParam(r, "name")
+
+	t, err := m.getPlcTest(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("test %q not found: %v", name, err))
+		return
+	}
+
+	result, status, err := m.doTestRunRequest(plcID, plcTestRunCommand{Name: t.Name, Source: t.Source})
+	if err != nil {
+		writeError(w, status, fmt.Sprintf("run test: %v", err))
+		return
+	}
+
+	t.LastResult = result
+	if perr := m.putPlcTest(t); perr != nil {
+		m.log.Warn("plc: failed to persist test result", "name", name, "error", perr)
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleRunAllPlcTests runs every test in the bucket sequentially and
+// returns their results. Each run persists its own last-result snapshot.
+func (m *Module) handleRunAllPlcTests(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+
+	keys, err := m.bus.KVKeys(topics.BucketPlcTests)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []itypes.PlcTestResult{})
+		return
+	}
+	sort.Strings(keys)
+
+	results := make([]itypes.PlcTestResult, 0, len(keys))
+	for _, k := range keys {
+		t, err := m.getPlcTest(k)
+		if err != nil {
+			continue
+		}
+		result, _, err := m.doTestRunRequest(plcID, plcTestRunCommand{Name: t.Name, Source: t.Source})
+		if err != nil {
+			results = append(results, itypes.PlcTestResult{
+				Name:    t.Name,
+				Status:  "error",
+				Message: err.Error(),
+			})
+			continue
+		}
+		t.LastResult = result
+		if perr := m.putPlcTest(t); perr != nil {
+			m.log.Warn("plc: failed to persist test result", "name", t.Name, "error", perr)
+		}
+		results = append(results, *result)
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+// handleStreamPlcTestEvents forwards test-run events from the PLC module
+// bus topic to an SSE stream. One shared stream per PLC — the client
+// filters by test name.
+func (m *Module) handleStreamPlcTestEvents(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+	sse, ok := newSSEWriter(w)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	events := make(chan json.RawMessage, 32)
+	sub, err := m.bus.Subscribe(topics.PlcTestEvents(plcID), func(_ string, data []byte, _ bus.ReplyFunc) {
+		select {
+		case events <- append(json.RawMessage(nil), data...):
+		default:
+		}
+	})
+	if err != nil {
+		m.log.Warn("plc: failed to subscribe to test events", "error", err)
+		return
+	}
+	defer sub.Unsubscribe()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev := <-events:
+			if err := sse.WriteEvent("test", ev); err != nil {
+				return
+			}
+		}
+	}
+}
+
 
 type plcImportItem struct {
 	VariableID     string      `json:"variableId"`

@@ -25,6 +25,8 @@ func Shutdown(moduleID string) string                   { return moduleID + ".sh
 func PlcTaskStats(plcID string) string                  { return plcID + ".plc.task-stats" }
 func PlcTry(plcID string) string                        { return plcID + ".plc.try" }
 func PlcTryEvents(plcID string) string                  { return plcID + ".plc.try.events" }
+func PlcTest(plcID string) string                       { return plcID + ".plc.test" }
+func PlcTestEvents(plcID string) string                 { return plcID + ".plc.test.events" }
 
 // Service management.
 func ServiceLogs(serviceType, moduleID string) string { return fmt.Sprintf("service.logs.%s.%s", serviceType, moduleID) }

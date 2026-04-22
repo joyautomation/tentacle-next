@@ -2,6 +2,7 @@
 	import ProgramEditor from './ProgramEditor.svelte';
 	import VariableEditor from './VariableEditor.svelte';
 	import TaskEditor from './TaskEditor.svelte';
+	import TestEditor from './TestEditor.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
@@ -49,6 +50,7 @@
 	function badgeLabel(tab: EditorTab): string {
 		if (tab.kind === 'variable') return 'VAR';
 		if (tab.kind === 'task') return 'TASK';
+		if (tab.kind === 'test') return 'TEST';
 		const lang = tab.language ?? '';
 		if (lang === 'starlark') return 'PY';
 		if (lang === 'st' || lang === 'structured-text') return 'ST';
@@ -70,6 +72,7 @@
 				class="badge"
 				class:var-badge={tab.kind === 'variable'}
 				class:task-badge={tab.kind === 'task'}
+				class:test-badge={tab.kind === 'test'}
 			>{badgeLabel(tab)}</span>
 			<span class="name">{tab.label}</span>
 			{#if workspaceTabs.dirty[tab.id]}
@@ -101,6 +104,14 @@
 						name={tab.name}
 						{tasks}
 						{programs}
+						onDirtyChange={(d) => workspaceTabs.setDirty(tab.id, d)}
+					/>
+				{:else if tab.kind === 'test'}
+					<TestEditor
+						tabId={tab.id}
+						name={tab.name}
+						isNew={tab.isNew ?? false}
+						{variableNames}
 						onDirtyChange={(d) => workspaceTabs.setDirty(tab.id, d)}
 					/>
 				{:else}
@@ -146,6 +157,11 @@
 		&.task-badge {
 			color: var(--theme-text);
 			background: color-mix(in srgb, var(--theme-text) 12%, transparent);
+		}
+
+		&.test-badge {
+			color: var(--theme-success, #10b981);
+			background: color-mix(in srgb, var(--theme-success, #10b981) 14%, transparent);
 		}
 	}
 
