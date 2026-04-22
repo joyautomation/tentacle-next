@@ -12,10 +12,20 @@ export type EditorTab = {
 	name: string;
 	kind: EditorTabKind;
 	language?: string;
+	// Untitled tabs created in-editor before their first save. The id is a
+	// synthetic `program:__new_<n>` so it stays stable while the user types
+	// their def header; once saved, the tab is renamed via renameTab().
+	isNew?: boolean;
 };
 
 export function tabId(kind: EditorTabKind, name: string): string {
 	return `${kind}:${name}`;
+}
+
+let newTabCounter = 0;
+export function newTabId(kind: EditorTabKind): string {
+	newTabCounter += 1;
+	return `${kind}:__new_${newTabCounter}`;
 }
 
 // Kept as alias for incremental migration; prefer EditorTab.
@@ -113,6 +123,42 @@ export const workspaceTabs = {
 		}
 		state.activeTab = id;
 	},
+	// openNew creates an unsaved tab with a synthetic id. The tab renders
+	// the editor in "new" mode — the user types a def, the pending name is
+	// derived from the header, and renameTab promotes the tab to its real
+	// key on first save.
+	openNew(kind: EditorTabKind, language?: string): string {
+		const id = newTabId(kind);
+		const tab: EditorTab = { id, name: '', kind, language, isNew: true };
+		state.tabs = [...state.tabs, tab];
+		state.activeTab = id;
+		return id;
+	},
+	// renameTab swaps a tab's id/name (and clears isNew) after a successful
+	// save or rename. If a tab with the target id already exists, we drop
+	// the source tab to avoid duplicates.
+	renameTab(oldId: string, newName: string) {
+		const idx = state.tabs.findIndex((t) => t.id === oldId);
+		if (idx === -1) return;
+		const src = state.tabs[idx];
+		const newId = tabId(src.kind, newName);
+		const collision = state.tabs.findIndex((t) => t.id === newId);
+		if (collision !== -1 && collision !== idx) {
+			// Caller is expected to prevent this — but if it happens, close
+			// the stale source tab rather than shadowing the existing one.
+			this.close(oldId);
+			state.activeTab = newId;
+			return;
+		}
+		const next = state.tabs.slice();
+		next[idx] = { ...src, id: newId, name: newName, isNew: false };
+		state.tabs = next;
+		if (state.activeTab === oldId) state.activeTab = newId;
+		if (state.dirty[oldId]) {
+			state.dirty[newId] = true;
+			delete state.dirty[oldId];
+		}
+	},
 	activate(id: string) {
 		if (state.tabs.some((t) => t.id === id)) {
 			state.activeTab = id;
@@ -128,6 +174,17 @@ export const workspaceTabs = {
 			state.activeTab =
 				next[idx]?.id ?? next[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
 		}
+	},
+	// setTabLabel updates only the display name for a tab. Intended for
+	// unsaved ("new") tabs whose name is being derived live from the def
+	// header the user is typing — the tab's id stays on its synthetic key.
+	setTabLabel(id: string, label: string) {
+		const idx = state.tabs.findIndex((t) => t.id === id);
+		if (idx === -1) return;
+		if (state.tabs[idx].name === label) return;
+		const next = state.tabs.slice();
+		next[idx] = { ...next[idx], name: label };
+		state.tabs = next;
 	},
 	setDirty(id: string, dirty: boolean) {
 		if (dirty) {

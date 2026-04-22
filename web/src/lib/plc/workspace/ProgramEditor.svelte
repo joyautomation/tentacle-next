@@ -8,10 +8,12 @@
 	import {
 		workspaceDiagnostics,
 		workspaceTabs,
+		workspaceSelection,
 		workspaceView,
 		type DiagnosticSeverity
 	} from '$lib/plc/workspace-state.svelte';
 	import { startLiveValues, liveValuesVersion, liveValuesSnapshot } from '$lib/plc/live-values.svelte';
+	import type { ProgramListItem } from '$lib/types/plc';
 
 	function lspSeverityToDiagnosticSeverity(sev: number | undefined): DiagnosticSeverity {
 		if (sev === 2) return 'warning';
@@ -33,28 +35,75 @@
 		tabId: string;
 		name: string;
 		variableNames: string[];
+		programs?: ProgramListItem[];
+		isNew?: boolean;
+		initialLanguage?: string;
 		onDirtyChange?: (dirty: boolean) => void;
 	};
 
-	let { tabId, name, variableNames, onDirtyChange }: Props = $props();
+	let {
+		tabId,
+		name,
+		variableNames,
+		programs = [],
+		isNew = false,
+		initialLanguage = 'starlark',
+		onDirtyChange
+	}: Props = $props();
+
+	// Placeholder body seeded into a brand-new tab. The user edits the def
+	// name in-place — pendingName is derived from the def header below.
+	const NEW_PROGRAM_PLACEHOLDER = 'def new_function():\n    pass\n';
 
 	let loading = $state(false);
 	let saving = $state(false);
 	let deleting = $state(false);
 	let error = $state<string | null>(null);
-	let serverSource = $state('');
+	let serverSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let serverStSource = $state('');
-	let language = $state<string>('starlark');
-	let draftSource = $state('');
+	let language = $state<string>(isNew ? initialLanguage : 'starlark');
+	let draftSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let draftStSource = $state('');
 
 	const dirty = $derived(
-		draftSource !== serverSource || draftStSource !== serverStSource
+		isNew || draftSource !== serverSource || draftStSource !== serverStSource
 	);
 
+	// Name derived from the first `def` header in the current source.
+	// Drives the tab label for unsaved tabs and the rename check for saved
+	// ones — editing the def is the user's way of naming the function.
+	function extractDefName(src: string): string {
+		const m = src.match(/^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/m);
+		return m?.[1] ?? '';
+	}
+
+	const pendingName = $derived.by(() => {
+		if (language !== 'starlark') return name;
+		return extractDefName(draftSource);
+	});
+
+	const nameIsValid = $derived(/^[A-Za-z_][A-Za-z0-9_]*$/.test(pendingName));
+
+	const nameCollision = $derived.by(() => {
+		if (!pendingName) return false;
+		if (!isNew && pendingName === name) return false;
+		return programs.some((p) => p.name === pendingName);
+	});
+
+	// Effective program name for LSP / display: the saved name while it
+	// still matches the source, otherwise whatever the user is typing.
+	const effectiveName = $derived(pendingName || name || 'untitled');
+
 	const lspUri = $derived(
-		`tentacle-plc://programs/${encodeURIComponent(name)}.${language === 'st' ? 'st' : 'star'}`
+		`tentacle-plc://programs/${encodeURIComponent(effectiveName)}.${language === 'st' ? 'st' : 'star'}`
 	);
+
+	// Keep the tab label in sync with the pending name so the tab strip
+	// shows the function's evolving identity as the user types.
+	$effect(() => {
+		if (!isNew) return;
+		workspaceTabs.setTabLabel(tabId, pendingName || 'Untitled');
+	});
 
 	const errorCount = $derived.by(() => {
 		const diags = workspaceDiagnostics.byUri[lspUri];
@@ -87,6 +136,7 @@
 	});
 
 	$effect(() => {
+		if (isNew) return;
 		if (!name) return;
 		void load(name);
 	});
@@ -116,13 +166,39 @@
 		}
 	}
 
+	// saveBlockedReason returns a short explanation when save is disabled.
+	// Used as a tooltip so the user knows why the button isn't clickable.
+	const saveBlockedReason = $derived.by(() => {
+		if (language === 'starlark') {
+			if (!pendingName) return 'Add a def header to name this function';
+			if (!nameIsValid) return `"${pendingName}" is not a valid identifier`;
+			if (nameCollision) return `A program named "${pendingName}" already exists`;
+		}
+		if (errorCount > 0) return `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before saving`;
+		return undefined;
+	});
+
+	const canSave = $derived.by(() => {
+		if (!dirty || saving) return false;
+		if (errorCount > 0) return false;
+		if (language === 'starlark') {
+			if (!nameIsValid) return false;
+			if (nameCollision) return false;
+		}
+		return true;
+	});
+
 	async function save() {
-		if (!dirty || saving) return;
-		if (errorCount > 0) return;
+		if (!canSave) return;
 		saving = true;
 		try {
+			// For Starlark, the stored key follows the def header. New tabs
+			// POST to the derived name; saved tabs PUT to the old key and
+			// ask the server to rename when the def has changed.
+			const urlName = isNew ? pendingName : name;
+			const bodyName = language === 'starlark' ? pendingName : name;
 			const body: Record<string, unknown> = {
-				name,
+				name: bodyName,
 				language,
 				source: draftSource,
 				updatedBy: 'gui'
@@ -130,14 +206,23 @@
 			if (language === 'st') {
 				body.stSource = draftStSource;
 			}
-			const result = await apiPut(`/plcs/plc/programs/${encodeURIComponent(name)}`, body);
+			const result = await apiPut(`/plcs/plc/programs/${encodeURIComponent(urlName)}`, body);
 			if (result.error) {
 				saltState.addNotification({ message: result.error.error, type: 'error' });
 				return;
 			}
 			serverSource = draftSource;
 			serverStSource = draftStSource;
-			saltState.addNotification({ message: `Function "${name}" saved`, type: 'success' });
+			const renamed = !isNew && bodyName !== name;
+			if (isNew || renamed) {
+				workspaceTabs.renameTab(tabId, bodyName);
+				workspaceSelection.select('program', bodyName);
+			}
+			const verb = isNew ? 'created' : renamed ? 'renamed' : 'saved';
+			saltState.addNotification({
+				message: `Function "${bodyName}" ${verb}`,
+				type: 'success'
+			});
 			await invalidateAll();
 		} finally {
 			saving = false;
@@ -150,6 +235,11 @@
 	}
 
 	async function del() {
+		// A never-saved tab just closes — nothing to delete server-side.
+		if (isNew) {
+			workspaceTabs.close(tabId);
+			return;
+		}
 		if (!confirm(`Delete function "${name}"? This cannot be undone.`)) return;
 		deleting = true;
 		try {
@@ -170,7 +260,14 @@
 <div class="program-editor">
 	<div class="ed-header">
 		<div class="left">
-			<span class="prog-name">{name}</span>
+			<span class="prog-name" class:pending={isNew || pendingName !== name}>
+				{effectiveName}
+			</span>
+			{#if !isNew && pendingName && pendingName !== name && nameIsValid && !nameCollision}
+				<span class="rename-hint" title="Saving will rename the program">
+					(will rename on save)
+				</span>
+			{/if}
 			<span class="lang-badge">{language}</span>
 			{#if dirty}
 				<DirtyIcon size="0.875rem" />
@@ -186,7 +283,7 @@
 			>
 				{showInlineValues ? 'Hide Values' : 'Show Values'}
 			</button>
-			{#if dirty}
+			{#if dirty && !isNew}
 				<button type="button" class="btn subtle" onclick={revert} disabled={saving}>
 					Revert
 				</button>
@@ -195,12 +292,10 @@
 				type="button"
 				class="btn primary"
 				onclick={save}
-				disabled={!dirty || saving || errorCount > 0}
-				title={errorCount > 0
-					? `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before saving`
-					: undefined}
+				disabled={!canSave}
+				title={saveBlockedReason}
 			>
-				{saving ? 'Saving…' : errorCount > 0 ? `Save (${errorCount} error${errorCount === 1 ? '' : 's'})` : 'Save'}
+				{saving ? 'Saving…' : isNew ? 'Create' : 'Save'}
 			</button>
 			<button
 				type="button"
@@ -288,6 +383,17 @@
 		font-size: 0.875rem;
 		font-weight: 600;
 		color: var(--theme-text);
+
+		&.pending {
+			color: var(--theme-text-muted);
+			font-style: italic;
+		}
+	}
+
+	.rename-hint {
+		font-size: 0.75rem;
+		color: var(--theme-text-muted);
+		font-style: italic;
 	}
 
 	.lang-badge {

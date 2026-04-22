@@ -43,7 +43,7 @@
 		workspaceTabs.open({ name: selection.id, kind: 'task' });
 	});
 
-	let createKind = $state<'variable' | 'task' | 'program' | null>(null);
+	let createKind = $state<'variable' | 'task' | null>(null);
 
 	function toggleLeft() {
 		layout.leftOpen = !layout.leftOpen;

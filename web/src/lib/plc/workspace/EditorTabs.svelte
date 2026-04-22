@@ -24,7 +24,7 @@
 	const tabs = $derived<EditorTab[]>(
 		workspaceTabs.list.map((t) => ({
 			id: t.id,
-			label: t.name,
+			label: t.isNew ? t.name || 'Untitled' : t.name,
 			kind: t.kind,
 			language: t.language
 		}))
@@ -34,6 +34,10 @@
 		workspaceTabs.activate(id);
 		const tab = workspaceTabs.list.find((t) => t.id === id);
 		if (!tab) return;
+		// Unsaved tabs don't have a real key yet; leaving the current
+		// selection alone is correct — otherwise the navigator would lose
+		// focus on whatever the user was looking at.
+		if (tab.isNew) return;
 		workspaceSelection.select(tab.kind, tab.name);
 	}
 
@@ -104,6 +108,9 @@
 						tabId={tab.id}
 						name={tab.name}
 						{variableNames}
+						{programs}
+						isNew={tab.isNew ?? false}
+						initialLanguage={tab.language}
 						onDirtyChange={(d) => workspaceTabs.setDirty(tab.id, d)}
 					/>
 				{/if}

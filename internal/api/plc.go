@@ -320,14 +320,16 @@ func (m *Module) handleGetPlcProgram(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) handlePutPlcProgram(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
+	urlName := chi.URLParam(r, "name")
 
 	var prog itypes.PlcProgramKV
 	if err := readJSON(r, &prog); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
 		return
 	}
-	prog.Name = name
+	if prog.Name == "" {
+		prog.Name = urlName
+	}
 
 	if !validProgramLanguages[prog.Language] {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("language must be one of ladder, st, starlark (got %q)", prog.Language))
@@ -336,6 +338,21 @@ func (m *Module) handlePutPlcProgram(w http.ResponseWriter, r *http.Request) {
 	if prog.Source == "" && prog.Language != "st" {
 		writeError(w, http.StatusBadRequest, "source is required")
 		return
+	}
+	if !isValidProgramName(prog.Name) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("name %q is not a valid identifier", prog.Name))
+		return
+	}
+
+	// Rename: URL key differs from body name. The old entry is deleted
+	// after the new entry is successfully persisted. A collision with an
+	// existing program at the new name is rejected with 409.
+	rename := urlName != prog.Name
+	if rename {
+		if existing, _ := m.getPlcProgram(prog.Name); existing != nil {
+			writeError(w, http.StatusConflict, fmt.Sprintf("a program named %q already exists", prog.Name))
+			return
+		}
 	}
 
 	// Signatures are derived from Python-style annotations on the entry
@@ -350,7 +367,32 @@ func (m *Module) handlePutPlcProgram(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put plc program: %v", err))
 		return
 	}
+	if rename {
+		if err := m.deletePlcProgram(urlName); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("delete old program %q after rename: %v", urlName, err))
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, &prog)
+}
+
+// isValidProgramName returns true when s is a non-empty identifier of the
+// form [A-Za-z_][A-Za-z0-9_]* — the same shape Starlark accepts for a def
+// name, which is what users end up typing in the editor.
+func isValidProgramName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		if r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+			continue
+		}
+		if i > 0 && r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (m *Module) handleDeletePlcProgram(w http.ResponseWriter, r *http.Request) {

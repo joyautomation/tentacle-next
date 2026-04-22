@@ -6,7 +6,7 @@
 	import { workspaceSelection, workspaceTabs } from '../workspace-state.svelte';
 	import type { PlcTaskConfig, PlcTemplate, ProgramListItem } from '$lib/types/plc';
 
-	type Kind = 'variable' | 'task' | 'program';
+	type Kind = 'variable' | 'task';
 
 	type Props = {
 		kind: Kind;
@@ -18,10 +18,6 @@
 	let { kind, programs, templates = [], onClose }: Props = $props();
 
 	let saving = $state(false);
-
-	let progName = $state('');
-	let progDescription = $state('');
-	let progLanguage = $state<'starlark' | 'st' | 'ladder'>('starlark');
 
 	let taskName = $state('');
 	let taskProgramRef = $state('');
@@ -54,21 +50,10 @@
 		return null;
 	}
 
-	const title = $derived(
-		kind === 'program' ? 'New Function' : kind === 'task' ? 'New Task' : 'New Variable'
-	);
-
-	function defaultBody(lang: 'starlark' | 'st' | 'ladder', fn: string): string {
-		if (lang === 'st') return '';
-		// Annotated template advertises the signature-from-annotations
-		// feature on first use — users see right away that `: type` and
-		// `-> type` are understood.
-		return `def ${fn}():\n    pass\n`;
-	}
+	const title = $derived(kind === 'task' ? 'New Task' : 'New Variable');
 
 	const canSubmit = $derived.by(() => {
 		if (saving) return false;
-		if (kind === 'program') return progName.trim() !== '';
 		if (kind === 'task') return taskName.trim() !== '' && taskProgramRef !== '' && taskScanRate > 0;
 		return varName.trim() !== '';
 	});
@@ -96,31 +81,7 @@
 		if (!canSubmit) return;
 		saving = true;
 		try {
-			if (kind === 'program') {
-				const name = progName.trim();
-				const source = progLanguage === 'st' ? '' : defaultBody(progLanguage, name);
-				// Signature metadata is derived server-side from the function
-				// body's annotations (`def foo(x: int) -> bool:`); the
-				// client doesn't send a signature at all.
-				const body: Record<string, unknown> = {
-					name,
-					description: progDescription.trim() || undefined,
-					language: progLanguage,
-					source,
-					updatedBy: 'gui'
-				};
-				if (progLanguage === 'st') body.stSource = '';
-				const res = await apiPut(`/plcs/plc/programs/${encodeURIComponent(name)}`, body);
-				if (res.error) {
-					saltState.addNotification({ message: res.error.error, type: 'error' });
-					return;
-				}
-				saltState.addNotification({ message: `Program "${name}" created`, type: 'success' });
-				await invalidateAll();
-				workspaceTabs.open({ name, kind: 'program', language: progLanguage });
-				workspaceSelection.select('program', name);
-				onClose();
-			} else if (kind === 'task') {
+			if (kind === 'task') {
 				const name = taskName.trim();
 				const body: PlcTaskConfig = {
 					name,
@@ -193,42 +154,7 @@
 				submit();
 			}}
 		>
-			{#if kind === 'program'}
-				<label class="field">
-					<span>Name</span>
-					<!-- svelte-ignore a11y_autofocus -->
-					<input
-						type="text"
-						bind:value={progName}
-						placeholder="scan_cycle"
-						required
-						autofocus
-					/>
-				</label>
-				<label class="field">
-					<span>Description</span>
-					<input
-						type="text"
-						bind:value={progDescription}
-						placeholder="What does this function do?"
-					/>
-				</label>
-				<label class="field">
-					<span>Language</span>
-					<select bind:value={progLanguage}>
-						<option value="starlark">Starlark</option>
-						<option value="st">Structured Text</option>
-						<option value="ladder">Ladder</option>
-					</select>
-				</label>
-				{#if progLanguage === 'starlark'}
-					<p class="sig-hint">
-						Parameter and return types are derived from annotations in the
-						function body &mdash;
-						<code>def name(x: int, y: str) -&gt; bool:</code>
-					</p>
-				{/if}
-			{:else if kind === 'task'}
+			{#if kind === 'task'}
 				<label class="field">
 					<span>Name</span>
 					<!-- svelte-ignore a11y_autofocus -->
@@ -428,23 +354,6 @@
 		font-size: 0.75rem;
 		color: var(--theme-text-muted);
 		font-style: italic;
-	}
-
-	.sig-hint {
-		margin: 0;
-		padding: 0.5rem 0.625rem;
-		font-size: 0.75rem;
-		color: var(--theme-text-muted);
-		background: var(--theme-surface);
-		border: 1px solid var(--theme-border);
-		border-radius: 0.3125rem;
-		line-height: 1.4;
-
-		code {
-			font-family: 'IBM Plex Mono', monospace;
-			font-size: 0.6875rem;
-			color: var(--theme-text);
-		}
 	}
 
 	.actions {

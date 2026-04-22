@@ -5,17 +5,24 @@
     PlcTaskConfig,
     ProgramListItem,
   } from "$lib/types/plc";
-  import { workspaceSelection } from "../workspace-state.svelte";
+  import { workspaceSelection, workspaceTabs } from "../workspace-state.svelte";
   import { ChevronRight, Plus } from "@joyautomation/salt/icons";
 
   type Props = {
     variables: Record<string, PlcVariableConfig>;
     tasks: Record<string, PlcTaskConfig>;
     programs: ProgramListItem[];
-    onCreate?: (kind: "variable" | "task" | "program") => void;
+    onCreate?: (kind: "variable" | "task") => void;
   };
 
   let { variables, tasks, programs, onCreate }: Props = $props();
+
+  function newProgramTab() {
+    // Functions are created in-editor: a blank tab opens, the user types
+    // their def, and the program name is derived from the def header on
+    // save. No modal.
+    workspaceTabs.openNew("program", "starlark");
+  }
 
   let sections = $state({
     variables: true,
@@ -209,7 +216,7 @@
         <button
           type="button"
           class="add-btn"
-          onclick={() => onCreate?.("program")}
+          onclick={newProgramTab}
           title="New function"
           aria-label="New function"
         >
