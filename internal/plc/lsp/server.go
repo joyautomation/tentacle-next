@@ -165,7 +165,7 @@ func (s *Server) handleCompletion(tr Transport, msg *rpcMessage) {
 		// client doesn't see an error. Add a case when the ST resolver lands.
 		list = CompletionList{IsIncomplete: false, Items: []CompletionItem{}}
 	default:
-		list = completeStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI))
+		list = completeStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI), lang)
 	}
 	body, _ := json.Marshal(list)
 	s.reply(tr, msg.ID, body)
@@ -192,7 +192,7 @@ func (s *Server) handleHover(tr Transport, msg *rpcMessage) {
 		s.reply(tr, msg.ID, json.RawMessage(`null`))
 		return
 	}
-	hov, ok := hoverStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI))
+	hov, ok := hoverStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI), lang)
 	if !ok {
 		s.reply(tr, msg.ID, json.RawMessage(`null`))
 		return

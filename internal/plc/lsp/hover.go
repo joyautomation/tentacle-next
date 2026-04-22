@@ -16,7 +16,7 @@ import (
 // Returns (nil, false) when there's nothing useful at the cursor. The
 // server turns a false into a JSON `null` result, which tells the client
 // to suppress the tooltip.
-func hoverStarlark(source string, pos Position, provider SymbolProvider, currentProgram string) (*Hover, bool) {
+func hoverStarlark(source string, pos Position, provider SymbolProvider, currentProgram, lang string) (*Hover, bool) {
 	word, startCol, endCol := identifierAt(source, pos.Line, pos.Character)
 	if word == "" {
 		return nil, false
@@ -25,7 +25,7 @@ func hoverStarlark(source string, pos Position, provider SymbolProvider, current
 		Start: Position{Line: pos.Line, Character: startCol},
 		End:   Position{Line: pos.Line, Character: endCol},
 	}
-	if b, ok := BuiltinsByName()[word]; ok {
+	if b, ok := BuiltinsByName()[word]; ok && builtinAvailable(b, lang) {
 		return &Hover{
 			Contents: MarkupContent{Kind: "markdown", Value: formatHoverMarkdown(b)},
 			Range:    rng,

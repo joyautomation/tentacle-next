@@ -201,3 +201,71 @@ func (vs *VariableStore) GetVariable(id string) *RuntimeVariable {
 	}
 	return nil
 }
+
+// Snapshot returns a shallow copy of every variable's current value, keyed by
+// id. Values are captured under a read lock; mutations after Snapshot returns
+// don't affect the returned map. Used by Try sessions to remember the
+// pre-candidate state so Restore can roll back on cancel/error/timeout.
+func (vs *VariableStore) Snapshot() map[string]interface{} {
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+	out := make(map[string]interface{}, len(vs.vars))
+	for id, v := range vs.vars {
+		out[id] = v.Value
+	}
+	return out
+}
+
+// Restore reverts variable values to the given snapshot, marking each changed
+// variable dirty for publication and persistence. Variables missing from the
+// snapshot are left alone — callers should pass a full snapshot from the same
+// store. Returns the number of values actually changed.
+func (vs *VariableStore) Restore(snapshot map[string]interface{}, nowMs int64) int {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	changed := 0
+	for id, prev := range snapshot {
+		v, ok := vs.vars[id]
+		if !ok {
+			continue
+		}
+		if valuesEqual(v.Value, prev) {
+			continue
+		}
+		v.Value = prev
+		v.LastUpdated = nowMs
+		v.changed = true
+		v.persistDirty = true
+		changed++
+	}
+	return changed
+}
+
+// valuesEqual compares two variable values for Restore's "did this actually
+// change" check. Keeps cycles clean — equal values don't re-publish or
+// re-persist. Falls back to a type switch for the scalars the store holds;
+// structs/maps are compared by reference which matches how the engine emits
+// them (same pointer = same value).
+func valuesEqual(a, b interface{}) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	switch av := a.(type) {
+	case bool:
+		bv, ok := b.(bool)
+		return ok && av == bv
+	case string:
+		bv, ok := b.(string)
+		return ok && av == bv
+	case float64:
+		bv, ok := b.(float64)
+		return ok && av == bv
+	case int64:
+		bv, ok := b.(int64)
+		return ok && av == bv
+	case int:
+		bv, ok := b.(int)
+		return ok && av == bv
+	}
+	return a == b
+}

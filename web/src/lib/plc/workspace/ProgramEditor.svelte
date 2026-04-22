@@ -380,6 +380,36 @@
 		trySession = null;
 	}
 
+	// Extract top-level `def NAME(` headers from Starlark source. Nested
+	// defs are ignored — tests should exercise the module's public surface,
+	// not helpers buried inside another function.
+	function extractTopLevelDefs(src: string): string[] {
+		const names: string[] = [];
+		for (const line of src.split('\n')) {
+			const m = line.match(/^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+			if (m) names.push(m[1]);
+		}
+		return names;
+	}
+
+	function newTestForProgram() {
+		const progName = effectiveName || name;
+		const defs = extractTopLevelDefs(draftSource);
+		const safeIdent = progName.replace(/[^A-Za-z0-9_]/g, '_');
+		const testName = `test_${safeIdent}_smoke`;
+		const callLines = defs.length
+			? defs.map((d) => `    ${d}()`).join('\n')
+			: `    # ${progName}() has no top-level defs to call — add assertions here.`;
+		const source =
+			`# Smoke test scaffolded from \`${progName}\`.\n` +
+			`# Each exported function is invoked; replace with real assertions.\n\n` +
+			`def ${testName}():\n` +
+			`${callLines}\n` +
+			`    assert_true(True)\n\n` +
+			`${testName}()\n`;
+		workspaceTabs.openNew('test', 'starlark', source);
+	}
+
 	async function del() {
 		// A never-saved tab just closes — nothing to delete server-side.
 		if (isNew) {
@@ -446,6 +476,14 @@
 					title={tryBlockedReason ?? 'Hot-swap the draft into the engine with auto-revert on error'}
 				>
 					{tryStarting ? 'Starting…' : 'Try'}
+				</button>
+				<button
+					type="button"
+					class="btn subtle"
+					onclick={newTestForProgram}
+					title="Create a unit test that calls this function's exports"
+				>
+					+ Test
 				</button>
 			{/if}
 			{#if dirty && !isNew}

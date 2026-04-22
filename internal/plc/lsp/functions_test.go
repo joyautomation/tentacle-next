@@ -26,7 +26,7 @@ func newFnProvider() *fakeProvider {
 }
 
 func TestCompletionIncludesCrossProgramFunctions(t *testing.T) {
-	list := completeStarlark("", Position{Line: 0, Character: 0}, newFnProvider(), "")
+	list := completeStarlark("", Position{Line: 0, Character: 0}, newFnProvider(), "", "")
 	var found *CompletionItem
 	for i, it := range list.Items {
 		if it.Label == "motor_on" {
@@ -49,7 +49,7 @@ func TestCompletionIncludesCrossProgramFunctions(t *testing.T) {
 }
 
 func TestCompletionSkipsCurrentProgramFunction(t *testing.T) {
-	list := completeStarlark("", Position{Line: 0, Character: 0}, newFnProvider(), "motor_on")
+	list := completeStarlark("", Position{Line: 0, Character: 0}, newFnProvider(), "motor_on", "")
 	for _, it := range list.Items {
 		if it.Label == "motor_on" && it.Kind == CompletionKindFunction {
 			t.Errorf("current program should not offer its own function, got %v", completionLabels(list))
@@ -59,7 +59,7 @@ func TestCompletionSkipsCurrentProgramFunction(t *testing.T) {
 
 func TestHoverResolvesCrossProgramFunction(t *testing.T) {
 	src := "def main():\n    motor_on(100)\n"
-	h, ok := hoverStarlark(src, Position{Line: 1, Character: 8}, newFnProvider(), "")
+	h, ok := hoverStarlark(src, Position{Line: 1, Character: 8}, newFnProvider(), "", "")
 	if !ok {
 		t.Fatalf("expected hover for motor_on")
 	}

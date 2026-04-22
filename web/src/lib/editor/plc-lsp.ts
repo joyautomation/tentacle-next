@@ -20,7 +20,7 @@ import {
 	snippet
 } from '@codemirror/autocomplete';
 
-type PlcLspLanguage = 'starlark' | 'python' | 'st';
+type PlcLspLanguage = 'starlark' | 'starlark-test' | 'python' | 'st';
 
 export interface PlcLspOptions {
 	/** Language of this editor's document. Called on each change so the caller can switch dynamically. */

@@ -111,6 +111,7 @@
 						tabId={tab.id}
 						name={tab.name}
 						isNew={tab.isNew ?? false}
+						initialSource={tab.initialSource}
 						{variableNames}
 						onDirtyChange={(d) => workspaceTabs.setDirty(tab.id, d)}
 					/>

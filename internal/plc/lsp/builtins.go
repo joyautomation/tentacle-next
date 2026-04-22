@@ -18,6 +18,10 @@ type Builtin struct {
 	Category   string   // category label shown in completion detail
 	Doc        string   // brief description, rendered in completion/hover popup
 	InsertText string   // optional snippet; empty means insert Name as-is
+	// Context limits where this builtin is surfaced. "" means everywhere
+	// (all starlark documents). "test" means only in unit-test documents —
+	// the client signals this by opening with languageId "starlark-test".
+	Context string
 }
 
 // catalog is the single source of truth. Other packages must not mutate
@@ -184,6 +188,57 @@ var catalog = []Builtin{
 		Doc:       "Reset. Clears `ACC` and `DN` for a timer or counter when the rung energizes.",
 	},
 
+	// --- Test assertions (only in test files) --------------------------
+	{
+		Name: "assert_eq", Kind: "function", Category: "Test · Assertion", Context: "test",
+		Signature:  `assert_eq(actual, expected, msg: str = "")`,
+		Params:     []string{"actual", "expected", "msg"},
+		InsertText: `assert_eq($1, $2)`,
+		Doc:        "Fail the test if `actual != expected`. Optional `msg` is prepended to the failure message.",
+	},
+	{
+		Name: "assert_ne", Kind: "function", Category: "Test · Assertion", Context: "test",
+		Signature:  `assert_ne(actual, expected, msg: str = "")`,
+		Params:     []string{"actual", "expected", "msg"},
+		InsertText: `assert_ne($1, $2)`,
+		Doc:        "Fail the test if `actual == expected`.",
+	},
+	{
+		Name: "assert_true", Kind: "function", Category: "Test · Assertion", Context: "test",
+		Signature:  `assert_true(value, msg: str = "")`,
+		Params:     []string{"value", "msg"},
+		InsertText: `assert_true($1)`,
+		Doc:        "Fail the test if `value` is falsy.",
+	},
+	{
+		Name: "assert_false", Kind: "function", Category: "Test · Assertion", Context: "test",
+		Signature:  `assert_false(value, msg: str = "")`,
+		Params:     []string{"value", "msg"},
+		InsertText: `assert_false($1)`,
+		Doc:        "Fail the test if `value` is truthy.",
+	},
+	{
+		Name: "assert_near", Kind: "function", Category: "Test · Assertion", Context: "test",
+		Signature:  `assert_near(actual: float, expected: float, tolerance: float = 1e-9, msg: str = "")`,
+		Params:     []string{"actual", "expected", "tolerance", "msg"},
+		InsertText: `assert_near($1, $2, $3)`,
+		Doc:        "Fail if `abs(actual - expected) > tolerance`. Use for floating-point comparisons where bit-exact equality is not reliable.",
+	},
+	{
+		Name: "assert_raises", Kind: "function", Category: "Test · Assertion", Context: "test",
+		Signature:  `assert_raises(fn: callable, msg: str = "")`,
+		Params:     []string{"fn", "msg"},
+		InsertText: `assert_raises(lambda: $1)`,
+		Doc:        "Fail if `fn()` does NOT raise. Use `lambda` to defer invocation — e.g. `assert_raises(lambda: divide(1, 0))`.",
+	},
+	{
+		Name: "fail", Kind: "function", Category: "Test · Assertion", Context: "test",
+		Signature:  `fail(msg: str = "")`,
+		Params:     []string{"msg"},
+		InsertText: `fail($1)`,
+		Doc:        "Fail the test immediately with the given message.",
+	},
+
 	// --- Ladder: Structure ---------------------------------------------
 	{
 		Name: "branch", Kind: "ladder", Category: "Ladder · Structure",
@@ -216,4 +271,14 @@ func Builtins() []Builtin {
 	out := make([]Builtin, len(catalog))
 	copy(out, catalog)
 	return out
+}
+
+// builtinAvailable reports whether a builtin should be surfaced for a given
+// document language. Test-scoped builtins (assert_eq, fail, ...) only appear
+// in "starlark-test" documents; everything else shows everywhere.
+func builtinAvailable(b Builtin, lang string) bool {
+	if b.Context == "" {
+		return true
+	}
+	return b.Context == "test" && lang == "starlark-test"
 }

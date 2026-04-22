@@ -25,7 +25,7 @@ import (
 //
 // We return IsIncomplete=false so the client caches the list until the
 // next trigger; filtering by prefix happens client-side.
-func completeStarlark(source string, pos Position, provider SymbolProvider, currentProgram string) CompletionList {
+func completeStarlark(source string, pos Position, provider SymbolProvider, currentProgram, lang string) CompletionList {
 	// Inside a variable-name string argument (e.g. `get_num("|")`), return
 	// the list of known PLC variables instead of the builtin-heavy default.
 	if list, ok := argumentCompletion(source, pos, provider); ok {
@@ -40,8 +40,11 @@ func completeStarlark(source string, pos Position, provider SymbolProvider, curr
 
 	items := make([]CompletionItem, 0, 64)
 
-	// 1. Builtins. These always apply.
+	// 1. Builtins. Test-scoped ones are skipped unless this is a test doc.
 	for _, b := range catalog {
+		if !builtinAvailable(b, lang) {
+			continue
+		}
 		items = append(items, builtinToCompletionItem(b))
 	}
 

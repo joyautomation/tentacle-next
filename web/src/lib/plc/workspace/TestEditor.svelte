@@ -13,10 +13,11 @@
 		name: string;
 		isNew?: boolean;
 		variableNames?: string[];
+		initialSource?: string;
 		onDirtyChange?: (dirty: boolean) => void;
 	};
 
-	let { tabId, name, isNew = false, variableNames = [], onDirtyChange }: Props = $props();
+	let { tabId, name, isNew = false, variableNames = [], initialSource, onDirtyChange }: Props = $props();
 
 	const STARTER_SOURCE = `# Unit test — runs against the live engine.
 # Use assert_eq / assert_true / assert_near / assert_raises.
@@ -31,7 +32,7 @@ test_example()
 	let loading = $state(!isNew);
 	let error = $state<string | null>(null);
 
-	let editValue = $state(isNew ? STARTER_SOURCE : '');
+	let editValue = $state(isNew ? (initialSource ?? STARTER_SOURCE) : '');
 	let description = $state('');
 	let newName = $state('');
 
@@ -234,9 +235,11 @@ test_example()
 			<div class="editor-wrap">
 				<CodeEditor
 					value={editValue}
-					language="starlark"
+					language="starlark-test"
 					onchange={(v) => (editValue = v)}
 					{variableNames}
+					useLSP
+					lspUri={`tentacle-plc://tests/${encodeURIComponent(effectiveName || tabId)}.star`}
 					flush
 				/>
 			</div>

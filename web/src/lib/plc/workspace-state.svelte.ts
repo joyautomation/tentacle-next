@@ -16,6 +16,10 @@ export type EditorTab = {
 	// synthetic `program:__new_<n>` so it stays stable while the user types
 	// their def header; once saved, the tab is renamed via renameTab().
 	isNew?: boolean;
+	// initialSource seeds the editor when the tab first mounts — used by
+	// "New test from program" scaffolding so the new tab arrives prefilled
+	// with a stub calling the selected program's exports.
+	initialSource?: string;
 };
 
 export function tabId(kind: EditorTabKind, name: string): string {
@@ -159,9 +163,9 @@ export const workspaceTabs = {
 	// the editor in "new" mode — the user types a def, the pending name is
 	// derived from the header, and renameTab promotes the tab to its real
 	// key on first save.
-	openNew(kind: EditorTabKind, language?: string): string {
+	openNew(kind: EditorTabKind, language?: string, initialSource?: string): string {
 		const id = newTabId(kind);
-		const tab: EditorTab = { id, name: '', kind, language, isNew: true };
+		const tab: EditorTab = { id, name: '', kind, language, isNew: true, initialSource };
 		state.tabs = [...state.tabs, tab];
 		state.activeTab = id;
 		return id;

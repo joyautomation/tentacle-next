@@ -20,7 +20,7 @@
 
   interface Props {
     value: string;
-    language?: 'python' | 'starlark' | 'st';
+    language?: 'python' | 'starlark' | 'starlark-test' | 'st';
     readonly?: boolean;
     onchange?: (value: string) => void;
     variableNames?: string[];
@@ -58,7 +58,7 @@
   const lspBundle = useLSP && lspUri
     ? plcLsp({
         uri: lspUri,
-        language: () => (language === 'python' ? 'starlark' : language) as 'starlark' | 'st',
+        language: () => (language === 'python' ? 'starlark' : language) as 'starlark' | 'starlark-test' | 'st',
         onDiagnostics,
       })
     : null;
@@ -70,6 +70,7 @@
 
   function getLanguageExtension() {
     if (language === 'st') return structuredText();
+    // 'starlark-test' is a Starlark dialect — same CodeMirror mode.
     return python();
   }
 

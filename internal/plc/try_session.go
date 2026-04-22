@@ -35,6 +35,10 @@ type TrySessionManager struct {
 type trySession struct {
 	program      string
 	preTrySource string
+	// varSnapshot captures every variable value at Start so revert can roll
+	// back mutations the candidate made. Without this, a botched candidate
+	// that flipped outputs leaves them flipped after the code reverts.
+	varSnapshot  map[string]interface{}
 	startedAt    time.Time
 	expiresAt    time.Time
 	timer        *time.Timer
@@ -54,7 +58,11 @@ type TryEvent struct {
 	Program string `json:"program"`
 	Reason  string `json:"reason"` // started, stopped, timeout, error
 	Error   string `json:"error,omitempty"`
-	At      int64  `json:"at"`
+	// VariablesRestored reports how many variable values were rolled back
+	// from the pre-try snapshot. 0 on "started" and on reverts where nothing
+	// changed. Surfaced so the UI can tell the user "10 values restored".
+	VariablesRestored int   `json:"variablesRestored,omitempty"`
+	At                int64 `json:"at"`
 }
 
 // NewTrySessionManager wires up an error observer on the engine so
@@ -125,6 +133,7 @@ func (m *TrySessionManager) Start(program, candidate string, timeout time.Durati
 	sess := &trySession{
 		program:      program,
 		preTrySource: preTry,
+		varSnapshot:  m.engine.vars.Snapshot(),
 		startedAt:    now,
 		expiresAt:    now.Add(timeout),
 	}
@@ -215,11 +224,17 @@ func (m *TrySessionManager) revert(program, reason, errMsg string) error {
 			"program", program, "error", cerr)
 	}
 
+	restored := 0
+	if sess.varSnapshot != nil {
+		restored = m.engine.vars.Restore(sess.varSnapshot, time.Now().UnixMilli())
+	}
+
 	ev := TryEvent{
-		Program: program,
-		Reason:  reason,
-		Error:   errMsg,
-		At:      time.Now().UnixMilli(),
+		Program:          program,
+		Reason:           reason,
+		Error:            errMsg,
+		VariablesRestored: restored,
+		At:               time.Now().UnixMilli(),
 	}
 	m.mu.Lock()
 	m.lastEvents[program] = ev
@@ -229,6 +244,7 @@ func (m *TrySessionManager) revert(program, reason, errMsg string) error {
 		m.onEvent(ev)
 	}
 	m.log.Info("plc: try session reverted",
-		"program", program, "reason", reason, "error", errMsg)
+		"program", program, "reason", reason, "error", errMsg,
+		"variablesRestored", restored)
 	return nil
 }
