@@ -16,15 +16,12 @@
 		workspaceSelection,
 		workspaceVariableDrafts,
 		workspaceReferences,
-		workspaceOutput,
 		type ReferenceSite
 	} from '../workspace-state.svelte';
-	import { Link } from '@joyautomation/salt/icons';
 	import ValueTree from '$lib/components/ValueTree.svelte';
 
 	async function findReferences(name: string, kind: 'program' | 'variable') {
 		workspaceReferences.setLoading(name, kind);
-		workspaceOutput.setTab('references');
 		const res = await api<ReferenceSite[]>(
 			`/plcs/plc/references?name=${encodeURIComponent(name)}&kind=${kind}`
 		);
@@ -67,6 +64,24 @@
 		if (selection?.kind !== 'variable') return;
 		const stop = watchVariable(selection.id);
 		return stop;
+	});
+
+	// Auto-populate the References panel whenever the selection changes to a
+	// function or variable. Small debounce avoids hammering the scanner when
+	// the user arrow-keys through the Navigator. Clear the panel when the
+	// selection leaves a referenceable kind so stale results don't linger.
+	$effect(() => {
+		const sel = selection;
+		if (!sel || (sel.kind !== 'program' && sel.kind !== 'variable')) {
+			workspaceReferences.clear();
+			return;
+		}
+		const kind = sel.kind as 'program' | 'variable';
+		const name = sel.id;
+		const timer = setTimeout(() => {
+			findReferences(name, kind);
+		}, 120);
+		return () => clearTimeout(timer);
 	});
 
 	const selectedVariable = $derived.by(() => {
@@ -172,17 +187,7 @@
 	{#if selectedVariable}
 		{@const v = selectedVariable}
 		<div class="section">
-			<div class="label-row">
-				<div class="label">Variable</div>
-				<button
-					type="button"
-					class="refs-btn"
-					onclick={() => findReferences(v.name, 'variable')}
-					title="Find references"
-				>
-					<Link size="0.75rem" /> Find references
-				</button>
-			</div>
+			<div class="label">Variable</div>
 			<div class="title">{v.name}</div>
 		</div>
 		<div class="value-block">
@@ -349,17 +354,7 @@
 		{/if}
 	{:else if selectedProgram}
 		<div class="section">
-			<div class="label-row">
-				<div class="label">Function</div>
-				<button
-					type="button"
-					class="refs-btn"
-					onclick={() => findReferences(selectedProgram.name, 'program')}
-					title="Find references"
-				>
-					<Link size="0.75rem" /> Find references
-				</button>
-			</div>
+			<div class="label">Function</div>
 			<div class="title">{selectedProgram.name}</div>
 		</div>
 		<div class="section">
@@ -444,33 +439,6 @@
 		letter-spacing: 0.04em;
 		color: var(--theme-text-muted);
 		margin-bottom: 0.25rem;
-	}
-
-	.label-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem;
-	}
-
-	.refs-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.25rem;
-		padding: 0.125rem 0.375rem;
-		background: transparent;
-		border: 1px solid var(--theme-border);
-		border-radius: 0.1875rem;
-		color: var(--theme-text-muted);
-		font-size: 0.6875rem;
-		cursor: pointer;
-		transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
-
-		&:hover {
-			color: var(--theme-primary);
-			border-color: var(--theme-primary);
-			background: color-mix(in srgb, var(--theme-primary) 8%, transparent);
-		}
 	}
 
 	.title {
