@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { api, apiPut, apiPost, apiDelete } from '$lib/api/client';
+	import { api, apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 	import { fly } from 'svelte/transition';
@@ -65,39 +65,23 @@
 
 	let loading = $state(false);
 	let saving = $state(false);
-	let assembling = $state(false);
-	let cancelling = $state(false);
 	let deleting = $state(false);
 	let error = $state<string | null>(null);
 	let serverSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let serverStSource = $state('');
-	// Pending = persisted uncommitted edit ("save"). Draft = in-memory edit
-	// buffer that may or may not have been saved as pending yet.
-	let pendingSource = $state<string | null>(null);
-	let pendingStSource = $state<string | null>(null);
-	let pendingUpdatedAt = $state<number>(0);
-	let pendingUpdatedBy = $state<string>('');
 	let language = $state<string>(isNew ? initialLanguage : 'starlark');
 	let draftSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let draftStSource = $state('');
 
-	// When a live program exists, "save" stores a pending edit rather than
-	// overwriting the running code. Assemble promotes pending → live,
-	// Cancel discards it. New programs (isNew) skip this entirely.
-	const hasPending = $derived(pendingSource !== null);
-	const effectiveSavedSource = $derived(pendingSource ?? serverSource);
-	const effectiveSavedStSource = $derived(pendingStSource ?? serverStSource);
-
 	const dirty = $derived(
-		isNew ||
-			draftSource !== effectiveSavedSource ||
-			draftStSource !== effectiveSavedStSource
+		isNew || draftSource !== serverSource || draftStSource !== serverStSource
 	);
 
-	// Show the diff view when there's something to compare against the live
-	// version — either a saved pending edit or an in-flight draft.
+	// Diff view appears whenever the draft differs from the running code —
+	// the pane shows Live (readonly) next to the in-memory edits so the
+	// user can review before saving.
 	const showDiff = $derived(
-		!isNew && (hasPending || draftSource !== serverSource || draftStSource !== serverStSource)
+		!isNew && (draftSource !== serverSource || draftStSource !== serverStSource)
 	);
 
 	// Name derived from the first `def` header in the current source.
@@ -186,24 +170,11 @@
 			return;
 		}
 		const full = result.data;
-		language = full.pendingLanguage || full.language;
+		language = full.language;
 		serverSource = full.source ?? '';
 		serverStSource = full.stSource ?? '';
-		if (full.pendingSource) {
-			pendingSource = full.pendingSource;
-			pendingStSource = full.pendingStSource ?? '';
-			pendingUpdatedAt = full.pendingUpdatedAt ?? 0;
-			pendingUpdatedBy = full.pendingUpdatedBy ?? '';
-			draftSource = pendingSource;
-			draftStSource = pendingStSource ?? '';
-		} else {
-			pendingSource = null;
-			pendingStSource = null;
-			pendingUpdatedAt = 0;
-			pendingUpdatedBy = '';
-			draftSource = serverSource;
-			draftStSource = serverStSource;
-		}
+		draftSource = serverSource;
+		draftStSource = serverStSource;
 	}
 
 	function onEditorChange(val: string) {
@@ -240,67 +211,33 @@
 		if (!canSave) return;
 		saving = true;
 		try {
-			// New programs go live immediately (nothing to pend against).
-			// Existing programs save to pending so the running engine keeps
-			// executing the live version until the user assembles.
-			if (isNew) {
-				const urlName = pendingName;
-				const bodyName = language === 'starlark' ? pendingName : name;
-				const body: Record<string, unknown> = {
-					name: bodyName,
-					language,
-					source: draftSource,
-					updatedBy: 'gui'
-				};
-				if (language === 'st') body.stSource = draftStSource;
-				const result = await apiPut(`/plcs/plc/programs/${encodeURIComponent(urlName)}`, body);
-				if (result.error) {
-					saltState.addNotification({ message: result.error.error, type: 'error' });
-					return;
-				}
-				serverSource = draftSource;
-				serverStSource = draftStSource;
-				workspaceTabs.renameTab(tabId, bodyName);
-				workspaceSelection.select('program', bodyName);
-				saltState.addNotification({
-					message: `Function "${bodyName}" created`,
-					type: 'success'
-				});
-				await invalidateAll();
-				return;
-			}
-
-			// Rename via def-header change is a structural edit and not
-			// online-safe — force the user to assemble first, then rename.
+			// For Starlark, the stored key follows the def header. New tabs
+			// POST to the derived name; saved tabs PUT to the old key and
+			// ask the server to rename when the def has changed.
+			const urlName = isNew ? pendingName : name;
 			const bodyName = language === 'starlark' ? pendingName : name;
-			if (bodyName !== name) {
-				saltState.addNotification({
-					message: 'Assemble or cancel the pending edit before renaming the function',
-					type: 'error'
-				});
-				return;
-			}
-
 			const body: Record<string, unknown> = {
-				source: draftSource,
+				name: bodyName,
 				language,
+				source: draftSource,
 				updatedBy: 'gui'
 			};
 			if (language === 'st') body.stSource = draftStSource;
-			const result = await apiPut<PlcProgramKV>(
-				`/plcs/plc/programs/${encodeURIComponent(name)}/pending`,
-				body
-			);
+			const result = await apiPut(`/plcs/plc/programs/${encodeURIComponent(urlName)}`, body);
 			if (result.error) {
 				saltState.addNotification({ message: result.error.error, type: 'error' });
 				return;
 			}
-			pendingSource = result.data.pendingSource ?? draftSource;
-			pendingStSource = result.data.pendingStSource ?? draftStSource;
-			pendingUpdatedAt = result.data.pendingUpdatedAt ?? Date.now();
-			pendingUpdatedBy = result.data.pendingUpdatedBy ?? 'gui';
+			serverSource = draftSource;
+			serverStSource = draftStSource;
+			const renamed = !isNew && bodyName !== name;
+			if (isNew || renamed) {
+				workspaceTabs.renameTab(tabId, bodyName);
+				workspaceSelection.select('program', bodyName);
+			}
+			const verb = isNew ? 'created' : renamed ? 'renamed' : 'saved';
 			saltState.addNotification({
-				message: `Pending edit saved — assemble to commit`,
+				message: `Function "${bodyName}" ${verb}`,
 				type: 'success'
 			});
 			await invalidateAll();
@@ -309,66 +246,9 @@
 		}
 	}
 
-	async function assemble() {
-		if (!hasPending || assembling) return;
-		assembling = true;
-		try {
-			const res = await apiPost<PlcProgramKV>(
-				`/plcs/plc/programs/${encodeURIComponent(name)}/assemble`
-			);
-			if (res.error) {
-				saltState.addNotification({ message: res.error.error, type: 'error' });
-				return;
-			}
-			serverSource = res.data.source ?? '';
-			serverStSource = res.data.stSource ?? '';
-			pendingSource = null;
-			pendingStSource = null;
-			pendingUpdatedAt = 0;
-			pendingUpdatedBy = '';
-			draftSource = serverSource;
-			draftStSource = serverStSource;
-			saltState.addNotification({
-				message: `Function "${name}" assembled — live engine updated`,
-				type: 'success'
-			});
-			await invalidateAll();
-		} finally {
-			assembling = false;
-		}
-	}
-
-	async function cancelPending() {
-		if (!hasPending || cancelling) return;
-		if (!confirm(`Discard pending edit for "${name}"? This cannot be undone.`)) return;
-		cancelling = true;
-		try {
-			const res = await apiPost<PlcProgramKV>(
-				`/plcs/plc/programs/${encodeURIComponent(name)}/cancel`
-			);
-			if (res.error) {
-				saltState.addNotification({ message: res.error.error, type: 'error' });
-				return;
-			}
-			pendingSource = null;
-			pendingStSource = null;
-			pendingUpdatedAt = 0;
-			pendingUpdatedBy = '';
-			draftSource = serverSource;
-			draftStSource = serverStSource;
-			saltState.addNotification({
-				message: `Pending edit discarded`,
-				type: 'success'
-			});
-			await invalidateAll();
-		} finally {
-			cancelling = false;
-		}
-	}
-
 	function revert() {
-		draftSource = effectiveSavedSource;
-		draftStSource = effectiveSavedStSource;
+		draftSource = serverSource;
+		draftStSource = serverStSource;
 	}
 
 	async function del() {
@@ -406,11 +286,6 @@
 				</span>
 			{/if}
 			<span class="lang-badge">{language}</span>
-			{#if hasPending}
-				<span class="pending-badge" title="Uncommitted edit — assemble to apply to running engine">
-					Pending edit
-				</span>
-			{/if}
 			{#if dirty}
 				<DirtyIcon size="0.875rem" />
 			{/if}
@@ -437,34 +312,8 @@
 				disabled={!canSave}
 				title={saveBlockedReason}
 			>
-				{saving ? 'Saving…' : isNew ? 'Create' : hasPending ? 'Update Pending' : 'Save'}
+				{saving ? 'Saving…' : isNew ? 'Create' : 'Save'}
 			</button>
-			{#if showDiff}
-				<button
-					type="button"
-					class="btn assemble"
-					onclick={assemble}
-					disabled={!hasPending || assembling || saving || dirty}
-					title={!hasPending
-						? 'Save the pending edit first, then assemble to apply it'
-						: dirty
-							? 'Save pending edit before assembling'
-							: 'Apply pending edit to the running engine'}
-				>
-					{assembling ? 'Assembling…' : 'Assemble'}
-				</button>
-				<button
-					type="button"
-					class="btn subtle"
-					onclick={cancelPending}
-					disabled={!hasPending || cancelling || assembling}
-					title={hasPending
-						? 'Discard pending edit, keep live version'
-						: 'No pending edit to cancel'}
-				>
-					{cancelling ? 'Cancelling…' : 'Cancel Edit'}
-				</button>
-			{/if}
 			<button
 				type="button"
 				class="btn danger"
@@ -604,18 +453,6 @@
 		border-radius: 0.1875rem;
 	}
 
-	.pending-badge {
-		padding: 0.0625rem 0.375rem;
-		font-size: 0.625rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--theme-warning, #d97706);
-		background: color-mix(in srgb, var(--theme-warning, #d97706) 14%, transparent);
-		border: 1px solid color-mix(in srgb, var(--theme-warning, #d97706) 40%, transparent);
-		border-radius: 0.1875rem;
-	}
-
 	.btn {
 		padding: 0.3125rem 0.75rem;
 		font-size: 0.8125rem;
@@ -652,16 +489,6 @@
 			&:hover:not(:disabled) {
 				background: color-mix(in srgb, var(--theme-error, #e5484d) 12%, transparent);
 				border-color: var(--theme-error, #e5484d);
-			}
-		}
-
-		&.assemble {
-			color: var(--theme-on-primary, white);
-			background: var(--theme-success, #16a34a);
-			border-color: var(--theme-success, #16a34a);
-
-			&:hover:not(:disabled) {
-				opacity: 0.9;
 			}
 		}
 
