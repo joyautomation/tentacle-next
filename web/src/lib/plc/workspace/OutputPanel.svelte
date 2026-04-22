@@ -1,8 +1,14 @@
 <script lang="ts">
 	import LogViewer from '$lib/components/LogViewer.svelte';
 	import ProblemsView from '$lib/plc/workspace/ProblemsView.svelte';
+	import ReferencesView from '$lib/plc/workspace/ReferencesView.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
-	import { workspaceDiagnostics } from '$lib/plc/workspace-state.svelte';
+	import {
+		workspaceDiagnostics,
+		workspaceReferences,
+		workspaceOutput,
+		type OutputTab
+	} from '$lib/plc/workspace-state.svelte';
 	import { ChevronDown } from '@joyautomation/salt/icons';
 
 	type Props = {
@@ -13,15 +19,17 @@
 
 	let { serviceType, initialLogs, onCollapse }: Props = $props();
 
-	type TabId = 'problems' | 'logs';
-	let activeTab = $state<TabId>('problems');
+	const activeTab = $derived<OutputTab>(workspaceOutput.tab);
 
 	const problemCount = $derived(workspaceDiagnostics.total);
 	const errorCount = $derived(workspaceDiagnostics.errorCount);
+	const referencesCount = $derived(workspaceReferences.current?.sites.length ?? 0);
+	const hasReferencesQuery = $derived(workspaceReferences.current !== null);
 
 	const tabs = $derived<TabItem[]>([
 		{ id: 'problems', label: 'Problems' },
-		{ id: 'logs', label: 'Logs' }
+		{ id: 'logs', label: 'Logs' },
+		{ id: 'references', label: 'References' }
 	]);
 </script>
 
@@ -30,7 +38,7 @@
 		<Tabs
 			{tabs}
 			active={activeTab}
-			onChange={(id) => (activeTab = id as TabId)}
+			onChange={(id) => workspaceOutput.setTab(id as OutputTab)}
 			size="sm"
 			ariaLabel="Output panel"
 		>
@@ -38,6 +46,9 @@
 				<span>{tab.label}</span>
 				{#if tab.id === 'problems' && problemCount > 0}
 					<span class="badge" class:error={errorCount > 0}>{problemCount}</span>
+				{/if}
+				{#if tab.id === 'references' && hasReferencesQuery}
+					<span class="badge">{referencesCount}</span>
 				{/if}
 			{/snippet}
 			{#snippet trailing()}
@@ -58,6 +69,8 @@
 	<div class="panel-body" class:with-padding={activeTab === 'logs'}>
 		{#if activeTab === 'problems'}
 			<ProblemsView />
+		{:else if activeTab === 'references'}
+			<ReferencesView />
 		{:else}
 			<LogViewer {serviceType} {initialLogs} />
 		{/if}

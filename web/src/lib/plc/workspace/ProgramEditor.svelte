@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { api, apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
@@ -10,6 +10,7 @@
 		workspaceTabs,
 		workspaceSelection,
 		workspaceView,
+		workspaceEditorGotos,
 		type DiagnosticSeverity
 	} from '$lib/plc/workspace-state.svelte';
 	import { startLiveValues, liveValuesVersion, liveValuesSnapshot } from '$lib/plc/live-values.svelte';
@@ -133,6 +134,10 @@
 	onMount(() => {
 		const stop = startLiveValues();
 		return () => stop();
+	});
+
+	onDestroy(() => {
+		workspaceEditorGotos.unregister(tabId);
 	});
 
 	$effect(() => {
@@ -333,6 +338,7 @@
 					{lspUri}
 					{showInlineValues}
 					liveValues={liveValuesMap}
+					onReady={(api) => workspaceEditorGotos.register(tabId, api.goto)}
 					onDiagnostics={(uri, diags) => {
 						workspaceDiagnostics.set(
 							uri,

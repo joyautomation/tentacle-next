@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, crosshairCursor, dropCursor } from '@codemirror/view';
-  import { EditorState, Compartment, type Extension } from '@codemirror/state';
+  import { EditorState, EditorSelection, Compartment, type Extension } from '@codemirror/state';
   import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
   import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language';
   import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from '@codemirror/autocomplete';
@@ -37,9 +37,11 @@
     showInlineValues?: boolean;
     /** Current snapshot of live variable values. Pass a new Map reference to trigger a refresh. */
     liveValues?: LiveValueMap;
+    /** Fires once the CodeMirror view is mounted; receives a handle for imperative navigation (jump-to-line). */
+    onReady?: (api: { goto(line: number, col: number): void; focus(): void }) => void;
   }
 
-  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false, useLSP = false, lspUri, onDiagnostics, showInlineValues = false, liveValues }: Props = $props();
+  let { value = '', language = 'starlark', readonly = false, onchange, variableNames = [], enableVariableDrop = false, flush = false, enableLint = false, useLSP = false, lspUri, onDiagnostics, showInlineValues = false, liveValues, onReady }: Props = $props();
 
   let container: HTMLDivElement;
   let view: EditorView | undefined;
@@ -212,6 +214,27 @@
     if (showInlineValues && liveValues) {
       view.dispatch({ effects: setInlineValuesEffect.of(liveValues) });
     }
+
+    // Imperative handle for jump-to-line (References panel, future F12
+    // navigation). Line is 1-based to match backend output; col is 1-based
+    // and clamped to the line's end so a stale position doesn't throw.
+    onReady?.({
+      goto(line: number, col: number) {
+        if (!view) return;
+        const doc = view.state.doc;
+        if (line < 1 || line > doc.lines) return;
+        const lineInfo = doc.line(line);
+        const offset = Math.min(lineInfo.from + Math.max(0, col - 1), lineInfo.to);
+        view.dispatch({
+          selection: EditorSelection.cursor(offset),
+          effects: EditorView.scrollIntoView(offset, { y: 'center' }),
+        });
+        view.focus();
+      },
+      focus() {
+        view?.focus();
+      },
+    });
 
     const mediaQuery = globalThis.matchMedia?.('(prefers-color-scheme: dark)');
     mediaQuery?.addEventListener('change', updateTheme);

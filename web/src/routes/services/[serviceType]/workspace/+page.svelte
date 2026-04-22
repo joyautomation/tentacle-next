@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { Pane, Splitpanes } from 'svelte-splitpanes';
 	import { createWorkspaceLayout } from '$lib/plc/workspace-layout.svelte';
-	import { workspaceSelection, workspaceTabs } from '$lib/plc/workspace-state.svelte';
+	import {
+		workspaceSelection,
+		workspaceTabs,
+		workspaceReferences
+	} from '$lib/plc/workspace-state.svelte';
 	import Navigator from '$lib/plc/workspace/Navigator.svelte';
 	import Inspector from '$lib/plc/workspace/Inspector.svelte';
 	import EditorTabs from '$lib/plc/workspace/EditorTabs.svelte';
@@ -41,6 +45,17 @@
 		if (selection?.kind !== 'task') return;
 		if (!(selection.id in data.tasks)) return;
 		workspaceTabs.open({ name: selection.id, kind: 'task' });
+	});
+
+	// When a References query kicks off, surface the bottom panel so the
+	// user doesn't have to hunt for the results. Only force-open on the
+	// query starting — leave layout alone once the results have landed so
+	// a subsequent manual collapse stays collapsed.
+	$effect(() => {
+		const current = workspaceReferences.current;
+		if (current?.loading && !layout.bottomOpen) {
+			layout.bottomOpen = true;
+		}
 	});
 
 	let createKind = $state<'variable' | 'task' | null>(null);

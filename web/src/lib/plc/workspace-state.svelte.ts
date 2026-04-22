@@ -64,6 +64,30 @@ export type VariableDraft = {
 	default?: unknown;
 };
 
+export type ReferenceSite = {
+	source: 'program' | 'taskProgramRef';
+	program?: string;
+	task?: string;
+	line?: number;
+	startCol?: number;
+	endCol?: number;
+	lineText?: string;
+};
+
+export type ReferencesQuery = {
+	name: string;
+	kind: 'program' | 'variable';
+	sites: ReferenceSite[];
+	loading: boolean;
+	error?: string;
+};
+
+export type OutputTab = 'problems' | 'logs' | 'references';
+
+// EditorGoto is the per-tab "jump to (line, col)" hook the editor exposes
+// so References results can navigate into the open source.
+export type EditorGoto = (line: number, col: number) => void;
+
 const state = $state<{
 	selection: Selection;
 	tabs: EditorTab[];
@@ -72,6 +96,8 @@ const state = $state<{
 	diagnostics: Record<string, WorkspaceDiagnostic[]>;
 	view: { showInlineValues: boolean };
 	variableDrafts: Record<string, VariableDraft>;
+	references: ReferencesQuery | null;
+	outputTab: OutputTab;
 }>({
 	selection: null,
 	tabs: [],
@@ -79,8 +105,14 @@ const state = $state<{
 	dirty: {},
 	diagnostics: {},
 	view: loadViewPrefs(),
-	variableDrafts: {}
+	variableDrafts: {},
+	references: null,
+	outputTab: 'problems'
 });
+
+// Goto handlers are kept outside $state because Svelte's deep proxy would
+// wrap function values and break CodeMirror's `this` bindings on dispatch.
+const editorGotos = new Map<string, EditorGoto>();
 
 function persistView() {
 	if (typeof localStorage === 'undefined') return;
@@ -252,5 +284,55 @@ export const workspaceDiagnostics = {
 	},
 	clear(uri: string) {
 		delete state.diagnostics[uri];
+	}
+};
+
+// workspaceReferences is the reactive store behind the "References" tab in
+// the bottom output panel. Callers (Inspector, future editor context menu)
+// kick off a query via setLoading → setResult; the panel reads `current`
+// and re-renders. Fetching the endpoint is the caller's job — this module
+// stays presentation-free.
+export const workspaceReferences = {
+	get current() {
+		return state.references;
+	},
+	setLoading(name: string, kind: 'program' | 'variable') {
+		state.references = { name, kind, sites: [], loading: true };
+	},
+	setResult(name: string, kind: 'program' | 'variable', sites: ReferenceSite[]) {
+		state.references = { name, kind, sites, loading: false };
+	},
+	setError(name: string, kind: 'program' | 'variable', message: string) {
+		state.references = { name, kind, sites: [], loading: false, error: message };
+	},
+	clear() {
+		state.references = null;
+	}
+};
+
+export const workspaceOutput = {
+	get tab() {
+		return state.outputTab;
+	},
+	setTab(tab: OutputTab) {
+		state.outputTab = tab;
+	}
+};
+
+// workspaceEditorGotos is a non-reactive registry mapping tab ids to the
+// editor's `goto(line, col)` handler. Tabs register on mount and clear on
+// destroy. References results call `invoke(tabId, line, col)` to jump.
+export const workspaceEditorGotos = {
+	register(tabId: string, goto: EditorGoto) {
+		editorGotos.set(tabId, goto);
+	},
+	unregister(tabId: string) {
+		editorGotos.delete(tabId);
+	},
+	invoke(tabId: string, line: number, col: number): boolean {
+		const goto = editorGotos.get(tabId);
+		if (!goto) return false;
+		goto(line, col);
+		return true;
 	}
 };
