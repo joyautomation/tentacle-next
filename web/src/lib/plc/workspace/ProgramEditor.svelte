@@ -437,15 +437,17 @@
 			>
 				{saving ? 'Saving…' : isNew ? 'Create' : hasPending ? 'Update Pending' : 'Save'}
 			</button>
-			{#if hasPending}
+			{#if showDiff}
 				<button
 					type="button"
 					class="btn assemble"
 					onclick={assemble}
-					disabled={assembling || saving || dirty}
-					title={dirty
-						? 'Save pending edit before assembling'
-						: 'Apply pending edit to the running engine'}
+					disabled={!hasPending || assembling || saving || dirty}
+					title={!hasPending
+						? 'Save the pending edit first, then assemble to apply it'
+						: dirty
+							? 'Save pending edit before assembling'
+							: 'Apply pending edit to the running engine'}
 				>
 					{assembling ? 'Assembling…' : 'Assemble'}
 				</button>
@@ -453,8 +455,10 @@
 					type="button"
 					class="btn subtle"
 					onclick={cancelPending}
-					disabled={cancelling || assembling}
-					title="Discard pending edit, keep live version"
+					disabled={!hasPending || cancelling || assembling}
+					title={hasPending
+						? 'Discard pending edit, keep live version'
+						: 'No pending edit to cancel'}
 				>
 					{cancelling ? 'Cancelling…' : 'Cancel Edit'}
 				</button>
@@ -483,19 +487,6 @@
 			</div>
 		{:else if showDiff}
 			<div class="diff-wrap">
-				<div class="diff-pane">
-					<div class="pane-label live">Live (running)</div>
-					<div class="editor-wrap">
-						<CodeEditor
-							value={language === 'st' ? serverStSource : serverSource}
-							language={editLanguage}
-							readonly
-							flush
-							{showInlineValues}
-							liveValues={liveValuesMap}
-						/>
-					</div>
-				</div>
 				<div class="diff-pane">
 					<div class="pane-label pending">
 						{hasPending ? 'Pending (saved)' : 'Pending (unsaved)'}
@@ -528,6 +519,19 @@
 									}))
 								);
 							}}
+						/>
+					</div>
+				</div>
+				<div class="diff-pane">
+					<div class="pane-label live">Live (running)</div>
+					<div class="editor-wrap">
+						<CodeEditor
+							value={language === 'st' ? serverStSource : serverSource}
+							language={editLanguage}
+							readonly
+							flush
+							{showInlineValues}
+							liveValues={liveValuesMap}
 						/>
 					</div>
 				</div>
