@@ -69,13 +69,14 @@
 	let deleting = $state(false);
 	let error = $state<string | null>(null);
 
-	// Test-mode session state. When non-null, the live engine is running
+	// Try-mode session state. When non-null, the live engine is running
 	// the draft candidate; an auto-revert fires on error or timeout.
-	type TestSessionInfo = { program: string; startedAt: number; expiresAt: number };
-	let testSession = $state<TestSessionInfo | null>(null);
-	let testStarting = $state(false);
-	let testRemaining = $state(0);
-	const TEST_TIMEOUT_SECONDS = 120;
+	// Named "try" (not "test") so "Tests" stays for the unit-test tab.
+	type TrySessionInfo = { program: string; startedAt: number; expiresAt: number };
+	let trySession = $state<TrySessionInfo | null>(null);
+	let tryStarting = $state(false);
+	let tryRemaining = $state(0);
+	const TRY_TIMEOUT_SECONDS = 120;
 	let serverSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let serverStSource = $state('');
 	let language = $state<string>(isNew ? initialLanguage : 'starlark');
@@ -158,7 +159,7 @@
 		const stop = startLiveValues();
 		const stopEvents = isNew
 			? () => {}
-			: subscribeSSE<TestEventMsg>('/plcs/plc/programs/test/events', (ev) => {
+			: subscribeSSE<TryEventMsg>('/plcs/plc/programs/try/events', (ev) => {
 					if (!ev || ev.program !== name) return;
 					if (ev.reason === 'started') {
 						// Session info comes back on the POST response; the
@@ -166,14 +167,14 @@
 						return;
 					}
 					// Terminal events: session is over, surface to the user.
-					testSession = null;
-					testRemaining = 0;
+					trySession = null;
+					tryRemaining = 0;
 					const msg =
 						ev.reason === 'error'
-							? `Test reverted: ${ev.error || 'runtime error'}`
+							? `Try reverted: ${ev.error || 'runtime error'}`
 							: ev.reason === 'timeout'
-								? 'Test session expired — reverted to live source'
-								: 'Test session stopped';
+								? 'Try session expired — reverted to live source'
+								: 'Try session stopped';
 					saltState.addNotification({
 						message: msg,
 						type: ev.reason === 'error' ? 'error' : 'info'
@@ -181,7 +182,7 @@
 				});
 		// Poll current status once so an active session survives navigation.
 		if (!isNew) {
-			void fetchTestStatus();
+			void fetchTryStatus();
 		}
 		return () => {
 			stop();
@@ -189,27 +190,27 @@
 		};
 	});
 
-	type TestEventMsg = { program: string; reason: string; error?: string; at: number };
+	type TryEventMsg = { program: string; reason: string; error?: string; at: number };
 
-	async function fetchTestStatus() {
-		const res = await api<{ session?: TestSessionInfo | null }>(
-			`/plcs/plc/programs/${encodeURIComponent(name)}/test`
+	async function fetchTryStatus() {
+		const res = await api<{ session?: TrySessionInfo | null }>(
+			`/plcs/plc/programs/${encodeURIComponent(name)}/try`
 		);
 		if (!res.error && res.data?.session) {
-			testSession = res.data.session;
+			trySession = res.data.session;
 		}
 	}
 
-	// Countdown tick while a test session is active.
+	// Countdown tick while a try session is active.
 	$effect(() => {
-		if (!testSession) {
-			testRemaining = 0;
+		if (!trySession) {
+			tryRemaining = 0;
 			return;
 		}
 		const tick = () => {
-			testRemaining = Math.max(
+			tryRemaining = Math.max(
 				0,
-				Math.ceil((testSession!.expiresAt - Date.now()) / 1000)
+				Math.ceil((trySession!.expiresAt - Date.now()) / 1000)
 			);
 		};
 		tick();
@@ -318,65 +319,65 @@
 		draftStSource = serverStSource;
 	}
 
-	// canTest gates the Test button: only Starlark (engine-level hot-swap),
+	// canTry gates the Try button: only Starlark (engine-level hot-swap),
 	// must be dirty, must not have blocking errors, and no active session.
-	const canTest = $derived.by(() => {
+	const canTry = $derived.by(() => {
 		if (isNew) return false;
 		if (language !== 'starlark') return false;
 		if (!dirty) return false;
 		if (errorCount > 0) return false;
-		if (testStarting) return false;
-		if (testSession) return false;
+		if (tryStarting) return false;
+		if (trySession) return false;
 		return true;
 	});
 
-	const testBlockedReason = $derived.by(() => {
-		if (isNew) return 'Save first before testing';
-		if (language !== 'starlark') return 'Test mode is Starlark-only for now';
-		if (!dirty) return 'Make an edit to test';
-		if (errorCount > 0) return `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before testing`;
+	const tryBlockedReason = $derived.by(() => {
+		if (isNew) return 'Save first before trying';
+		if (language !== 'starlark') return 'Try mode is Starlark-only for now';
+		if (!dirty) return 'Make an edit to try';
+		if (errorCount > 0) return `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before trying`;
 		return undefined;
 	});
 
-	async function startTest() {
-		if (!canTest) return;
-		testStarting = true;
+	async function startTry() {
+		if (!canTry) return;
+		tryStarting = true;
 		try {
-			const res = await apiPost<{ ok: boolean; session?: TestSessionInfo; error?: string }>(
-				`/plcs/plc/programs/${encodeURIComponent(name)}/test`,
-				{ source: draftSource, timeoutSeconds: TEST_TIMEOUT_SECONDS }
+			const res = await apiPost<{ ok: boolean; session?: TrySessionInfo; error?: string }>(
+				`/plcs/plc/programs/${encodeURIComponent(name)}/try`,
+				{ source: draftSource, timeoutSeconds: TRY_TIMEOUT_SECONDS }
 			);
 			if (res.error) {
 				saltState.addNotification({ message: res.error.error, type: 'error' });
 				return;
 			}
 			if (res.data?.ok && res.data.session) {
-				testSession = res.data.session;
+				trySession = res.data.session;
 				saltState.addNotification({
-					message: `Test session started (${TEST_TIMEOUT_SECONDS}s watchdog)`,
+					message: `Try session started (${TRY_TIMEOUT_SECONDS}s watchdog)`,
 					type: 'success'
 				});
 			} else if (res.data?.error) {
 				saltState.addNotification({ message: res.data.error, type: 'error' });
 			}
 		} finally {
-			testStarting = false;
+			tryStarting = false;
 		}
 	}
 
-	async function stopTest() {
-		if (!testSession) return;
+	async function stopTry() {
+		if (!trySession) return;
 		const res = await apiPost<{ ok: boolean }>(
-			`/plcs/plc/programs/${encodeURIComponent(name)}/test/stop`,
+			`/plcs/plc/programs/${encodeURIComponent(name)}/try/stop`,
 			{}
 		);
 		if (res.error) {
 			saltState.addNotification({ message: res.error.error, type: 'error' });
 			return;
 		}
-		// The SSE 'stopped' event will clear testSession — fall back in case
+		// The SSE 'stopped' event will clear trySession — fall back in case
 		// the event arrives late so the UI isn't stuck.
-		testSession = null;
+		trySession = null;
 	}
 
 	async function del() {
@@ -428,23 +429,23 @@
 			>
 				{showInlineValues ? 'Hide Values' : 'Show Values'}
 			</button>
-			{#if testSession}
-				<span class="test-status" title="Test session auto-reverts on error or timeout">
+			{#if trySession}
+				<span class="test-status" title="Try session auto-reverts on error or timeout">
 					<span class="test-dot"></span>
-					Testing · {testRemaining}s
+					Trying · {tryRemaining}s
 				</span>
-				<button type="button" class="btn warn" onclick={stopTest}>
-					Stop Test
+				<button type="button" class="btn warn" onclick={stopTry}>
+					Stop Try
 				</button>
 			{:else if !isNew && language === 'starlark'}
 				<button
 					type="button"
 					class="btn test"
-					onclick={startTest}
-					disabled={!canTest}
-					title={testBlockedReason ?? 'Hot-swap the draft into the engine with auto-revert on error'}
+					onclick={startTry}
+					disabled={!canTry}
+					title={tryBlockedReason ?? 'Hot-swap the draft into the engine with auto-revert on error'}
 				>
-					{testStarting ? 'Starting…' : 'Test'}
+					{tryStarting ? 'Starting…' : 'Try'}
 				</button>
 			{/if}
 			{#if dirty && !isNew}
@@ -488,7 +489,7 @@
 				<div class="diff-pane pending-pane">
 					{#if showDiff}
 						<div class="pane-label pending">
-							{testSession ? 'Testing (candidate)' : 'Draft (unsaved)'}
+							{trySession ? 'Trying (candidate)' : 'Draft (unsaved)'}
 						</div>
 					{/if}
 					<div class="editor-wrap">

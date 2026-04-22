@@ -665,39 +665,42 @@ func (m *Module) handleCancelPlcProgram(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, existing)
 }
 
-// ─── Online Edit: Test Mode ────────────────────────────────────────────────
+// ─── Online Edit: Try Mode ─────────────────────────────────────────────────
 //
-// Test mode hot-swaps a candidate source into the live engine. If a task
+// "Try" hot-swaps a candidate source into the live engine. If a task
 // raises an error during the session — or a watchdog timer expires — the
-// PLC module auto-reverts to the pre-test source. The live KV record is
-// never touched; test mode is ephemeral.
+// PLC module auto-reverts to the pre-try source. The live KV record is
+// never touched; try mode is ephemeral.
 //
-//   POST   /programs/{name}/test        — start session { source, timeoutSeconds? }
-//   POST   /programs/{name}/test/stop   — end session (revert now)
-//   GET    /programs/{name}/test        — session status + last event
-//   GET    /plcs/{plcId}/programs/test/events — SSE stream of test events
+// Named "try" (not "test") so the latter stays free for the unit-test
+// framework.
+//
+//   POST   /programs/{name}/try        — start session { source, timeoutSeconds? }
+//   POST   /programs/{name}/try/stop   — end session (revert now)
+//   GET    /programs/{name}/try        — session status + last event
+//   GET    /plcs/{plcId}/programs/try/events — SSE stream of try events
 
-type testStartRequest struct {
+type tryStartRequest struct {
 	Source         string `json:"source"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 }
 
-// plcTestCommand is the wire format the PLC module decodes on PlcTest.
-// Mirrors plc.testCommand — duplicated here to avoid the api package
+// plcTryCommand is the wire format the PLC module decodes on PlcTry.
+// Mirrors plc.tryCommand — duplicated here to avoid the api package
 // importing the plc package (which the build tags keep independent).
-type plcTestCommand struct {
+type plcTryCommand struct {
 	Op             string `json:"op"`
 	Program        string `json:"program"`
 	Source         string `json:"source,omitempty"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 }
 
-func (m *Module) doTestRequest(plcID string, cmd plcTestCommand) ([]byte, int, error) {
+func (m *Module) doTryRequest(plcID string, cmd plcTryCommand) ([]byte, int, error) {
 	body, err := json.Marshal(cmd)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
-	resp, err := m.bus.Request(topics.PlcTest(plcID), body, busTimeout)
+	resp, err := m.bus.Request(topics.PlcTry(plcID), body, busTimeout)
 	if err != nil {
 		return nil, http.StatusBadGateway, err
 	}
@@ -712,11 +715,11 @@ func (m *Module) doTestRequest(plcID string, cmd plcTestCommand) ([]byte, int, e
 	return resp, http.StatusOK, nil
 }
 
-func (m *Module) handleStartPlcProgramTest(w http.ResponseWriter, r *http.Request) {
+func (m *Module) handleStartPlcProgramTry(w http.ResponseWriter, r *http.Request) {
 	plcID := chi.URLParam(r, "plcId")
 	name := chi.URLParam(r, "name")
 
-	var body testStartRequest
+	var body tryStartRequest
 	if err := readJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
 		return
@@ -726,14 +729,14 @@ func (m *Module) handleStartPlcProgramTest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resp, status, err := m.doTestRequest(plcID, plcTestCommand{
+	resp, status, err := m.doTryRequest(plcID, plcTryCommand{
 		Op:             "start",
 		Program:        name,
 		Source:         body.Source,
 		TimeoutSeconds: body.TimeoutSeconds,
 	})
 	if err != nil && status != http.StatusBadRequest {
-		writeError(w, status, fmt.Sprintf("start test session: %v", err))
+		writeError(w, status, fmt.Sprintf("start try session: %v", err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -741,13 +744,13 @@ func (m *Module) handleStartPlcProgramTest(w http.ResponseWriter, r *http.Reques
 	_, _ = w.Write(resp)
 }
 
-func (m *Module) handleStopPlcProgramTest(w http.ResponseWriter, r *http.Request) {
+func (m *Module) handleStopPlcProgramTry(w http.ResponseWriter, r *http.Request) {
 	plcID := chi.URLParam(r, "plcId")
 	name := chi.URLParam(r, "name")
 
-	resp, status, err := m.doTestRequest(plcID, plcTestCommand{Op: "stop", Program: name})
+	resp, status, err := m.doTryRequest(plcID, plcTryCommand{Op: "stop", Program: name})
 	if err != nil && status != http.StatusBadRequest {
-		writeError(w, status, fmt.Sprintf("stop test session: %v", err))
+		writeError(w, status, fmt.Sprintf("stop try session: %v", err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -755,13 +758,13 @@ func (m *Module) handleStopPlcProgramTest(w http.ResponseWriter, r *http.Request
 	_, _ = w.Write(resp)
 }
 
-func (m *Module) handleGetPlcProgramTest(w http.ResponseWriter, r *http.Request) {
+func (m *Module) handleGetPlcProgramTry(w http.ResponseWriter, r *http.Request) {
 	plcID := chi.URLParam(r, "plcId")
 	name := chi.URLParam(r, "name")
 
-	resp, status, err := m.doTestRequest(plcID, plcTestCommand{Op: "status", Program: name})
+	resp, status, err := m.doTryRequest(plcID, plcTryCommand{Op: "status", Program: name})
 	if err != nil && status != http.StatusBadRequest {
-		writeError(w, status, fmt.Sprintf("get test session: %v", err))
+		writeError(w, status, fmt.Sprintf("get try session: %v", err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -769,10 +772,10 @@ func (m *Module) handleGetPlcProgramTest(w http.ResponseWriter, r *http.Request)
 	_, _ = w.Write(resp)
 }
 
-// handleStreamPlcProgramTestEvents forwards test-session events from the
+// handleStreamPlcProgramTryEvents forwards try-session events from the
 // bus to an SSE stream. One shared stream per PLC — the client filters by
 // program name client-side.
-func (m *Module) handleStreamPlcProgramTestEvents(w http.ResponseWriter, r *http.Request) {
+func (m *Module) handleStreamPlcProgramTryEvents(w http.ResponseWriter, r *http.Request) {
 	plcID := chi.URLParam(r, "plcId")
 	sse, ok := newSSEWriter(w)
 	if !ok {
@@ -781,17 +784,17 @@ func (m *Module) handleStreamPlcProgramTestEvents(w http.ResponseWriter, r *http
 	}
 
 	events := make(chan json.RawMessage, 32)
-	sub, err := m.bus.Subscribe(topics.PlcTestEvents(plcID), func(_ string, data []byte, _ bus.ReplyFunc) {
+	sub, err := m.bus.Subscribe(topics.PlcTryEvents(plcID), func(_ string, data []byte, _ bus.ReplyFunc) {
 		select {
 		case events <- append(json.RawMessage(nil), data...):
 		default:
-			// Drop if the client is too slow — test events are low-volume
+			// Drop if the client is too slow — try events are low-volume
 			// and a lost revert notification is still surfaced by the
-			// next GET /test poll.
+			// next GET /try poll.
 		}
 	})
 	if err != nil {
-		m.log.Warn("plc: failed to subscribe to test events", "error", err)
+		m.log.Warn("plc: failed to subscribe to try events", "error", err)
 		return
 	}
 	defer sub.Unsubscribe()
@@ -801,7 +804,7 @@ func (m *Module) handleStreamPlcProgramTestEvents(w http.ResponseWriter, r *http
 		case <-r.Context().Done():
 			return
 		case ev := <-events:
-			if err := sse.WriteEvent("test", ev); err != nil {
+			if err := sse.WriteEvent("try", ev); err != nil {
 				return
 			}
 		}

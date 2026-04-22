@@ -43,7 +43,7 @@ type Module struct {
 	tasks     map[string]*taskRunner
 	pub       *publisher
 	bridge    *scannerBridge
-	testMgr   *TestSessionManager
+	tryMgr    *TrySessionManager
 
 	persist *persister
 
@@ -247,12 +247,12 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.subs = append(m.subs, statsSub)
 	m.mu.Unlock()
 
-	// Handle test-session commands (start/stop/status).
-	testSub, _ := b.Subscribe(topics.PlcTest(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
-		m.handleTestRequest(data, reply)
+	// Handle try-session commands (start/stop/status).
+	trySub, _ := b.Subscribe(topics.PlcTry(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
+		m.handleTryRequest(data, reply)
 	})
 	m.mu.Lock()
-	m.subs = append(m.subs, testSub)
+	m.subs = append(m.subs, trySub)
 	m.mu.Unlock()
 
 	// Handle variable write commands. The API publishes {"value": X} to
@@ -316,9 +316,9 @@ func (m *Module) Stop() error {
 			sub.Unsubscribe()
 		}
 	}
-	if m.testMgr != nil {
-		m.testMgr.Close()
-		m.testMgr = nil
+	if m.tryMgr != nil {
+		m.tryMgr.Close()
+		m.tryMgr = nil
 	}
 
 	m.subs = nil
@@ -369,11 +369,11 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 		m.bridge = nil
 	}
 
-	// Tear down any active test session manager — it holds an error
+	// Tear down any active try session manager — it holds an error
 	// observer on the old engine that must be released.
-	if m.testMgr != nil {
-		m.testMgr.Close()
-		m.testMgr = nil
+	if m.tryMgr != nil {
+		m.tryMgr.Close()
+		m.tryMgr = nil
 	}
 
 	m.config = config
@@ -390,11 +390,11 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	templates := m.loadTemplates()
 	m.engine.SetTemplates(templates)
 
-	// Wire test-session manager. onEvent publishes terminal events to the
+	// Wire try-session manager. onEvent publishes terminal events to the
 	// bus so API subscribers (SSE streams) can forward to the UI.
-	m.testMgr = NewTestSessionManager(m.engine, m.log, func(ev TestEvent) {
+	m.tryMgr = NewTrySessionManager(m.engine, m.log, func(ev TryEvent) {
 		if data, err := json.Marshal(ev); err == nil {
-			_ = m.b.Publish(topics.PlcTestEvents(m.plcID), data)
+			_ = m.b.Publish(topics.PlcTryEvents(m.plcID), data)
 		}
 	})
 
@@ -686,54 +686,54 @@ func (m *Module) handleVariableCommand(subject string, data []byte) {
 	m.variables.MarkChanged(rootID)
 }
 
-// testCommand is the request body decoded from PlcTest messages. The Op
+// tryCommand is the request body decoded from PlcTry messages. The Op
 // selects one of start/stop/status; other fields apply only to start.
-type testCommand struct {
+type tryCommand struct {
 	Op             string `json:"op"`
 	Program        string `json:"program"`
 	Source         string `json:"source,omitempty"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 }
 
-// testResponse is the reply envelope for PlcTest requests.
-type testResponse struct {
-	OK        bool             `json:"ok"`
-	Error     string           `json:"error,omitempty"`
-	Session   *TestSessionInfo `json:"session,omitempty"`
-	LastEvent *TestEvent       `json:"lastEvent,omitempty"`
+// tryResponse is the reply envelope for PlcTry requests.
+type tryResponse struct {
+	OK        bool            `json:"ok"`
+	Error     string          `json:"error,omitempty"`
+	Session   *TrySessionInfo `json:"session,omitempty"`
+	LastEvent *TryEvent       `json:"lastEvent,omitempty"`
 }
 
-// handleTestRequest services the test-session command topic. Callers
+// handleTryRequest services the try-session command topic. Callers
 // multiplex start/stop/status via the request body's Op field.
-func (m *Module) handleTestRequest(data []byte, reply bus.ReplyFunc) {
+func (m *Module) handleTryRequest(data []byte, reply bus.ReplyFunc) {
 	if reply == nil {
 		return
 	}
 
-	respond := func(r testResponse) {
+	respond := func(r tryResponse) {
 		payload, err := json.Marshal(r)
 		if err != nil {
-			m.log.Error("plc: failed to marshal test response", "error", err)
+			m.log.Error("plc: failed to marshal try response", "error", err)
 			return
 		}
 		reply(payload)
 	}
 
-	var cmd testCommand
+	var cmd tryCommand
 	if err := json.Unmarshal(data, &cmd); err != nil {
-		respond(testResponse{OK: false, Error: fmt.Sprintf("invalid body: %v", err)})
+		respond(tryResponse{OK: false, Error: fmt.Sprintf("invalid body: %v", err)})
 		return
 	}
 	if cmd.Program == "" {
-		respond(testResponse{OK: false, Error: "program is required"})
+		respond(tryResponse{OK: false, Error: "program is required"})
 		return
 	}
 
 	m.mu.RLock()
-	mgr := m.testMgr
+	mgr := m.tryMgr
 	m.mu.RUnlock()
 	if mgr == nil {
-		respond(testResponse{OK: false, Error: "test manager not initialized (config not applied yet)"})
+		respond(tryResponse{OK: false, Error: "try manager not initialized (config not applied yet)"})
 		return
 	}
 
@@ -742,21 +742,21 @@ func (m *Module) handleTestRequest(data []byte, reply bus.ReplyFunc) {
 		timeout := time.Duration(cmd.TimeoutSeconds) * time.Second
 		info, err := mgr.Start(cmd.Program, cmd.Source, timeout)
 		if err != nil {
-			respond(testResponse{OK: false, Error: err.Error()})
+			respond(tryResponse{OK: false, Error: err.Error()})
 			return
 		}
-		respond(testResponse{OK: true, Session: &info})
+		respond(tryResponse{OK: true, Session: &info})
 	case "stop":
 		_ = mgr.Stop(cmd.Program)
-		respond(testResponse{OK: true, LastEvent: mgr.LastEvent(cmd.Program)})
+		respond(tryResponse{OK: true, LastEvent: mgr.LastEvent(cmd.Program)})
 	case "status":
-		respond(testResponse{
+		respond(tryResponse{
 			OK:        true,
 			Session:   mgr.Active(cmd.Program),
 			LastEvent: mgr.LastEvent(cmd.Program),
 		})
 	default:
-		respond(testResponse{OK: false, Error: fmt.Sprintf("unknown op %q", cmd.Op)})
+		respond(tryResponse{OK: false, Error: fmt.Sprintf("unknown op %q", cmd.Op)})
 	}
 }
 
