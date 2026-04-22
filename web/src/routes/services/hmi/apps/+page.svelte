@@ -31,7 +31,7 @@
     }
     newName = '';
     await refresh();
-    if (r.data) goto(`/hmi/${encodeURIComponent(r.data.appId)}`);
+    if (r.data) goto(`/hmi/designer/${encodeURIComponent(r.data.appId)}`);
   }
 
   async function handleDelete(appId: string) {
@@ -59,14 +59,6 @@
 </svelte:head>
 
 <section class="page">
-  <header class="page-header">
-    <div>
-      <h1>HMI Apps</h1>
-      <p class="subtitle">Build screens against gateway tags and UDTs.</p>
-    </div>
-    <a href="/hmi/udts" class="link-btn">Browse UDTs &rarr;</a>
-  </header>
-
   {#if error}
     <div class="banner error">{error}</div>
   {/if}
@@ -93,7 +85,7 @@
     <ul class="app-list">
       {#each apps as app (app.appId)}
         <li class="app-card">
-          <a href="/hmi/{encodeURIComponent(app.appId)}" class="app-link">
+          <a href="/hmi/designer/{encodeURIComponent(app.appId)}" class="app-link">
             <div class="app-name">{app.name}</div>
             <div class="app-id">{app.appId}</div>
             {#if app.description}
@@ -103,9 +95,10 @@
               {screenCount(app)} screens · {componentCount(app)} components
             </div>
           </a>
-          <button class="delete-btn" onclick={() => handleDelete(app.appId)} title="Delete">
-            ×
-          </button>
+          <div class="app-actions">
+            <a href="/hmi/{encodeURIComponent(app.appId)}" class="run-btn" title="Open runtime">▶ Run</a>
+            <button class="delete-btn" onclick={() => handleDelete(app.appId)} title="Delete">×</button>
+          </div>
         </li>
       {/each}
     </ul>
@@ -118,23 +111,23 @@
     margin: 0 auto;
     padding: 2rem 1.5rem;
   }
-  .page-header {
+  .app-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
     display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: 1.5rem;
-    h1 { margin: 0; font-family: 'Righteous', sans-serif; color: var(--theme-text); }
-    .subtitle { margin: 0.25rem 0 0; color: var(--theme-text-muted); }
+    gap: 0.25rem;
+    align-items: center;
   }
-  .link-btn {
-    text-decoration: none;
-    color: var(--theme-text);
-    padding: 0.5rem 0.875rem;
+  .run-btn {
+    padding: 0.25rem 0.625rem;
     border: 1px solid var(--theme-border);
     border-radius: var(--rounded-md);
     background: var(--theme-surface);
-    transition: background 0.15s;
-    &:hover { background: var(--theme-surface-hover, var(--theme-border)); }
+    color: var(--theme-text);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    &:hover { border-color: var(--theme-text); }
   }
   .banner.error {
     margin-bottom: 1rem;
@@ -218,9 +211,6 @@
     color: var(--theme-text-muted);
   }
   .delete-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
     width: 1.75rem;
     height: 1.75rem;
     line-height: 1;

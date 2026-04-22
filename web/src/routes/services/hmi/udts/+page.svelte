@@ -55,8 +55,8 @@
     }
     const appId = targetAppId;
     closeCreate();
-    // Jump to the app overview — component editor is phase 2.
-    goto(`/hmi/${encodeURIComponent(appId)}`);
+    // Jump to the designer — component editor is phase 2.
+    goto(`/hmi/designer/${encodeURIComponent(appId)}`);
   }
 
   onMount(refresh);
@@ -67,16 +67,10 @@
 </svelte:head>
 
 <section class="page">
-  <header class="page-header">
-    <div>
-      <h1>UDT Browser</h1>
-      <p class="subtitle">
-        User-Defined Types declared across all gateways. Build a reusable HMI
-        component for any UDT type — one definition renders per instance.
-      </p>
-    </div>
-    <a href="/hmi" class="link-btn">&larr; Back to apps</a>
-  </header>
+  <p class="subtitle">
+    User-Defined Types declared across all gateways. Build a reusable HMI
+    component for any UDT type — one definition renders per instance.
+  </p>
 
   {#if error}
     <div class="banner error">{error}</div>
@@ -182,26 +176,7 @@
 
 <style lang="scss">
   .page { max-width: 64rem; margin: 0 auto; padding: 2rem 1.5rem; }
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    h1 { margin: 0; font-family: 'Righteous', sans-serif; color: var(--theme-text); }
-    .subtitle { margin: 0.25rem 0 0; max-width: 42rem; color: var(--theme-text-muted); font-size: 0.9375rem; }
-  }
-  .link-btn {
-    text-decoration: none;
-    color: var(--theme-text);
-    padding: 0.5rem 0.875rem;
-    border: 1px solid var(--theme-border);
-    border-radius: var(--rounded-md);
-    background: var(--theme-surface);
-    white-space: nowrap;
-    flex-shrink: 0;
-    &:hover { background: var(--theme-surface-hover, var(--theme-border)); }
-  }
+  .subtitle { margin: 0 0 1.5rem; max-width: 42rem; color: var(--theme-text-muted); font-size: 0.9375rem; }
   .banner.error {
     margin-bottom: 1rem;
     padding: 0.75rem 1rem;

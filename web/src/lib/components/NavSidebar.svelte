@@ -163,7 +163,8 @@
     nftables: ShieldCheck,
     orchestrator: ArrowsRightLeft,
     snmp: ComputerDesktop,
-    opcua: CircleStack
+    opcua: CircleStack,
+    hmi: PaintBrush
   };
 
   /** Map moduleId to an icon */
@@ -312,18 +313,6 @@
         <span>Setup</span>
       </a>
     </li>
-    <li>
-      <a
-        href="/hmi"
-        class="sidebar-item"
-        class:active={$page.url.pathname.startsWith('/hmi')}
-        onclick={close}
-      >
-        <PaintBrush size="1.25rem" />
-        <span>HMI</span>
-      </a>
-    </li>
-
     {#if uniqueServices.length > 0}
       <li class="sidebar-section-label">Services</li>
       {#each uniqueServices as service}

@@ -21,6 +21,7 @@
   }
 
   const screen = $derived<HmiScreenConfig | null>(app?.screens?.[screenId] ?? null);
+  const screens = $derived<HmiScreenConfig[]>(app ? Object.values(app.screens ?? {}) : []);
 
   onMount(refresh);
 </script>
@@ -29,43 +30,79 @@
   <title>{screen?.name ?? screenId} · {app?.name ?? appId}</title>
 </svelte:head>
 
-<section class="page">
-  <header class="page-header">
-    <div>
-      <a href="/hmi/{encodeURIComponent(appId)}" class="back">&larr; {app?.name ?? appId}</a>
-      <h1>{screen?.name ?? screenId}</h1>
-      {#if screen}
-        <p class="subtitle">{screen.widgets?.length ?? 0} widgets</p>
-      {/if}
+<div class="runtime">
+  <header class="runtime-header">
+    <div class="title">
+      <span class="app-name">{app?.name ?? appId}</span>
+      <span class="sep">/</span>
+      <span class="screen-name">{screen?.name ?? screenId}</span>
     </div>
+    {#if screens.length > 1}
+      <nav class="screen-nav">
+        {#each screens as scr (scr.screenId)}
+          <a
+            href="/hmi/{encodeURIComponent(appId)}/screens/{encodeURIComponent(scr.screenId)}"
+            class="screen-tab"
+            class:active={scr.screenId === screenId}
+          >{scr.name}</a>
+        {/each}
+      </nav>
+    {/if}
+    <a href="/hmi/designer/{encodeURIComponent(appId)}" class="designer-link" title="Open designer">Edit</a>
   </header>
 
   {#if error}
     <div class="banner error">{error}</div>
-  {/if}
-
-  {#if loading}
+  {:else if loading}
     <p class="muted">Loading…</p>
   {:else if !screen}
     <p class="muted">Screen not found.</p>
   {:else}
     <ScreenCanvas {screen} />
   {/if}
-</section>
+</div>
 
 <style lang="scss">
-  .page { max-width: 80rem; margin: 0 auto; padding: 2rem 1.5rem; }
-  .page-header { margin-bottom: 1rem; }
-  .back { color: var(--theme-text-muted); text-decoration: none; font-size: 0.875rem; }
-  h1 { margin: 0.25rem 0 0; font-family: 'Righteous', sans-serif; color: var(--theme-text); }
-  .subtitle { margin: 0.125rem 0 0; color: var(--theme-text-muted); font-size: 0.8125rem; }
+  .runtime { display: flex; flex-direction: column; min-height: calc(100vh - var(--header-height)); }
+  .runtime-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1.5rem;
+    border-bottom: 1px solid var(--theme-border);
+    background: var(--theme-surface);
+  }
+  .title { display: flex; align-items: baseline; gap: 0.5rem; font-family: 'Righteous', sans-serif; }
+  .app-name { color: var(--theme-text-muted); font-size: 0.9375rem; }
+  .sep { color: var(--theme-text-muted); }
+  .screen-name { color: var(--theme-text); font-size: 1.0625rem; }
+  .screen-nav { display: flex; gap: 0.25rem; margin-left: 1rem; flex: 1; }
+  .screen-tab {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    text-decoration: none;
+    border-radius: var(--rounded-sm, 4px);
+    &:hover { color: var(--theme-text); background: var(--theme-background); }
+    &.active { color: var(--theme-text); background: var(--theme-background); }
+  }
+  .designer-link {
+    margin-left: auto;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    color: var(--theme-text);
+    text-decoration: none;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    &:hover { border-color: var(--theme-text); }
+  }
   .banner.error {
-    margin-bottom: 1rem;
+    margin: 1rem;
     padding: 0.75rem 1rem;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.4);
     border-radius: var(--rounded-md);
     color: #ef4444;
   }
-  .muted { color: var(--theme-text-muted); }
+  .muted { color: var(--theme-text-muted); padding: 1rem 1.5rem; }
 </style>

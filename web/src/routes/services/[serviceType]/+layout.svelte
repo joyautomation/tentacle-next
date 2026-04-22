@@ -22,6 +22,8 @@
     if (path.endsWith('/modules')) return 'modules';
     if (path.endsWith('/history')) return 'history';
     if (path.endsWith('/trends')) return 'trends';
+    if (path.endsWith('/apps') || path.includes('/apps/')) return 'apps';
+    if (path.endsWith('/udts') || path.includes('/udts/')) return 'udts';
     return 'default';
   });
 </script>
@@ -197,6 +199,19 @@
       </a>
       <a href="/services/{serviceType}/trends" class="tab" class:active={currentTab() === 'trends'}>
         Trends
+      </a>
+      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+        Logs
+      </a>
+    {:else if serviceType === 'hmi'}
+      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+        Overview
+      </a>
+      <a href="/services/{serviceType}/apps" class="tab" class:active={currentTab() === 'apps'}>
+        Apps
+      </a>
+      <a href="/services/{serviceType}/udts" class="tab" class:active={currentTab() === 'udts'}>
+        UDTs
       </a>
       <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
         Logs
