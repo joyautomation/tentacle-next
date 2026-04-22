@@ -78,14 +78,29 @@ type PlcTaskConfigKV struct {
 // documents the entry function's parameters and return type so the editor
 // and LSP can offer completion/hover/diagnostics across the flat namespace.
 type PlcProgramKV struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	Language    string              `json:"language"`            // "ladder", "st", "starlark"
-	Source      string              `json:"source"`              // Starlark source (for ladder, this IS the DSL)
-	StSource    string              `json:"stSource,omitempty"`  // Original ST source (for ST programs only)
-	Signature   *PlcFunctionSig     `json:"signature,omitempty"` // entry-function signature for intellisense
-	UpdatedAt   int64               `json:"updatedAt"`
-	UpdatedBy   string              `json:"updatedBy,omitempty"` // "gui", "cli", "gitops"
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Language    string          `json:"language"`            // "ladder", "st", "starlark"
+	Source      string          `json:"source"`              // Starlark source (for ladder, this IS the DSL)
+	StSource    string          `json:"stSource,omitempty"`  // Original ST source (for ST programs only)
+	Signature   *PlcFunctionSig `json:"signature,omitempty"` // entry-function signature for intellisense
+	UpdatedAt   int64           `json:"updatedAt"`
+	UpdatedBy   string          `json:"updatedBy,omitempty"` // "gui", "cli", "gitops"
+
+	// Online-edit pending state. When PendingSource is non-empty the program
+	// has an uncommitted edit that hasn't been swapped into the running
+	// engine yet. Cleared by assemble (promoted to live) or cancel.
+	PendingSource    string          `json:"pendingSource,omitempty"`
+	PendingStSource  string          `json:"pendingStSource,omitempty"`
+	PendingLanguage  string          `json:"pendingLanguage,omitempty"`
+	PendingSignature *PlcFunctionSig `json:"pendingSignature,omitempty"`
+	PendingUpdatedAt int64           `json:"pendingUpdatedAt,omitempty"`
+	PendingUpdatedBy string          `json:"pendingUpdatedBy,omitempty"`
+}
+
+// HasPending reports whether the program carries an uncommitted online edit.
+func (p *PlcProgramKV) HasPending() bool {
+	return p != nil && p.PendingSource != ""
 }
 
 // PlcFunctionSig captures a callable's input/output shape. Types use the

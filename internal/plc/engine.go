@@ -288,6 +288,15 @@ func (e *Engine) HasProgram(name string) bool {
 	return ok
 }
 
+// Source returns the currently-compiled source for a program, or "" if the
+// program is unknown. Useful for diffing KV updates against running code so
+// we only recompile when the live source actually changed.
+func (e *Engine) Source(name string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.sources[name]
+}
+
 // ProgramCount returns the number of compiled programs.
 func (e *Engine) ProgramCount() int {
 	e.mu.RLock()

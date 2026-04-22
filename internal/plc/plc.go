@@ -182,6 +182,43 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.mu.Unlock()
 	}
 
+	// Watch for program changes so edits assembled via the API hot-swap
+	// into the running engine without a config reapply. Pending-only
+	// writes don't change Source so they won't recompile.
+	progSub, err := b.KVWatchAll(topics.BucketPlcPrograms, func(key string, value []byte, op bus.KVOperation) {
+		m.mu.RLock()
+		eng := m.engine
+		m.mu.RUnlock()
+		if eng == nil {
+			return
+		}
+		if op == bus.KVOpDelete {
+			eng.Remove(key)
+			m.log.Info("plc: program removed, engine updated", "program", key)
+			return
+		}
+		var prog itypes.PlcProgramKV
+		if err := json.Unmarshal(value, &prog); err != nil {
+			m.log.Error("plc: failed to parse updated program", "program", key, "error", err)
+			return
+		}
+		if eng.Source(prog.Name) == prog.Source {
+			return // pending-only write or no-op: live source unchanged
+		}
+		if err := eng.Compile(prog.Name, prog.Source); err != nil {
+			m.log.Error("plc: failed to recompile program", "program", prog.Name, "error", err)
+			return
+		}
+		m.log.Info("plc: program recompiled", "program", prog.Name)
+	})
+	if err != nil {
+		m.log.Error("plc: failed to watch programs KV", "error", err)
+	} else {
+		m.mu.Lock()
+		m.subs = append(m.subs, progSub)
+		m.mu.Unlock()
+	}
+
 	// Listen for shutdown via Bus.
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.plcID), func(subject string, data []byte, reply bus.ReplyFunc) {
 		m.log.Info("plc: received shutdown command via Bus")

@@ -275,12 +275,15 @@ func (m *Module) handleDeletePlcConfigVariable(w http.ResponseWriter, r *http.Re
 
 // programListItem is the program list response (omits source for payload size).
 type programListItem struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Language    string                 `json:"language"`
-	Signature   *itypes.PlcFunctionSig `json:"signature,omitempty"`
-	UpdatedAt   int64                  `json:"updatedAt"`
-	UpdatedBy   string                 `json:"updatedBy,omitempty"`
+	Name             string                 `json:"name"`
+	Description      string                 `json:"description,omitempty"`
+	Language         string                 `json:"language"`
+	Signature        *itypes.PlcFunctionSig `json:"signature,omitempty"`
+	UpdatedAt        int64                  `json:"updatedAt"`
+	UpdatedBy        string                 `json:"updatedBy,omitempty"`
+	HasPending       bool                   `json:"hasPending,omitempty"`
+	PendingUpdatedAt int64                  `json:"pendingUpdatedAt,omitempty"`
+	PendingUpdatedBy string                 `json:"pendingUpdatedBy,omitempty"`
 }
 
 func (m *Module) handleListPlcPrograms(w http.ResponseWriter, r *http.Request) {
@@ -298,12 +301,15 @@ func (m *Module) handleListPlcPrograms(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out = append(out, programListItem{
-			Name:        prog.Name,
-			Description: prog.Description,
-			Language:    prog.Language,
-			Signature:   prog.Signature,
-			UpdatedAt:   prog.UpdatedAt,
-			UpdatedBy:   prog.UpdatedBy,
+			Name:             prog.Name,
+			Description:      prog.Description,
+			Language:         prog.Language,
+			Signature:        prog.Signature,
+			UpdatedAt:        prog.UpdatedAt,
+			UpdatedBy:        prog.UpdatedBy,
+			HasPending:       prog.HasPending(),
+			PendingUpdatedAt: prog.PendingUpdatedAt,
+			PendingUpdatedBy: prog.PendingUpdatedBy,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -503,6 +509,159 @@ func (m *Module) handleDeletePlcProgram(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─── Online Edit: pending / assemble / cancel ──────────────────────────────
+//
+// RSLogix-style online-edit flow. The live program keeps running while the
+// user edits; changes accumulate in the Pending* fields on the KV record
+// and only swap into the engine on assemble.
+//
+//   PUT    /programs/{name}/pending   — write/update pending edit
+//   POST   /programs/{name}/assemble  — promote pending → live (hot-swap)
+//   POST   /programs/{name}/cancel    — discard pending
+
+// handlePutPlcProgramPending stores an uncommitted edit on an existing
+// program. Does not recompile — the engine keeps running the live source
+// until assemble. Refuses when no live program exists yet (first save
+// still goes through PUT /programs/{name}).
+func (m *Module) handlePutPlcProgramPending(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	var body struct {
+		Source      string `json:"source"`
+		StSource    string `json:"stSource,omitempty"`
+		Language    string `json:"language,omitempty"`
+		Description string `json:"description,omitempty"`
+		UpdatedBy   string `json:"updatedBy,omitempty"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
+		return
+	}
+
+	existing, err := m.getPlcProgram(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("program %q not found (create via PUT /programs/%s first)", name, name))
+		return
+	}
+
+	lang := body.Language
+	if lang == "" {
+		lang = existing.Language
+	}
+	if !validProgramLanguages[lang] {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("language must be one of ladder, st, starlark (got %q)", lang))
+		return
+	}
+	if body.Source == "" && lang != "st" {
+		writeError(w, http.StatusBadRequest, "source is required")
+		return
+	}
+
+	existing.PendingSource = body.Source
+	existing.PendingStSource = body.StSource
+	existing.PendingLanguage = lang
+	existing.PendingUpdatedAt = time.Now().UnixMilli()
+	existing.PendingUpdatedBy = body.UpdatedBy
+	if existing.PendingUpdatedBy == "" {
+		existing.PendingUpdatedBy = "api"
+	}
+	if lang == "starlark" {
+		existing.PendingSignature = plc.DeriveProgramSignature(body.Source, name)
+	} else {
+		existing.PendingSignature = nil
+	}
+
+	// Persist pending edit without touching the live Source/UpdatedAt so
+	// the program-bucket watcher treats this as a no-op for the engine.
+	data, err := json.Marshal(existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshal program: %v", err))
+		return
+	}
+	if _, err := m.bus.KVPut(topics.BucketPlcPrograms, name, data); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put pending program: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, existing)
+}
+
+// handleAssemblePlcProgram promotes the pending edit to live. The KV write
+// bumps Source/UpdatedAt; the PLC module's program-bucket watcher picks it
+// up and hot-recompiles the engine.
+func (m *Module) handleAssemblePlcProgram(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	existing, err := m.getPlcProgram(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("program %q not found", name))
+		return
+	}
+	if !existing.HasPending() {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("program %q has no pending edit", name))
+		return
+	}
+
+	existing.Source = existing.PendingSource
+	existing.StSource = existing.PendingStSource
+	if existing.PendingLanguage != "" {
+		existing.Language = existing.PendingLanguage
+	}
+	if existing.PendingSignature != nil {
+		existing.Signature = existing.PendingSignature
+	} else if existing.Language == "starlark" {
+		existing.Signature = plc.DeriveProgramSignature(existing.Source, name)
+	}
+	if existing.PendingUpdatedBy != "" {
+		existing.UpdatedBy = existing.PendingUpdatedBy
+	}
+
+	existing.PendingSource = ""
+	existing.PendingStSource = ""
+	existing.PendingLanguage = ""
+	existing.PendingSignature = nil
+	existing.PendingUpdatedAt = 0
+	existing.PendingUpdatedBy = ""
+
+	if err := m.putPlcProgram(existing); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("assemble plc program: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, existing)
+}
+
+// handleCancelPlcProgram discards the pending edit. Live source untouched.
+func (m *Module) handleCancelPlcProgram(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	existing, err := m.getPlcProgram(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("program %q not found", name))
+		return
+	}
+	if !existing.HasPending() {
+		writeJSON(w, http.StatusOK, existing)
+		return
+	}
+
+	existing.PendingSource = ""
+	existing.PendingStSource = ""
+	existing.PendingLanguage = ""
+	existing.PendingSignature = nil
+	existing.PendingUpdatedAt = 0
+	existing.PendingUpdatedBy = ""
+
+	data, err := json.Marshal(existing)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshal program: %v", err))
+		return
+	}
+	if _, err := m.bus.KVPut(topics.BucketPlcPrograms, name, data); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("cancel pending program: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, existing)
 }
 
 // ─── PLC Browse Import ─────────────────────────────────────────────────────
