@@ -75,6 +75,9 @@ export interface ProgramListItem {
   signature?: PlcFunctionSig | null;
   updatedAt: number;
   updatedBy?: string;
+  hasPending?: boolean;
+  pendingUpdatedAt?: number;
+  pendingUpdatedBy?: string;
 }
 
 export interface PlcTemplateField {
