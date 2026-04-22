@@ -131,7 +131,9 @@ test.describe('PLC Tests UI', () => {
 		).toBeVisible();
 
 		// Run it — POST returns pass → dot + result panel become visible.
-		await page.getByRole('button', { name: /Run/, exact: false }).click();
+		// Scope to the TestEditor header to avoid matching the Navigator's
+		// "Run all tests" button.
+		await page.locator('.test-editor .ed-header').getByRole('button', { name: 'Run', exact: true }).click();
 
 		// Pass dot appears in the TestEditor header.
 		await expect(page.locator('.test-editor .ed-header .status-dot.pass')).toBeVisible();
