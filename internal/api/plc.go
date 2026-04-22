@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/joyautomation/tentacle/internal/plc"
+	"github.com/joyautomation/tentacle/internal/plc/lsp"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 )
@@ -393,6 +394,106 @@ func isValidProgramName(s string) bool {
 		return false
 	}
 	return true
+}
+
+// ─── References ────────────────────────────────────────────────────────────
+
+// referenceSite is one cross-reference hit. When Source == "program" the
+// site lives inside a Starlark program's source and Line/StartCol/EndCol
+// pinpoint the token. When Source == "taskProgramRef" the site is a task's
+// programRef field — Task identifies which task, and no text positions
+// apply (the field is structured config, not source).
+type referenceSite struct {
+	Source   string `json:"source"`
+	Program  string `json:"program,omitempty"`
+	Task     string `json:"task,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	StartCol int    `json:"startCol,omitempty"`
+	EndCol   int    `json:"endCol,omitempty"`
+	LineText string `json:"lineText,omitempty"`
+}
+
+// handleFindPlcReferences returns every place the given name is referenced
+// across the PLC. kind=program matches bare-ident call sites in Starlark
+// sources plus task programRefs; kind=variable matches the first string
+// argument of variable-taking builtins (get_var, set_var, NO, TON, …).
+//
+// Only Starlark programs are scanned for source-level references — ST and
+// ladder sources are not parsed by the same walker.
+func (m *Module) handleFindPlcReferences(w http.ResponseWriter, r *http.Request) {
+	plcID := chi.URLParam(r, "plcId")
+	name := r.URL.Query().Get("name")
+	kind := r.URL.Query().Get("kind")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name query parameter is required")
+		return
+	}
+	if kind != "program" && kind != "variable" {
+		writeError(w, http.StatusBadRequest, "kind must be program or variable")
+		return
+	}
+
+	keys, err := m.bus.KVKeys(topics.BucketPlcPrograms)
+	if err != nil {
+		// Empty bucket is not an error — no programs, no references.
+		keys = nil
+	}
+
+	sites := make([]referenceSite, 0)
+	for _, k := range keys {
+		prog, err := m.getPlcProgram(k)
+		if err != nil || prog == nil {
+			continue
+		}
+		if prog.Language != "starlark" {
+			continue
+		}
+		// Skip the program itself when looking up references to it — the
+		// def header isn't a "use", and local recursive calls are part of
+		// the owning program's body and handled by rename separately.
+		if kind == "program" && prog.Name == name {
+			continue
+		}
+		var refs []lsp.SourceReference
+		if kind == "program" {
+			refs = lsp.FindProgramReferences(prog.Source, name)
+		} else {
+			refs = lsp.FindVariableReferences(prog.Source, name)
+		}
+		for _, ref := range refs {
+			sites = append(sites, referenceSite{
+				Source:   "program",
+				Program:  prog.Name,
+				Line:     ref.Line,
+				StartCol: ref.StartCol,
+				EndCol:   ref.EndCol,
+				LineText: ref.LineText,
+			})
+		}
+	}
+
+	if kind == "program" {
+		if cfg, err := m.getPlcConfig(plcID); err == nil && cfg != nil {
+			ensurePlcMaps(cfg)
+			taskNames := make([]string, 0, len(cfg.Tasks))
+			for taskName := range cfg.Tasks {
+				taskNames = append(taskNames, taskName)
+			}
+			sort.Strings(taskNames)
+			for _, taskName := range taskNames {
+				task := cfg.Tasks[taskName]
+				if task.ProgramRef == name {
+					sites = append(sites, referenceSite{
+						Source:  "taskProgramRef",
+						Task:    taskName,
+						Program: task.ProgramRef,
+					})
+				}
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, sites)
 }
 
 func (m *Module) handleDeletePlcProgram(w http.ResponseWriter, r *http.Request) {
