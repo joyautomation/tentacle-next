@@ -98,7 +98,7 @@ func analyzeCallSites(file *syntax.File, provider SymbolProvider, currentProgram
 			return true
 		}
 		info := provider.Function(name)
-		if info == nil {
+		if info == nil || !info.HasSignature {
 			return true
 		}
 		if d, ok := checkCallArity(call, ident, info); ok {

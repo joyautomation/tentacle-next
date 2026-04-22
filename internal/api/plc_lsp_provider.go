@@ -79,21 +79,20 @@ func (p *plcLspProvider) Template(name string) *lsp.TemplateInfo {
 }
 
 // Function returns the signature of a top-level function exported by any
-// saved program. The LSP uses this for cross-program completion, hover,
-// and arity diagnostics. Today the signature on PlcProgramKV documents the
-// program's entry function (same name as the program); non-entry helpers
-// don't carry signatures yet, so they won't surface here.
+// saved program. Programs without a declared signature still resolve —
+// completion and hover fall back to a bare `name()` form so every saved
+// function is discoverable from other programs.
 func (p *plcLspProvider) Function(name string) *lsp.FunctionInfo {
 	prog, err := p.mod.getPlcProgram(name)
-	if err != nil || prog == nil || prog.Signature == nil {
+	if err != nil || prog == nil {
 		return nil
 	}
 	return toFunctionInfo(prog.Name, prog.Description, prog.Signature)
 }
 
-// FunctionNames returns the names of every saved program that has a
-// declared signature. Programs without signatures are skipped — there's
-// nothing useful to offer for them yet.
+// FunctionNames returns the names of every saved program, so the LSP can
+// surface them all as callables. Signature-less programs get a bare
+// `name()` signature downstream.
 func (p *plcLspProvider) FunctionNames() []string {
 	keys, err := p.mod.bus.KVKeys(topics.BucketPlcPrograms)
 	if err != nil {
@@ -102,7 +101,7 @@ func (p *plcLspProvider) FunctionNames() []string {
 	names := make([]string, 0, len(keys))
 	for _, k := range keys {
 		prog, err := p.mod.getPlcProgram(k)
-		if err != nil || prog == nil || prog.Signature == nil {
+		if err != nil || prog == nil {
 			continue
 		}
 		names = append(names, prog.Name)
@@ -119,6 +118,7 @@ func toFunctionInfo(program, description string, sig *itypes.PlcFunctionSig) *ls
 	if sig == nil {
 		return info
 	}
+	info.HasSignature = true
 	info.Params = make([]lsp.FunctionParam, 0, len(sig.Params))
 	for _, p := range sig.Params {
 		info.Params = append(info.Params, lsp.FunctionParam{

@@ -60,12 +60,17 @@ type FunctionReturn struct {
 //
 // Program is the owning program's name — useful for disambiguating in
 // hover text and for skipping self-references at the call site.
+//
+// HasSignature distinguishes "function declared with empty param list" from
+// "function has no declared signature at all" — the latter should skip
+// arity checking so users aren't punished for not filling in metadata.
 type FunctionInfo struct {
-	Name        string
-	Program     string
-	Description string
-	Params      []FunctionParam
-	Returns     *FunctionReturn
+	Name         string
+	Program      string
+	Description  string
+	Params       []FunctionParam
+	Returns      *FunctionReturn
+	HasSignature bool
 }
 
 // SymbolProvider surfaces PLC-scoped knowledge — variables, templates, and

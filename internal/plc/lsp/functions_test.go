@@ -11,9 +11,10 @@ func newFnProvider() *fakeProvider {
 	return &fakeProvider{
 		fns: map[string]*FunctionInfo{
 			"motor_on": {
-				Name:        "motor_on",
-				Program:     "motor_on",
-				Description: "Starts the motor.",
+				Name:         "motor_on",
+				Program:      "motor_on",
+				Description:  "Starts the motor.",
+				HasSignature: true,
 				Params: []FunctionParam{
 					{Name: "speed", Type: "number", Required: true},
 					{Name: "ramp", Type: "number", Required: false},

@@ -109,6 +109,11 @@ func functionToCompletionItem(info *FunctionInfo) CompletionItem {
 	} else if info.Program != "" {
 		doc = info.Description + "\n\n*Defined in program `" + info.Program + "`.*"
 	}
+	if !info.HasSignature {
+		// Land the cursor between the parens so the user can type args even
+		// though we have no declared param list.
+		insert = info.Name + "(${0})"
+	}
 	return CompletionItem{
 		Label:            info.Name,
 		Kind:             CompletionKindFunction,
