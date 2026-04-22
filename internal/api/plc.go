@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joyautomation/tentacle/internal/plc"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 )
@@ -335,6 +336,14 @@ func (m *Module) handlePutPlcProgram(w http.ResponseWriter, r *http.Request) {
 	if prog.Source == "" && prog.Language != "st" {
 		writeError(w, http.StatusBadRequest, "source is required")
 		return
+	}
+
+	// Signatures are derived from Python-style annotations on the entry
+	// function's def header — the client no longer supplies them directly.
+	// Sources that don't declare annotations leave Signature nil, which is
+	// the right default (completion still offers the name as a bare call).
+	if prog.Language == "starlark" {
+		prog.Signature = plc.DeriveProgramSignature(prog.Source, prog.Name)
 	}
 
 	if err := m.putPlcProgram(&prog); err != nil {

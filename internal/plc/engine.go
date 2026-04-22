@@ -126,7 +126,8 @@ func (e *Engine) compileAllLocked(focus string) error {
 	ownDefs := map[string]map[string]bool{}
 	exportedBy := map[string][]string{}
 	for pn, src := range e.sources {
-		defs, err := extractTopLevelDefs(src)
+		stripped, _ := StripAnnotations(src)
+		defs, err := extractTopLevelDefs(stripped)
 		if err != nil {
 			continue
 		}
@@ -156,8 +157,12 @@ func (e *Engine) compileAllLocked(focus string) error {
 			predeclared[defName] = e.makeCallProxy(defName, append([]string(nil), owners...))
 		}
 
+		// Python-style type annotations on def headers are stripped before
+		// Starlark sees the source. Positions are preserved so error
+		// messages still point at the right column in the user's code.
+		stripped, _ := StripAnnotations(src)
 		thread := &starlark.Thread{Name: pn}
-		globals, err := starlark.ExecFile(thread, pn+".star", src, predeclared)
+		globals, err := starlark.ExecFile(thread, pn+".star", stripped, predeclared)
 		if err != nil {
 			wrapped := fmt.Errorf("compile %s: %w", pn, err)
 			if pn == focus {

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joyautomation/tentacle/internal/plc"
 	"github.com/joyautomation/tentacle/internal/plc/st"
 	"go.starlark.net/syntax"
 )
@@ -43,6 +44,10 @@ func analyzeStarlark(source string, provider SymbolProvider, currentProgram stri
 	if source == "" {
 		return nil
 	}
+	// Strip Python-style annotations so Starlark's parser doesn't complain
+	// about them. Byte offsets are preserved, so any diagnostics the parser
+	// produces still land at the user's original caret.
+	source, _ = plc.StripAnnotations(source)
 	var parserDiags []Diagnostic
 	file, err := syntax.Parse("program.star", source, 0)
 	if err != nil {

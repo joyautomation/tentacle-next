@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/joyautomation/tentacle/internal/plc"
 	"go.starlark.net/syntax"
 )
 
@@ -218,6 +219,9 @@ func collectLocalSymbols(source string, pos Position) []string {
 	// 1-based line for Starlark positions.
 	cursorLine := pos.Line + 1
 
+	// Annotations are stripped before parsing (positions preserved) so
+	// Starlark's parser isn't thrown by `def f(x: int):`.
+	source, _ = plc.StripAnnotations(source)
 	f, err := syntax.Parse("program.star", source, 0)
 	if f == nil && err != nil {
 		// Parsing completely failed — give up on locals; builtins are still

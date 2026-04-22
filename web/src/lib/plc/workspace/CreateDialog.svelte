@@ -2,15 +2,9 @@
 	import { apiPut } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
-	import { XMark, Plus, Trash } from '@joyautomation/salt/icons';
+	import { XMark } from '@joyautomation/salt/icons';
 	import { workspaceSelection, workspaceTabs } from '../workspace-state.svelte';
-	import type {
-		PlcTaskConfig,
-		PlcTemplate,
-		ProgramListItem,
-		PlcFunctionParam,
-		PlcFunctionReturn
-	} from '$lib/types/plc';
+	import type { PlcTaskConfig, PlcTemplate, ProgramListItem } from '$lib/types/plc';
 
 	type Kind = 'variable' | 'task' | 'program';
 
@@ -28,10 +22,6 @@
 	let progName = $state('');
 	let progDescription = $state('');
 	let progLanguage = $state<'starlark' | 'st' | 'ladder'>('starlark');
-	let progParams = $state<PlcFunctionParam[]>([]);
-	let progReturnEnabled = $state(false);
-	let progReturnType = $state<string>('number');
-	let progReturnDescription = $state('');
 
 	let taskName = $state('');
 	let taskProgramRef = $state('');
@@ -68,21 +58,12 @@
 		kind === 'program' ? 'New Function' : kind === 'task' ? 'New Task' : 'New Variable'
 	);
 
-	function addParam() {
-		progParams = [
-			...progParams,
-			{ name: '', type: 'number', description: '', required: true }
-		];
-	}
-
-	function removeParam(i: number) {
-		progParams = progParams.filter((_, idx) => idx !== i);
-	}
-
-	function defaultBody(lang: 'starlark' | 'st' | 'ladder', fn: string, params: PlcFunctionParam[]): string {
+	function defaultBody(lang: 'starlark' | 'st' | 'ladder', fn: string): string {
 		if (lang === 'st') return '';
-		const paramList = params.map((p) => p.name.trim()).filter(Boolean).join(', ');
-		return `def ${fn}(${paramList}):\n    pass\n`;
+		// Annotated template advertises the signature-from-annotations
+		// feature on first use — users see right away that `: type` and
+		// `-> type` are understood.
+		return `def ${fn}():\n    pass\n`;
 	}
 
 	const canSubmit = $derived.by(() => {
@@ -117,30 +98,15 @@
 		try {
 			if (kind === 'program') {
 				const name = progName.trim();
-				const params: PlcFunctionParam[] = progParams
-					.filter((p) => p.name.trim() !== '')
-					.map((p) => ({
-						name: p.name.trim(),
-						type: p.type,
-						description: p.description?.trim() || undefined,
-						required: p.required ?? true
-					}));
-				const returns: PlcFunctionReturn | undefined = progReturnEnabled
-					? {
-						type: progReturnType,
-						description: progReturnDescription.trim() || undefined
-					}
-					: undefined;
-				const source = progLanguage === 'st' ? '' : defaultBody(progLanguage, name, params);
+				const source = progLanguage === 'st' ? '' : defaultBody(progLanguage, name);
+				// Signature metadata is derived server-side from the function
+				// body's annotations (`def foo(x: int) -> bool:`); the
+				// client doesn't send a signature at all.
 				const body: Record<string, unknown> = {
 					name,
 					description: progDescription.trim() || undefined,
 					language: progLanguage,
 					source,
-					signature: {
-						params: params.length > 0 ? params : undefined,
-						returns
-					},
 					updatedBy: 'gui'
 				};
 				if (progLanguage === 'st') body.stSource = '';
@@ -255,90 +221,13 @@
 						<option value="ladder">Ladder</option>
 					</select>
 				</label>
-
-				<fieldset class="sig-group">
-					<legend>Parameters</legend>
-					{#if progParams.length === 0}
-						<p class="hint">None. Add a parameter to document the function's inputs.</p>
-					{/if}
-					{#each progParams as p, i (i)}
-						<div class="param-row">
-							<input
-								class="param-name"
-								type="text"
-								placeholder="name"
-								bind:value={p.name}
-							/>
-							<select class="param-type" bind:value={p.type}>
-								<optgroup label="Primitives">
-									<option value="number">number</option>
-									<option value="boolean">boolean</option>
-									<option value="string">string</option>
-								</optgroup>
-								{#if templates.length > 0}
-									<optgroup label="Templates">
-										{#each templates as tmpl (tmpl.name)}
-											<option value={tmpl.name}>{tmpl.name}</option>
-										{/each}
-									</optgroup>
-								{/if}
-							</select>
-							<input
-								class="param-desc"
-								type="text"
-								placeholder="description (optional)"
-								bind:value={p.description}
-							/>
-							<button
-								type="button"
-								class="icon-btn"
-								aria-label="Remove parameter"
-								onclick={() => removeParam(i)}
-							>
-								<Trash size="0.875rem" />
-							</button>
-						</div>
-					{/each}
-					<button type="button" class="btn subtle add-param" onclick={addParam}>
-						<Plus size="0.75rem" /> Add parameter
-					</button>
-				</fieldset>
-
-				<fieldset class="sig-group">
-					<legend>
-						<label class="inline-toggle">
-							<input type="checkbox" bind:checked={progReturnEnabled} />
-							<span>Returns a value</span>
-						</label>
-					</legend>
-					{#if progReturnEnabled}
-						<label class="field">
-							<span>Return type</span>
-							<select bind:value={progReturnType}>
-								<optgroup label="Primitives">
-									<option value="number">number</option>
-									<option value="boolean">boolean</option>
-									<option value="string">string</option>
-								</optgroup>
-								{#if templates.length > 0}
-									<optgroup label="Templates">
-										{#each templates as tmpl (tmpl.name)}
-											<option value={tmpl.name}>{tmpl.name}</option>
-										{/each}
-									</optgroup>
-								{/if}
-							</select>
-						</label>
-						<label class="field">
-							<span>Return description</span>
-							<input
-								type="text"
-								bind:value={progReturnDescription}
-								placeholder="optional"
-							/>
-						</label>
-					{/if}
-				</fieldset>
+				{#if progLanguage === 'starlark'}
+					<p class="sig-hint">
+						Parameter and return types are derived from annotations in the
+						function body &mdash;
+						<code>def name(x: int, y: str) -&gt; bool:</code>
+					</p>
+				{/if}
 			{:else if kind === 'task'}
 				<label class="field">
 					<span>Name</span>
@@ -541,91 +430,21 @@
 		font-style: italic;
 	}
 
-	.sig-group {
+	.sig-hint {
+		margin: 0;
+		padding: 0.5rem 0.625rem;
+		font-size: 0.75rem;
+		color: var(--theme-text-muted);
+		background: var(--theme-surface);
 		border: 1px solid var(--theme-border);
 		border-radius: 0.3125rem;
-		padding: 0.5rem 0.75rem 0.75rem;
-		margin: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
+		line-height: 1.4;
 
-		legend {
-			font-size: 0.75rem;
-			color: var(--theme-text-muted);
-			font-weight: 500;
-			padding: 0 0.25rem;
-		}
-
-		.hint {
-			margin: 0;
-			font-size: 0.75rem;
-			color: var(--theme-text-muted);
-			font-style: italic;
-		}
-	}
-
-	.inline-toggle {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.375rem;
-
-		span {
-			font-size: 0.75rem;
-			color: var(--theme-text-muted);
-		}
-	}
-
-	.param-row {
-		display: grid;
-		grid-template-columns: 1fr 7rem 1.5fr auto;
-		gap: 0.375rem;
-		align-items: center;
-
-		.param-name,
-		.param-type,
-		.param-desc {
-			padding: 0.3125rem 0.4375rem;
-			font-size: 0.75rem;
-			background: var(--theme-background);
+		code {
+			font-family: 'IBM Plex Mono', monospace;
+			font-size: 0.6875rem;
 			color: var(--theme-text);
-			border: 1px solid var(--theme-border);
-			border-radius: 0.25rem;
-
-			&:focus {
-				outline: none;
-				border-color: var(--theme-primary);
-			}
 		}
-	}
-
-	.icon-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 1.5rem;
-		height: 1.5rem;
-		padding: 0;
-		background: transparent;
-		border: 1px solid transparent;
-		color: var(--theme-text-muted);
-		border-radius: 0.25rem;
-		cursor: pointer;
-
-		&:hover {
-			color: var(--theme-text);
-			background: var(--theme-surface);
-			border-color: var(--theme-border);
-		}
-	}
-
-	.add-param {
-		align-self: flex-start;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.25rem;
-		font-size: 0.75rem;
-		padding: 0.25rem 0.5rem;
 	}
 
 	.actions {
