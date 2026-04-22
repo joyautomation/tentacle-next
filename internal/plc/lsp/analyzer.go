@@ -85,6 +85,7 @@ func analyzeStarlark(source string, provider SymbolProvider, currentProgram stri
 // own helper.
 func analyzeCallSites(file *syntax.File, provider SymbolProvider, currentProgram string) []Diagnostic {
 	localDefs := collectLocalDefNames(file)
+	env := newTypeEnv(file, provider, currentProgram)
 	var diags []Diagnostic
 	syntax.Walk(file, func(n syntax.Node) bool {
 		call, ok := n.(*syntax.CallExpr)
@@ -109,6 +110,7 @@ func analyzeCallSites(file *syntax.File, provider SymbolProvider, currentProgram
 		if d, ok := checkCallArity(call, ident, info); ok {
 			diags = append(diags, d...)
 		}
+		diags = append(diags, checkCallTypes(call, info, env)...)
 		return true
 	})
 	return diags
