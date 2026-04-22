@@ -114,6 +114,7 @@
     &[data-type="numeric"]::before { content: '#'; display: flex; align-items: center; justify-content: center; height: 100%; font-weight: 600; color: var(--theme-text-muted); font-size: 0.875rem; }
     &[data-type="indicator"]::before { content: '●'; display: flex; align-items: center; justify-content: center; height: 100%; color: var(--theme-text-muted); font-size: 0.75rem; }
     &[data-type="bar"]::before { content: '▮'; display: flex; align-items: center; justify-content: center; height: 100%; color: var(--theme-text-muted); font-size: 0.75rem; }
+    &[data-type="stack"]::before { content: '☷'; display: flex; align-items: center; justify-content: center; height: 100%; color: var(--theme-text-muted); font-size: 0.875rem; }
     &[data-type="componentInstance"]::before { content: '◧'; display: flex; align-items: center; justify-content: center; height: 100%; color: var(--theme-text-muted); font-size: 0.875rem; }
     &.component::before { content: '◧'; display: flex; align-items: center; justify-content: center; height: 100%; color: var(--theme-text-muted); font-size: 0.875rem; }
   }

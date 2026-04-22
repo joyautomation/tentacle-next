@@ -1,8 +1,17 @@
 <script lang="ts">
   import type { HmiWidget, HmiComponentConfig } from '$lib/types/hmi';
-  import WidgetView from '../WidgetView.svelte';
   import { useLiveTags } from '../tagStore.svelte';
-  import { makeWidget } from '../widgetSchema';
+  import {
+    makeWidget,
+    appendChild,
+    findWidget,
+    findParent,
+    removeWidget,
+    replaceWidget,
+    collectIds,
+    schemaByType,
+  } from '../widgetSchema';
+  import DesignerWidget from './DesignerWidget.svelte';
 
   interface Props {
     widgets: HmiWidget[];
@@ -22,17 +31,36 @@
   const canvasH = $derived(`${Math.max(height, 400)}px`);
 
   let canvasEl: HTMLDivElement | undefined = $state();
+  let dropTargetId = $state<string | null>(null);
 
   function snap(n: number): number {
     return Math.round(n / 8) * 8;
   }
 
+  /** Find the nearest container widget under the pointer by walking the
+   * event path for `data-container-id`. Returns null when no container is
+   * under the pointer (drop should land on the canvas root). */
+  function containerAtEvent(e: DragEvent): string | null {
+    const path = e.composedPath() as HTMLElement[];
+    for (const el of path) {
+      if (el === canvasEl) break;
+      const id = (el as HTMLElement).dataset?.containerId;
+      if (id) return id;
+    }
+    return null;
+  }
+
   function onDragOver(e: DragEvent) {
     if (!e.dataTransfer) return;
-    if (Array.from(e.dataTransfer.types).includes('application/x-hmi-widget')) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-    }
+    if (!Array.from(e.dataTransfer.types).includes('application/x-hmi-widget')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropTargetId = containerAtEvent(e);
+  }
+
+  function onDragLeave(e: DragEvent) {
+    // Only clear when leaving the canvas root itself.
+    if (e.target === canvasEl) dropTargetId = null;
   }
 
   function onDrop(e: DragEvent) {
@@ -40,17 +68,19 @@
     const type = e.dataTransfer.getData('application/x-hmi-widget');
     if (!type) return;
     e.preventDefault();
+    const parentId = containerAtEvent(e);
+    const ids = collectIds(widgets);
     const rect = canvasEl.getBoundingClientRect();
-    const x = snap(e.clientX - rect.left);
-    const y = snap(e.clientY - rect.top);
-    const ids = widgets.map((w) => w.id);
-    const widget = makeWidget(type, Math.max(0, x), Math.max(0, y), ids);
+    const x = parentId ? 0 : Math.max(0, snap(e.clientX - rect.left));
+    const y = parentId ? 0 : Math.max(0, snap(e.clientY - rect.top));
+    const widget = makeWidget(type, x, y, ids);
     const componentId = e.dataTransfer.getData('application/x-hmi-component-id');
     if (componentId && type === 'componentInstance') {
       widget.props = { ...(widget.props ?? {}), componentId };
     }
-    onChange([...widgets, widget]);
+    onChange(appendChild(widgets, parentId, widget));
     onSelect(widget.id);
+    dropTargetId = null;
   }
 
   type DragMode = { kind: 'move'; id: string; startX: number; startY: number; origX: number; origY: number }
@@ -73,16 +103,17 @@
   }
   function onPointerMove(e: PointerEvent) {
     if (!drag) return;
+    const target = findWidget(widgets, drag.id);
+    if (!target) return;
     const dx = e.clientX - drag.startX;
     const dy = e.clientY - drag.startY;
-    const next = widgets.map((w) => {
-      if (w.id !== drag!.id) return w;
-      if (drag!.kind === 'move') {
-        return { ...w, x: Math.max(0, snap(drag!.origX + dx)), y: Math.max(0, snap(drag!.origY + dy)) };
-      }
-      return { ...w, w: Math.max(40, snap(drag!.origW + dx)), h: Math.max(24, snap(drag!.origH + dy)) };
-    });
-    onChange(next);
+    let updated: HmiWidget;
+    if (drag.kind === 'move') {
+      updated = { ...target, x: Math.max(0, snap(drag.origX + dx)), y: Math.max(0, snap(drag.origY + dy)) };
+    } else {
+      updated = { ...target, w: Math.max(40, snap(drag.origW + dx)), h: Math.max(24, snap(drag.origH + dy)) };
+    }
+    onChange(replaceWidget(widgets, updated));
   }
   function onPointerUp() {
     drag = null;
@@ -94,12 +125,13 @@
 
   function onKeyDown(e: KeyboardEvent) {
     if (!selectedId) return;
+    const target = e.target as HTMLElement;
+    const tag = target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      const target = e.target as HTMLElement;
-      const tag = target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       e.preventDefault();
-      onChange(widgets.filter((w) => w.id !== selectedId));
+      onChange(removeWidget(widgets, selectedId));
       onSelect(null);
       return;
     }
@@ -107,12 +139,14 @@
       ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
     };
     if (arrows[e.key]) {
+      // Arrow nudge only applies to top-level widgets (children flow in containers).
+      const isTopLevel = widgets.some((w) => w.id === selectedId);
+      if (!isTopLevel) return;
       e.preventDefault();
       const step = e.shiftKey ? 8 : 1;
       const [dx, dy] = arrows[e.key];
-      onChange(widgets.map((w) =>
-        w.id === selectedId ? { ...w, x: Math.max(0, w.x + dx * step), y: Math.max(0, w.y + dy * step) } : w
-      ));
+      const w = findWidget(widgets, selectedId)!;
+      onChange(replaceWidget(widgets, { ...w, x: Math.max(0, w.x + dx * step), y: Math.max(0, w.y + dy * step) }));
     }
   }
 </script>
@@ -126,32 +160,23 @@
     style:width={canvasW}
     style:height={canvasH}
     ondragover={onDragOver}
+    ondragleave={onDragLeave}
     ondrop={onDrop}
     onclick={onCanvasClick}
     role="application"
     tabindex="0"
   >
     {#each widgets as widget (widget.id)}
-      {@const isSelected = widget.id === selectedId}
-      <div
-        class="widget-slot"
-        class:selected={isSelected}
-        style:left="{widget.x}px"
-        style:top="{widget.y}px"
-        style:width="{widget.w}px"
-        style:height="{widget.h}px"
-        onpointerdown={(e) => startMove(e, widget)}
-        role="button"
-        tabindex="-1"
-      >
-        <div class="widget-content">
-          <WidgetView {widget} {components} />
-        </div>
-        <div class="hit-overlay"></div>
-        {#if isSelected}
-          <div class="resize-handle" onpointerdown={(e) => startResize(e, widget)} role="presentation"></div>
-        {/if}
-      </div>
+      <DesignerWidget
+        {widget}
+        {selectedId}
+        {onSelect}
+        onMoveStart={startMove}
+        onResizeStart={startResize}
+        topLevel={true}
+        {components}
+        {dropTargetId}
+      />
     {/each}
     {#if widgets.length === 0}
       <div class="empty">Drag a widget from the palette to begin.</div>
@@ -175,31 +200,6 @@
     border: 1px solid var(--theme-border);
     border-radius: var(--rounded-lg);
     outline: none;
-  }
-  .widget-slot {
-    position: absolute;
-    cursor: move;
-  }
-  .widget-content { width: 100%; height: 100%; pointer-events: none; }
-  .hit-overlay {
-    position: absolute;
-    inset: 0;
-    background: transparent;
-  }
-  .widget-slot.selected {
-    outline: 2px solid var(--theme-text);
-    outline-offset: 2px;
-  }
-  .resize-handle {
-    position: absolute;
-    right: -6px;
-    bottom: -6px;
-    width: 12px;
-    height: 12px;
-    background: var(--theme-text);
-    border-radius: 2px;
-    cursor: nwse-resize;
-    z-index: 2;
   }
   .empty {
     position: absolute;

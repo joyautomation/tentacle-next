@@ -6,6 +6,7 @@
   import Indicator from './widgets/Indicator.svelte';
   import Bar from './widgets/Bar.svelte';
   import ComponentInstance from './widgets/ComponentInstance.svelte';
+  import Stack from './widgets/Stack.svelte';
 
   interface Props {
     widget: HmiWidget;
@@ -60,7 +61,9 @@
   });
 </script>
 
-{#if widget.type === 'componentInstance'}
+{#if widget.type === 'stack'}
+  <Stack {widget} {udtContext} {components} />
+{:else if widget.type === 'componentInstance'}
   <ComponentInstance component={instanceComponent} udtContext={nestedUdtContext} {components} />
 {:else if Component}
   <Component {...resolved} />

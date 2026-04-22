@@ -5,6 +5,7 @@
   import Palette from '$lib/hmi/designer/Palette.svelte';
   import DesignerCanvas from '$lib/hmi/designer/DesignerCanvas.svelte';
   import Inspector from '$lib/hmi/designer/Inspector.svelte';
+  import { findWidget, findParent, removeWidget, replaceWidget, schemaByType } from '$lib/hmi/widgetSchema';
   import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember, HmiWidget } from '$lib/types/hmi';
 
   const appId = $derived($page.params.appId as string);
@@ -26,8 +27,12 @@
   let saveError = $state<string | null>(null);
 
   const selectedWidget = $derived<HmiWidget | null>(
-    widgets.find((w) => w.id === selectedId) ?? null
+    selectedId ? findWidget(widgets, selectedId) ?? null : null
   );
+  const selectedParent = $derived<HmiWidget | undefined>(
+    selectedId ? findParent(widgets, selectedId) : undefined
+  );
+  const parentIsContainer = $derived(!!(selectedParent && schemaByType[selectedParent.type]?.isContainer));
 
   const members = $derived<HmiUdtMember[]>(template?.members ?? []);
   const inUdtMode = $derived(!!udtTemplateName);
@@ -73,12 +78,12 @@
 
   function onWidgetsChange(next: HmiWidget[]) { widgets = next; dirty = true; }
   function onWidgetChange(updated: HmiWidget) {
-    widgets = widgets.map((w) => (w.id === updated.id ? updated : w));
+    widgets = replaceWidget(widgets, updated);
     dirty = true;
   }
   function onWidgetDelete() {
     if (!selectedId) return;
-    widgets = widgets.filter((w) => w.id !== selectedId);
+    widgets = removeWidget(widgets, selectedId);
     selectedId = null;
     dirty = true;
   }
@@ -148,6 +153,7 @@
         onChange={onWidgetChange}
         onDelete={onWidgetDelete}
         udtMembers={inUdtMode ? members : undefined}
+        {parentIsContainer}
       />
     </div>
   {/if}

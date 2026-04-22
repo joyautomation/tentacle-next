@@ -14,7 +14,7 @@ export interface HmiBinding {
 
 export interface HmiWidget {
   id: string;
-  /** Widget renderer id, e.g. "label", "numeric", "indicator" */
+  /** Widget renderer id, e.g. "label", "numeric", "indicator", "stack" */
   type: string;
   x: number;
   y: number;
@@ -22,6 +22,9 @@ export interface HmiWidget {
   h: number;
   props?: Record<string, unknown>;
   bindings?: Record<string, HmiBinding>;
+  /** Container widgets (stack) hold ordered children that render in document
+   * flow inside the container. Children's x/y/w/h are ignored. */
+  children?: HmiWidget[];
 }
 
 export interface HmiScreenConfig {

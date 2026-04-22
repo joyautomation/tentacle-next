@@ -35,7 +35,10 @@ type HmiComponentConfig struct {
 
 // HmiWidget is a single widget instance placed on a screen or inside a
 // component. Type identifies which renderer (e.g. "label", "numeric",
-// "indicator", "gauge"). Bindings map widget prop names to a data source.
+// "indicator", "gauge", "stack"). Bindings map widget prop names to a
+// data source. Container widgets (e.g. "stack") hold ordered Children
+// that render in document flow inside the container; for those children
+// X/Y/W/H are ignored.
 type HmiWidget struct {
 	ID       string                 `json:"id"`
 	Type     string                 `json:"type"`
@@ -45,6 +48,7 @@ type HmiWidget struct {
 	H        float64                `json:"h"`
 	Props    map[string]interface{} `json:"props,omitempty"`
 	Bindings map[string]HmiBinding  `json:"bindings,omitempty"`
+	Children []HmiWidget            `json:"children,omitempty"`
 }
 
 // HmiBinding describes how a widget prop gets its value.

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { HmiWidget, HmiBinding, HmiUdtMember, HmiComponentConfig } from '$lib/types/hmi';
-  import { schemaByType } from '../widgetSchema';
+  import { schemaByType, childLayoutFields } from '../widgetSchema';
   import VariablePicker from './VariablePicker.svelte';
   import UdtMemberPicker from './UdtMemberPicker.svelte';
 
@@ -13,9 +13,12 @@
     udtMembers?: HmiUdtMember[];
     /** Available components for the `component` field type. */
     components?: HmiComponentConfig[];
+    /** True when the selected widget lives inside a container (its position is
+     * determined by flex flow, not x/y). Hides Geometry; shows Layout. */
+    parentIsContainer?: boolean;
   }
 
-  let { widget, onChange, onDelete, udtMembers, components }: Props = $props();
+  let { widget, onChange, onDelete, udtMembers, components, parentIsContainer = false }: Props = $props();
 
   const schema = $derived(widget ? schemaByType[widget.type] : null);
   const udtMode = $derived(!!udtMembers);
@@ -90,15 +93,58 @@
       <button class="del" onclick={onDelete} title="Delete widget">Delete</button>
     </header>
 
-    <section class="section">
-      <h4>Geometry</h4>
-      <div class="grid">
-        <label>X<input type="number" value={widget.x} oninput={(e) => setGeom('x', Number(e.currentTarget.value))} /></label>
-        <label>Y<input type="number" value={widget.y} oninput={(e) => setGeom('y', Number(e.currentTarget.value))} /></label>
-        <label>W<input type="number" value={widget.w} oninput={(e) => setGeom('w', Number(e.currentTarget.value))} /></label>
-        <label>H<input type="number" value={widget.h} oninput={(e) => setGeom('h', Number(e.currentTarget.value))} /></label>
-      </div>
-    </section>
+    {#if parentIsContainer}
+      <section class="section">
+        <h4>Layout (in container)</h4>
+        {#each childLayoutFields as field (field.key)}
+          {@const value = (widget.props ?? {})[field.key]}
+          <label class="field">
+            <span>{field.label}</span>
+            {#if field.type === 'select'}
+              <select value={value as string ?? ''} onchange={(e) => setProp(field.key, e.currentTarget.value)}>
+                {#each field.options ?? [] as opt}
+                  <option value={opt}>{opt || '(default)'}</option>
+                {/each}
+              </select>
+            {:else if field.type === 'number'}
+              <input
+                type="number"
+                step={field.step ?? 'any'}
+                value={value as number ?? ''}
+                oninput={(e) => {
+                  const v = e.currentTarget.value;
+                  setProp(field.key, v === '' ? undefined : Number(v));
+                }}
+              />
+            {:else}
+              <input
+                type="text"
+                placeholder={field.placeholder ?? ''}
+                value={value as string ?? ''}
+                oninput={(e) => setProp(field.key, e.currentTarget.value || undefined)}
+              />
+            {/if}
+          </label>
+        {/each}
+        <div class="hint">
+          Intrinsic size W={widget.w} H={widget.h}. Used as fallback when basis/grow isn't set.
+        </div>
+        <div class="grid">
+          <label>W<input type="number" value={widget.w} oninput={(e) => setGeom('w', Number(e.currentTarget.value))} /></label>
+          <label>H<input type="number" value={widget.h} oninput={(e) => setGeom('h', Number(e.currentTarget.value))} /></label>
+        </div>
+      </section>
+    {:else}
+      <section class="section">
+        <h4>Geometry</h4>
+        <div class="grid">
+          <label>X<input type="number" value={widget.x} oninput={(e) => setGeom('x', Number(e.currentTarget.value))} /></label>
+          <label>Y<input type="number" value={widget.y} oninput={(e) => setGeom('y', Number(e.currentTarget.value))} /></label>
+          <label>W<input type="number" value={widget.w} oninput={(e) => setGeom('w', Number(e.currentTarget.value))} /></label>
+          <label>H<input type="number" value={widget.h} oninput={(e) => setGeom('h', Number(e.currentTarget.value))} /></label>
+        </div>
+      </section>
+    {/if}
 
     {#if schema.propFields.length > 0}
       <section class="section">
@@ -175,6 +221,12 @@
     gap: 1rem;
   }
   .muted { color: var(--theme-text-muted); margin: 0; font-size: 0.875rem; }
+  .hint {
+    font-size: 0.6875rem;
+    color: var(--theme-text-muted);
+    margin: 0.5rem 0;
+    line-height: 1.4;
+  }
   .header {
     display: flex;
     justify-content: space-between;
