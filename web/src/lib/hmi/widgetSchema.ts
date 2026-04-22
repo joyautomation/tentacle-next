@@ -1,6 +1,6 @@
 import type { HmiWidget } from '$lib/types/hmi';
 
-export type FieldType = 'text' | 'number' | 'select';
+export type FieldType = 'text' | 'number' | 'select' | 'component';
 
 export interface PropField {
   key: string;
@@ -70,6 +70,18 @@ export const widgetSchemas: WidgetSchema[] = [
       { key: 'max', label: 'Max', type: 'number' },
     ],
     bindingSlots: [{ key: 'value', label: 'Value' }],
+  },
+  {
+    type: 'componentInstance',
+    label: 'Component',
+    defaultSize: { w: 320, h: 200 },
+    defaultProps: { componentId: '' },
+    propFields: [
+      { key: 'componentId', label: 'Component', type: 'component' },
+    ],
+    // `root` binds the UDT instance whose members the component's
+    // udtMember bindings resolve against at runtime.
+    bindingSlots: [{ key: 'root', label: 'UDT instance' }],
   },
 ];
 

@@ -5,12 +5,14 @@
   import {
     getHmiApp,
     createHmiScreen,
+    createHmiComponent,
     deleteHmiScreen,
     deleteHmiComponent,
     putHmiScreen,
+    listHmiUdts,
   } from '$lib/api/hmi';
   import { api } from '$lib/api/client';
-  import type { HmiAppConfig, HmiWidget } from '$lib/types/hmi';
+  import type { HmiAppConfig, HmiUdtTemplate, HmiWidget } from '$lib/types/hmi';
 
   const appId = $derived($page.params.appId as string);
   let app = $state<HmiAppConfig | null>(null);
@@ -19,13 +21,18 @@
   let newScreenName = $state('');
   let creating = $state(false);
   let seeding = $state(false);
+  let udtTemplates = $state<HmiUdtTemplate[]>([]);
+  let newComponentName = $state('');
+  let newComponentTemplate = $state('');
+  let creatingComponent = $state(false);
 
   async function refresh() {
     loading = true;
     error = null;
-    const r = await getHmiApp(appId);
+    const [r, ur] = await Promise.all([getHmiApp(appId), listHmiUdts()]);
     if (r.error) error = r.error.error;
     else app = r.data ?? null;
+    if (ur.data) udtTemplates = ur.data;
     loading = false;
   }
 
@@ -61,6 +68,28 @@
       return;
     }
     await refresh();
+  }
+
+  async function handleCreateComponent(e: SubmitEvent) {
+    e.preventDefault();
+    if (!newComponentName.trim()) return;
+    creatingComponent = true;
+    const r = await createHmiComponent(appId, {
+      name: newComponentName.trim(),
+      udtTemplate: newComponentTemplate || undefined,
+    });
+    creatingComponent = false;
+    if (r.error) {
+      error = r.error.error;
+      return;
+    }
+    const created = r.data;
+    newComponentName = '';
+    newComponentTemplate = '';
+    await refresh();
+    if (created?.componentId) {
+      goto(`/hmi/designer/${encodeURIComponent(appId)}/components/${encodeURIComponent(created.componentId)}`);
+    }
   }
 
   /**
@@ -209,15 +238,31 @@
     <section class="block">
       <header class="block-header">
         <h2>Components</h2>
-        <a href="/services/hmi/udts" class="link-btn small">Create from UDT &rarr;</a>
       </header>
+      <form class="inline-form" onsubmit={handleCreateComponent}>
+        <input
+          type="text"
+          placeholder="New component name"
+          bind:value={newComponentName}
+          disabled={creatingComponent}
+        />
+        <select bind:value={newComponentTemplate} disabled={creatingComponent}>
+          <option value="">freeform (no UDT)</option>
+          {#each udtTemplates as t (t.name)}
+            <option value={t.name}>bind to UDT: {t.name}</option>
+          {/each}
+        </select>
+        <button type="submit" disabled={creatingComponent || !newComponentName.trim()}>
+          {creatingComponent ? 'Creating…' : 'Add component'}
+        </button>
+      </form>
       {#if components.length === 0}
-        <p class="muted">No components yet. Visit the UDT Browser to create one bound to a UDT type.</p>
+        <p class="muted">No components yet. Add one above — pick a UDT to make member bindings reusable across instances.</p>
       {:else}
         <ul class="card-list">
           {#each components as c (c.componentId)}
             <li class="card">
-              <div class="card-body">
+              <a href="/hmi/designer/{encodeURIComponent(appId)}/components/{encodeURIComponent(c.componentId)}">
                 <div class="card-name">{c.name}</div>
                 <div class="card-id">{c.componentId}</div>
                 <div class="card-meta">
@@ -228,7 +273,7 @@
                   {/if}
                   · {c.widgets?.length ?? 0} widgets
                 </div>
-              </div>
+              </a>
               <button class="del" onclick={() => handleDeleteComponent(c.componentId)} title="Delete">×</button>
             </li>
           {/each}
@@ -286,8 +331,7 @@
   }
   .inline-form {
     display: flex; gap: 0.5rem;
-    input {
-      flex: 1;
+    input, select {
       padding: 0.5rem 0.75rem;
       border: 1px solid var(--theme-border);
       border-radius: var(--rounded-md);
@@ -295,6 +339,7 @@
       color: var(--theme-text);
       font-family: inherit;
     }
+    input { flex: 1; }
     button {
       padding: 0.5rem 1rem;
       border: 1px solid var(--theme-border);

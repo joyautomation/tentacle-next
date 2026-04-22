@@ -1,19 +1,27 @@
 <script lang="ts">
-  import type { HmiWidget, HmiBinding } from '$lib/types/hmi';
+  import type { HmiWidget, HmiBinding, HmiUdtMember, HmiComponentConfig } from '$lib/types/hmi';
   import { schemaByType } from '../widgetSchema';
   import VariablePicker from './VariablePicker.svelte';
+  import UdtMemberPicker from './UdtMemberPicker.svelte';
 
   interface Props {
     widget: HmiWidget | null;
     onChange: (widget: HmiWidget) => void;
     onDelete: () => void;
+    /** When set, binding pickers offer UDT members instead of variables.
+     * Used by the component editor. */
+    udtMembers?: HmiUdtMember[];
+    /** Available components for the `component` field type. */
+    components?: HmiComponentConfig[];
   }
 
-  let { widget, onChange, onDelete }: Props = $props();
+  let { widget, onChange, onDelete, udtMembers, components }: Props = $props();
 
   const schema = $derived(widget ? schemaByType[widget.type] : null);
+  const udtMode = $derived(!!udtMembers);
 
-  let pickerOpen = $state(false);
+  let varPickerOpen = $state(false);
+  let memberPickerOpen = $state(false);
   let pickerSlot = $state<string | null>(null);
 
   function setProp(key: string, value: unknown) {
@@ -28,17 +36,27 @@
 
   function openPicker(slot: string) {
     pickerSlot = slot;
-    pickerOpen = true;
+    if (udtMode) memberPickerOpen = true;
+    else varPickerOpen = true;
   }
 
-  function onPick(gateway: string, variable: string) {
+  function onPickVariable(gateway: string, variable: string) {
     if (!widget || !pickerSlot) return;
     const binding: HmiBinding = { kind: 'variable', gateway, variable };
-    onChange({
-      ...widget,
-      bindings: { ...(widget.bindings ?? {}), [pickerSlot]: binding },
-    });
-    pickerOpen = false;
+    onChange({ ...widget, bindings: { ...(widget.bindings ?? {}), [pickerSlot]: binding } });
+    closePicker();
+  }
+
+  function onPickMember(member: string) {
+    if (!widget || !pickerSlot) return;
+    const binding: HmiBinding = { kind: 'udtMember', member };
+    onChange({ ...widget, bindings: { ...(widget.bindings ?? {}), [pickerSlot]: binding } });
+    closePicker();
+  }
+
+  function closePicker() {
+    varPickerOpen = false;
+    memberPickerOpen = false;
     pickerSlot = null;
   }
 
@@ -52,7 +70,11 @@
   function bindingLabel(b?: HmiBinding): string {
     if (!b) return 'Not bound';
     if (b.kind === 'variable') return `${b.gateway ?? '?'} / ${b.variable ?? '?'}`;
-    return `${b.gateway ?? '?'} / ${b.udtVariable ?? '?'}.${b.member ?? '?'}`;
+    if (b.kind === 'udtMember') {
+      if (b.gateway) return `${b.gateway}/${b.udtVariable ?? '?'}.${b.member ?? '?'}`;
+      return `member: ${b.member ?? '?'}`;
+    }
+    return 'Not bound';
   }
 </script>
 
@@ -98,6 +120,13 @@
                 value={value as number ?? 0}
                 oninput={(e) => setProp(field.key, Number(e.currentTarget.value))}
               />
+            {:else if field.type === 'component'}
+              <select value={value as string ?? ''} onchange={(e) => setProp(field.key, e.currentTarget.value)}>
+                <option value="">— pick a component —</option>
+                {#each components ?? [] as c (c.componentId)}
+                  <option value={c.componentId}>{c.name} ({c.componentId}{c.udtTemplate ? ` · ${c.udtTemplate}` : ''})</option>
+                {/each}
+              </select>
             {:else}
               <input
                 type="text"
@@ -130,7 +159,8 @@
   {/if}
 </aside>
 
-<VariablePicker open={pickerOpen} onClose={() => { pickerOpen = false; pickerSlot = null; }} {onPick} />
+<VariablePicker open={varPickerOpen} onClose={closePicker} onPick={onPickVariable} />
+<UdtMemberPicker open={memberPickerOpen} members={udtMembers ?? []} onClose={closePicker} onPick={onPickMember} />
 
 <style lang="scss">
   .inspector {

@@ -58,7 +58,7 @@
   {:else if !screen}
     <p class="muted">Screen not found.</p>
   {:else}
-    <ScreenCanvas {screen} />
+    <ScreenCanvas {screen} components={app?.components ?? {}} />
   {/if}
 </div>
 

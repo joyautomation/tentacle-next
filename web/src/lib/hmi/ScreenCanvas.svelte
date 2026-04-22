@@ -1,13 +1,14 @@
 <script lang="ts">
-  import type { HmiScreenConfig } from '$lib/types/hmi';
+  import type { HmiScreenConfig, HmiComponentConfig } from '$lib/types/hmi';
   import { useLiveTags } from './tagStore.svelte';
   import WidgetView from './WidgetView.svelte';
 
   interface Props {
     screen: HmiScreenConfig;
+    components?: Record<string, HmiComponentConfig>;
   }
 
-  let { screen }: Props = $props();
+  let { screen, components }: Props = $props();
 
   // Subscribe to live tag values for the lifetime of this canvas.
   useLiveTags();
@@ -25,7 +26,7 @@
       style:width="{widget.w}px"
       style:height="{widget.h}px"
     >
-      <WidgetView {widget} />
+      <WidgetView {widget} {components} />
     </div>
   {/each}
   {#if screen.widgets.length === 0}

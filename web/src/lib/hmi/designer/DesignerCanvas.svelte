@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { HmiWidget } from '$lib/types/hmi';
+  import type { HmiWidget, HmiComponentConfig } from '$lib/types/hmi';
   import WidgetView from '../WidgetView.svelte';
   import { useLiveTags } from '../tagStore.svelte';
   import { makeWidget } from '../widgetSchema';
@@ -11,9 +11,10 @@
     height?: number;
     onChange: (widgets: HmiWidget[]) => void;
     onSelect: (id: string | null) => void;
+    components?: Record<string, HmiComponentConfig>;
   }
 
-  let { widgets, selectedId, width = 0, height = 600, onChange, onSelect }: Props = $props();
+  let { widgets, selectedId, width = 0, height = 600, onChange, onSelect, components }: Props = $props();
 
   useLiveTags();
 
@@ -44,6 +45,10 @@
     const y = snap(e.clientY - rect.top);
     const ids = widgets.map((w) => w.id);
     const widget = makeWidget(type, Math.max(0, x), Math.max(0, y), ids);
+    const componentId = e.dataTransfer.getData('application/x-hmi-component-id');
+    if (componentId && type === 'componentInstance') {
+      widget.props = { ...(widget.props ?? {}), componentId };
+    }
     onChange([...widgets, widget]);
     onSelect(widget.id);
   }
@@ -83,8 +88,8 @@
     drag = null;
   }
 
-  function onCanvasClick() {
-    onSelect(null);
+  function onCanvasClick(e: MouseEvent) {
+    if (e.target === canvasEl) onSelect(null);
   }
 
   function onKeyDown(e: KeyboardEvent) {
@@ -140,7 +145,7 @@
         tabindex="-1"
       >
         <div class="widget-content">
-          <WidgetView {widget} />
+          <WidgetView {widget} {components} />
         </div>
         <div class="hit-overlay"></div>
         {#if isSelected}
