@@ -1,42 +1,105 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { getHmiApp } from '$lib/api/hmi';
-  import ScreenCanvas from '$lib/hmi/ScreenCanvas.svelte';
-  import type { HmiAppConfig, HmiScreenConfig } from '$lib/types/hmi';
+  import { getHmiApp, putHmiScreen } from '$lib/api/hmi';
+  import Palette from '$lib/hmi/designer/Palette.svelte';
+  import DesignerCanvas from '$lib/hmi/designer/DesignerCanvas.svelte';
+  import Inspector from '$lib/hmi/designer/Inspector.svelte';
+  import type { HmiAppConfig, HmiScreenConfig, HmiWidget } from '$lib/types/hmi';
 
   const appId = $derived($page.params.appId as string);
   const screenId = $derived($page.params.screenId as string);
+
   let app = $state<HmiAppConfig | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+
+  let widgets = $state<HmiWidget[]>([]);
+  let screenName = $state('');
+  let screenWidth = $state(0);
+  let screenHeight = $state(600);
+  let selectedId = $state<string | null>(null);
+  let dirty = $state(false);
+  let saving = $state(false);
+  let saveError = $state<string | null>(null);
+
+  const selectedWidget = $derived<HmiWidget | null>(
+    widgets.find((w) => w.id === selectedId) ?? null
+  );
 
   async function refresh() {
     loading = true;
     error = null;
     const r = await getHmiApp(appId);
-    if (r.error) error = r.error.error;
-    else app = r.data ?? null;
+    if (r.error) {
+      error = r.error.error;
+      loading = false;
+      return;
+    }
+    app = r.data ?? null;
+    const screen = app?.screens?.[screenId];
+    if (screen) {
+      widgets = structuredClone(screen.widgets ?? []);
+      screenName = screen.name;
+      screenWidth = screen.width ?? 0;
+      screenHeight = screen.height ?? 600;
+    }
+    dirty = false;
     loading = false;
   }
 
-  const screen = $derived<HmiScreenConfig | null>(app?.screens?.[screenId] ?? null);
+  function onWidgetsChange(next: HmiWidget[]) {
+    widgets = next;
+    dirty = true;
+  }
+
+  function onWidgetChange(updated: HmiWidget) {
+    widgets = widgets.map((w) => (w.id === updated.id ? updated : w));
+    dirty = true;
+  }
+
+  function onWidgetDelete() {
+    if (!selectedId) return;
+    widgets = widgets.filter((w) => w.id !== selectedId);
+    selectedId = null;
+    dirty = true;
+  }
+
+  async function save() {
+    saving = true;
+    saveError = null;
+    const payload: Omit<HmiScreenConfig, 'screenId'> = {
+      name: screenName,
+      width: screenWidth || undefined,
+      height: screenHeight || undefined,
+      widgets,
+    };
+    const r = await putHmiScreen(appId, screenId, payload);
+    if (r.error) saveError = r.error.error;
+    else dirty = false;
+    saving = false;
+  }
 
   onMount(refresh);
 </script>
 
 <svelte:head>
-  <title>{screen?.name ?? screenId} · {app?.name ?? appId}</title>
+  <title>{screenName || screenId} · {app?.name ?? appId} · Designer</title>
 </svelte:head>
 
-<section class="page">
-  <header class="page-header">
-    <div>
+<section class="designer">
+  <header class="topbar">
+    <div class="left">
       <a href="/hmi/designer/{encodeURIComponent(appId)}" class="back">&larr; {app?.name ?? appId}</a>
-      <h1>{screen?.name ?? screenId}</h1>
-      {#if screen}
-        <p class="subtitle">{screen.widgets?.length ?? 0} widgets</p>
-      {/if}
+      <h1>{screenName || screenId}</h1>
+      <span class="meta">{widgets.length} widgets{dirty ? ' · unsaved' : ''}</span>
+    </div>
+    <div class="right">
+      {#if saveError}<span class="save-error">{saveError}</span>{/if}
+      <a class="run" href="/hmi/{encodeURIComponent(appId)}/screens/{encodeURIComponent(screenId)}" target="_blank" rel="noopener">▶ Preview</a>
+      <button class="save" onclick={save} disabled={!dirty || saving}>
+        {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
+      </button>
     </div>
   </header>
 
@@ -46,26 +109,81 @@
 
   {#if loading}
     <p class="muted">Loading…</p>
-  {:else if !screen}
+  {:else if !app?.screens?.[screenId]}
     <p class="muted">Screen not found.</p>
   {:else}
-    <ScreenCanvas {screen} />
+    <div class="workspace">
+      <Palette />
+      <DesignerCanvas
+        {widgets}
+        {selectedId}
+        width={screenWidth}
+        height={screenHeight}
+        onChange={onWidgetsChange}
+        onSelect={(id) => (selectedId = id)}
+      />
+      <Inspector
+        widget={selectedWidget}
+        onChange={onWidgetChange}
+        onDelete={onWidgetDelete}
+      />
+    </div>
   {/if}
 </section>
 
 <style lang="scss">
-  .page { max-width: 80rem; margin: 0 auto; padding: 2rem 1.5rem; }
-  .page-header { margin-bottom: 1rem; }
-  .back { color: var(--theme-text-muted); text-decoration: none; font-size: 0.875rem; }
-  h1 { margin: 0.25rem 0 0; font-family: 'Righteous', sans-serif; color: var(--theme-text); }
-  .subtitle { margin: 0.125rem 0 0; color: var(--theme-text-muted); font-size: 0.8125rem; }
+  .designer {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--theme-background);
+  }
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.625rem 1rem;
+    border-bottom: 1px solid var(--theme-border);
+    background: var(--theme-surface);
+    .left { display: flex; align-items: baseline; gap: 0.75rem; }
+    .right { display: flex; align-items: center; gap: 0.5rem; }
+  }
+  .back { color: var(--theme-text-muted); text-decoration: none; font-size: 0.8125rem; &:hover { color: var(--theme-text); } }
+  h1 { margin: 0; font-size: 1rem; color: var(--theme-text); font-family: 'Righteous', sans-serif; }
+  .meta { color: var(--theme-text-muted); font-size: 0.75rem; }
+  .save-error { color: #ef4444; font-size: 0.75rem; }
+  .run {
+    color: var(--theme-text);
+    text-decoration: none;
+    padding: 0.375rem 0.75rem;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    font-size: 0.8125rem;
+    &:hover { border-color: var(--theme-text); }
+  }
+  .save {
+    background: var(--theme-text);
+    color: var(--theme-background);
+    border: 1px solid var(--theme-text);
+    padding: 0.375rem 0.875rem;
+    border-radius: var(--rounded-md);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    &:disabled { opacity: 0.5; cursor: default; }
+  }
+  .workspace {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+  }
   .banner.error {
-    margin-bottom: 1rem;
+    margin: 0.75rem 1rem;
     padding: 0.75rem 1rem;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.4);
     border-radius: var(--rounded-md);
     color: #ef4444;
   }
-  .muted { color: var(--theme-text-muted); }
+  .muted { color: var(--theme-text-muted); padding: 1.5rem; }
 </style>
