@@ -2,6 +2,8 @@
 	import { api, apiPut, apiPost, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
+	import { fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
@@ -485,12 +487,14 @@
 				Ladder editing isn't wired into the workspace yet.
 				<a href="/services/plc/programs">Open in the Functions tab</a> to edit visually.
 			</div>
-		{:else if showDiff}
-			<div class="diff-wrap">
-				<div class="diff-pane">
-					<div class="pane-label pending">
-						{hasPending ? 'Pending (saved)' : 'Pending (unsaved)'}
-					</div>
+		{:else}
+			<div class="diff-wrap" class:diff-active={showDiff}>
+				<div class="diff-pane pending-pane">
+					{#if showDiff}
+						<div class="pane-label pending">
+							{hasPending ? 'Pending (saved)' : 'Pending (unsaved)'}
+						</div>
+					{/if}
 					<div class="editor-wrap">
 						<CodeEditor
 							value={editValue}
@@ -522,50 +526,25 @@
 						/>
 					</div>
 				</div>
-				<div class="diff-pane">
-					<div class="pane-label live">Live (running)</div>
-					<div class="editor-wrap">
-						<CodeEditor
-							value={language === 'st' ? serverStSource : serverSource}
-							language={editLanguage}
-							readonly
-							flush
-							{showInlineValues}
-							liveValues={liveValuesMap}
-						/>
+				{#if showDiff}
+					<div
+						class="diff-pane live-pane"
+						in:fly={{ x: 60, duration: 240, easing: cubicOut }}
+						out:fly={{ x: 60, duration: 180, easing: cubicOut }}
+					>
+						<div class="pane-label live">Live (running)</div>
+						<div class="editor-wrap">
+							<CodeEditor
+								value={language === 'st' ? serverStSource : serverSource}
+								language={editLanguage}
+								readonly
+								flush
+								{showInlineValues}
+								liveValues={liveValuesMap}
+							/>
+						</div>
 					</div>
-				</div>
-			</div>
-		{:else}
-			<div class="editor-wrap">
-				<CodeEditor
-					value={editValue}
-					language={editLanguage}
-					onchange={onEditorChange}
-					{variableNames}
-					enableVariableDrop
-					flush
-					enableLint
-					useLSP
-					{lspUri}
-					{showInlineValues}
-					liveValues={liveValuesMap}
-					onReady={(api) => workspaceEditorGotos.register(tabId, api.goto)}
-					onDiagnostics={(uri, diags) => {
-						workspaceDiagnostics.set(
-							uri,
-							diags.map((d) => ({
-								severity: lspSeverityToDiagnosticSeverity(d.severity),
-								message: d.message,
-								startLine: d.range.start.line,
-								startCol: d.range.start.character,
-								endLine: d.range.end.line,
-								endCol: d.range.end.character,
-								source: d.source
-							}))
-						);
-					}}
-				/>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -722,10 +701,10 @@
 		min-height: 0;
 		display: flex;
 		flex-direction: row;
+		overflow: hidden;
 	}
 
 	.diff-pane {
-		flex: 1 1 0;
 		min-width: 0;
 		min-height: 0;
 		display: flex;
@@ -735,6 +714,23 @@
 		&:last-child {
 			border-right: none;
 		}
+	}
+
+	// When the diff is hidden the pending pane takes the whole area.
+	// When the diff opens, both panes split 50/50 and the live pane
+	// flies in from the right. Transitioning flex-basis lets the pending
+	// pane shrink smoothly rather than snapping to half-width.
+	.pending-pane {
+		flex: 1 1 100%;
+		transition: flex-basis 240ms cubic-bezier(0.25, 0.1, 0.25, 1);
+	}
+
+	.diff-wrap.diff-active .pending-pane {
+		flex-basis: 50%;
+	}
+
+	.live-pane {
+		flex: 1 1 50%;
 	}
 
 	.pane-label {
