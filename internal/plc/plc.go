@@ -115,6 +115,16 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.log.Error("plc: failed to start devices registry", "error", err)
 	}
 
+	// Self-register in the shared devices bucket so the Gateway sees the
+	// PLC as an aggregatable device. AutoManaged so the scanner never
+	// tries to subscribe — the PLC publishes its own variables.
+	selfDevice := itypes.DeviceConfig{Protocol: serviceType, AutoManaged: true}
+	if data, err := json.Marshal(selfDevice); err == nil {
+		if _, err := b.KVPut(topics.BucketDevices, m.plcID, data); err != nil {
+			m.log.Warn("plc: failed to self-register as device", "error", err)
+		}
+	}
+
 	// Start heartbeat.
 	m.stopHeartbeat = heartbeat.Start(b, m.plcID, serviceType, func() map[string]interface{} {
 		return map[string]interface{}{
@@ -348,6 +358,14 @@ func (m *Module) Stop() error {
 
 	if m.stopHeartbeat != nil {
 		m.stopHeartbeat()
+	}
+
+	// Deregister self from the shared devices bucket so the Gateway stops
+	// showing this PLC once it's offline.
+	if m.b != nil {
+		if err := m.b.KVDelete(topics.BucketDevices, m.plcID); err != nil {
+			m.log.Debug("plc: failed to deregister self device", "error", err)
+		}
 	}
 	return nil
 }

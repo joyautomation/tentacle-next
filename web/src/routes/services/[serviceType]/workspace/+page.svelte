@@ -182,6 +182,7 @@
 											programs={data.programs}
 											tests={data.tests}
 											gatewayConfig={data.gatewayConfig}
+											localPlcId={data.serviceType === 'plc' ? data.plcConfig?.plcId : null}
 											onCreate={(kind) => (createKind = kind)}
 											onRunAllTests={runAllTests}
 											testsRunning={runningAllTests}

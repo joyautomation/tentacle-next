@@ -21,6 +21,7 @@
     programs: ProgramListItem[];
     tests: TestListItem[];
     gatewayConfig: GatewayConfig | null;
+    localPlcId?: string | null;
     onCreate?: (kind: "variable" | "task") => void;
     onRunAllTests?: () => void;
     testsRunning?: boolean;
@@ -33,6 +34,7 @@
     programs,
     tests,
     gatewayConfig,
+    localPlcId,
     onCreate,
     onRunAllTests,
     testsRunning,
@@ -104,7 +106,7 @@
   // `devices` KV bucket, exposed on the gateway config as `devices`.
   const deviceEntries = $derived(
     (gatewayConfig?.devices ?? [])
-      .filter((d) => matchesFilter(d.deviceId))
+      .filter((d) => d.deviceId !== localPlcId && matchesFilter(d.deviceId))
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
   );
 
