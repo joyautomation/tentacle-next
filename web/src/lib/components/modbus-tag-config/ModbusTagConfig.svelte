@@ -34,7 +34,7 @@
 
   // ── Derived data from config ──
   const modbusDevices = $derived(
-    (gatewayConfig?.devices ?? []).filter((d) => d.protocol === 'modbus' && !d.autoManaged)
+    (gatewayConfig?.sources ?? []).filter((d) => d.protocol === 'modbus' && !d.autoManaged)
   );
 
   // ── Active view state ──
@@ -461,8 +461,7 @@
     const host = newDeviceHost.trim();
     if (!deviceId || !host) return;
 
-    const result = await apiPut('/gateways/gateway/devices', {
-      deviceId,
+    const result = await apiPut(`/sources/${encodeURIComponent(deviceId)}`, {
       protocol: 'modbus',
       host,
       port: parseInt(newDevicePort, 10) || 502,

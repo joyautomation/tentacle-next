@@ -22,6 +22,7 @@ import (
 
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/scanner"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/types"
@@ -38,6 +39,7 @@ type Module struct {
 
 	mu        sync.RWMutex
 	config    *itypes.PlcConfigKV
+	sources   *scanner.Registry
 	variables *VariableStore
 	engine    *Engine
 	tasks     map[string]*taskRunner
@@ -93,12 +95,22 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	for _, bucket := range []string{
 		topics.BucketPlcConfig, topics.BucketPlcPrograms, topics.BucketPlcTemplates,
 		topics.BucketPlcVariables, topics.BucketPlcValues,
+		topics.BucketSources,
 		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
 		topics.BucketScannerModbus, topics.BucketScannerSNMP,
 	} {
 		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
 			m.log.Warn("plc: failed to create bucket", "bucket", bucket, "error", err)
 		}
+	}
+
+	// Migrate any legacy plc_config.devices to the shared sources bucket.
+	scanner.MigrateLegacyDevices(b, m.log, topics.BucketPlcConfig, m.plcID)
+
+	// Start the shared sources registry watcher.
+	m.sources = scanner.NewRegistry(b, m.log)
+	if err := m.sources.Start(m.onSourcesChanged); err != nil {
+		m.log.Error("plc: failed to start sources registry", "error", err)
 	}
 
 	// Start heartbeat.
@@ -124,7 +136,6 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.log.Info("plc: no existing config found, seeding empty config")
 		emptyConfig := &itypes.PlcConfigKV{
 			PlcID:        m.plcID,
-			Devices:      make(map[string]itypes.PlcDeviceConfigKV),
 			Variables:    make(map[string]itypes.PlcVariableConfigKV),
 			UdtTemplates: make(map[string]itypes.PlcUdtTemplateConfigKV),
 			Tasks:        make(map[string]itypes.PlcTaskConfigKV),
@@ -150,7 +161,6 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 			return
 		}
 		m.log.Info("plc: config updated, rebuilding",
-			"devices", len(config.Devices),
 			"variables", len(config.Variables),
 			"tasks", len(config.Tasks))
 		m.applyConfig(&config)
@@ -347,6 +357,19 @@ func (m *Module) HasConfig() bool {
 	return m.config != nil
 }
 
+// onSourcesChanged is invoked by the shared sources Registry whenever a source
+// is added, updated, or deleted. It re-applies the current config so the
+// scanner bridge picks up the new source set.
+func (m *Module) onSourcesChanged() {
+	m.mu.RLock()
+	cfg := m.config
+	m.mu.RUnlock()
+	if cfg == nil {
+		return
+	}
+	m.applyConfig(cfg)
+}
+
 // applyConfig rebuilds the variable store, engine, tasks, publisher, and scanner bridge.
 func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	m.mu.Lock()
@@ -463,7 +486,7 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	}
 
 	// Start scanner bridge.
-	m.bridge = newScannerBridge(m.b, m.plcID, m.variables, m.log)
+	m.bridge = newScannerBridge(m.b, m.plcID, m.variables, m.sources, m.log)
 	m.bridge.subscribe(config)
 
 	// Start publisher.

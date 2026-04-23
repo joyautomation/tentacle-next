@@ -100,10 +100,10 @@
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
 
-  // Source = Gateway device. Sharing the Gateway store means PLC sources
-  // and Gateway devices stay in one source of truth — no sync, no drift.
+  // Sources are shared across Gateway and PLC — one source of truth in the
+  // `sources` KV bucket, exposed on the gateway config as `sources`.
   const sourceEntries = $derived(
-    (gatewayConfig?.devices ?? [])
+    (gatewayConfig?.sources ?? [])
       .filter((d) => matchesFilter(d.deviceId))
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
   );

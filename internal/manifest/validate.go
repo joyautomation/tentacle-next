@@ -26,10 +26,25 @@ func (ve *ValidationError) hasErrors() bool {
 // Returns nil if all resources are valid.
 func Validate(resources []any) error {
 	ve := &ValidationError{}
+
+	// Collect SourceResource ids in the batch so we can cross-validate
+	// variable/udtVariable deviceId references when sources are provided
+	// alongside gateway/plc resources. If no SourceResources are in the
+	// batch, we skip the cross-check entirely (the source may already be
+	// in the bucket from a prior apply).
+	sourceIDs := make(map[string]bool)
+	hasSources := false
+	for _, res := range resources {
+		if r, ok := res.(*SourceResource); ok {
+			hasSources = true
+			sourceIDs[r.Metadata.Name] = true
+		}
+	}
+
 	for i, res := range resources {
 		switch r := res.(type) {
 		case *GatewayResource:
-			validateGateway(r, i, ve)
+			validateGateway(r, i, ve, hasSources, sourceIDs)
 		case *ServiceResource:
 			validateService(r, i, ve)
 		case *ModuleConfigResource:
@@ -39,7 +54,9 @@ func Validate(resources []any) error {
 		case *NetworkResource:
 			validateNetwork(r, i, ve)
 		case *PlcResource:
-			validatePlc(r, i, ve)
+			validatePlc(r, i, ve, hasSources, sourceIDs)
+		case *SourceResource:
+			validateSource(r, i, ve)
 		default:
 			ve.add("resource %d: unknown type %T", i, res)
 		}
@@ -50,45 +67,34 @@ func Validate(resources []any) error {
 	return nil
 }
 
-func validateGateway(r *GatewayResource, idx int, ve *ValidationError) {
+func validateGateway(r *GatewayResource, idx int, ve *ValidationError, hasSources bool, sourceIDs map[string]bool) {
 	prefix := fmt.Sprintf("Gateway %q (resource %d)", r.Metadata.Name, idx)
 
 	if r.Metadata.Name == "" {
 		ve.add("%s: metadata.name is required", prefix)
 	}
 
-	// Check that variable deviceIds reference defined devices.
+	// Check that variable deviceIds are set (and resolve to a known source
+	// when sources are supplied in the same batch).
 	for varID, v := range r.Spec.Variables {
 		if v.DeviceID == "" {
 			ve.add("%s: variable %q has no deviceId", prefix, varID)
-		} else if _, ok := r.Spec.Devices[v.DeviceID]; !ok {
-			ve.add("%s: variable %q references unknown device %q", prefix, varID, v.DeviceID)
+		} else if hasSources && !sourceIDs[v.DeviceID] {
+			ve.add("%s: variable %q references unknown source %q", prefix, varID, v.DeviceID)
 		}
 	}
 
-	// Check UDT variables reference defined templates and devices.
+	// Check UDT variables reference defined templates and sources.
 	for udtID, u := range r.Spec.UdtVariables {
 		if u.DeviceID == "" {
 			ve.add("%s: udtVariable %q has no deviceId", prefix, udtID)
-		} else if _, ok := r.Spec.Devices[u.DeviceID]; !ok {
-			ve.add("%s: udtVariable %q references unknown device %q", prefix, udtID, u.DeviceID)
+		} else if hasSources && !sourceIDs[u.DeviceID] {
+			ve.add("%s: udtVariable %q references unknown source %q", prefix, udtID, u.DeviceID)
 		}
 		if u.TemplateName == "" {
 			ve.add("%s: udtVariable %q has no templateName", prefix, udtID)
 		} else if _, ok := r.Spec.UdtTemplates[u.TemplateName]; !ok {
 			ve.add("%s: udtVariable %q references unknown template %q", prefix, udtID, u.TemplateName)
-		}
-	}
-
-	// Check device protocols.
-	validProtocols := map[string]bool{
-		"ethernetip": true, "opcua": true, "snmp": true, "modbus": true,
-	}
-	for devID, d := range r.Spec.Devices {
-		if d.Protocol == "" {
-			ve.add("%s: device %q has no protocol", prefix, devID)
-		} else if !validProtocols[d.Protocol] {
-			ve.add("%s: device %q has unknown protocol %q", prefix, devID, d.Protocol)
 		}
 	}
 }
@@ -129,18 +135,19 @@ func validateNftables(r *NftablesResource, idx int, ve *ValidationError) {
 	}
 }
 
-func validatePlc(r *PlcResource, idx int, ve *ValidationError) {
+func validatePlc(r *PlcResource, idx int, ve *ValidationError, hasSources bool, sourceIDs map[string]bool) {
 	prefix := fmt.Sprintf("Plc %q (resource %d)", r.Metadata.Name, idx)
 
 	if r.Metadata.Name == "" {
 		ve.add("%s: metadata.name is required", prefix)
 	}
 
-	// Check that input variables with sources reference defined devices.
+	// Check that input variables with sources reference a known source
+	// when sources are supplied in the same batch.
 	for varID, v := range r.Spec.Variables {
-		if v.Source != nil && v.Source.DeviceID != "" {
-			if _, ok := r.Spec.Devices[v.Source.DeviceID]; !ok {
-				ve.add("%s: variable %q source references unknown device %q", prefix, varID, v.Source.DeviceID)
+		if v.Source != nil && v.Source.DeviceID != "" && hasSources {
+			if !sourceIDs[v.Source.DeviceID] {
+				ve.add("%s: variable %q source references unknown source %q", prefix, varID, v.Source.DeviceID)
 			}
 		}
 	}
@@ -158,17 +165,22 @@ func validatePlc(r *PlcResource, idx int, ve *ValidationError) {
 			ve.add("%s: task %q has invalid scanRateMs %d", prefix, taskID, t.ScanRateMs)
 		}
 	}
+}
 
-	// Check device protocols.
+func validateSource(r *SourceResource, idx int, ve *ValidationError) {
+	prefix := fmt.Sprintf("Source %q (resource %d)", r.Metadata.Name, idx)
+
+	if r.Metadata.Name == "" {
+		ve.add("%s: metadata.name is required", prefix)
+	}
+
 	validProtocols := map[string]bool{
 		"ethernetip": true, "opcua": true, "snmp": true, "modbus": true,
 	}
-	for devID, d := range r.Spec.Devices {
-		if d.Protocol == "" {
-			ve.add("%s: device %q has no protocol", prefix, devID)
-		} else if !validProtocols[d.Protocol] {
-			ve.add("%s: device %q has unknown protocol %q", prefix, devID, d.Protocol)
-		}
+	if r.Spec.Protocol == "" {
+		ve.add("%s: spec.protocol is required", prefix)
+	} else if !validProtocols[r.Spec.Protocol] {
+		ve.add("%s: unknown protocol %q", prefix, r.Spec.Protocol)
 	}
 }
 

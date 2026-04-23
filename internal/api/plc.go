@@ -47,9 +47,6 @@ func (m *Module) putPlcConfig(cfg *itypes.PlcConfigKV) error {
 
 // ensurePlcMaps initializes nil maps so callers can safely write.
 func ensurePlcMaps(cfg *itypes.PlcConfigKV) {
-	if cfg.Devices == nil {
-		cfg.Devices = make(map[string]itypes.PlcDeviceConfigKV)
-	}
 	if cfg.Variables == nil {
 		cfg.Variables = make(map[string]itypes.PlcVariableConfigKV)
 	}
@@ -1091,8 +1088,7 @@ type plcImportItem struct {
 }
 
 type plcImportRequest struct {
-	GatewayID string           `json:"gatewayId"`
-	Imports   []plcImportItem  `json:"imports"`
+	Imports []plcImportItem `json:"imports"`
 }
 
 func (m *Module) handleBatchImportPlcVariables(w http.ResponseWriter, r *http.Request) {
@@ -1105,15 +1101,6 @@ func (m *Module) handleBatchImportPlcVariables(w http.ResponseWriter, r *http.Re
 	}
 	if len(req.Imports) == 0 {
 		writeError(w, http.StatusBadRequest, "imports is required and must not be empty")
-		return
-	}
-	if req.GatewayID == "" {
-		req.GatewayID = "gateway"
-	}
-
-	gwCfg, err := m.getGatewayConfig(req.GatewayID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("read gateway config: %v", err))
 		return
 	}
 
@@ -1135,23 +1122,9 @@ func (m *Module) handleBatchImportPlcVariables(w http.ResponseWriter, r *http.Re
 			imp.Direction = "input"
 		}
 
-		if _, exists := cfg.Devices[imp.DeviceID]; !exists {
-			if gwDev, ok := gwCfg.Devices[imp.DeviceID]; ok {
-				cfg.Devices[imp.DeviceID] = itypes.PlcDeviceConfigKV{
-					Protocol:    gwDev.Protocol,
-					Host:        gwDev.Host,
-					Port:        gwDev.Port,
-					Slot:        gwDev.Slot,
-					EndpointURL: gwDev.EndpointURL,
-					Version:     gwDev.Version,
-					Community:   gwDev.Community,
-					UnitID:      gwDev.UnitID,
-					ScanRate:    gwDev.ScanRate,
-				}
-			} else {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("device %q not found in gateway config", imp.DeviceID))
-				return
-			}
+		if _, ok := m.getSource(imp.DeviceID); !ok {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("source %q not found — create it via /api/v1/sources first", imp.DeviceID))
+			return
 		}
 
 		cfg.Variables[imp.VariableID] = itypes.PlcVariableConfigKV{

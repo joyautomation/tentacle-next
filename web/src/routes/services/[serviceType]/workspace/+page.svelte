@@ -65,7 +65,7 @@
 
 	$effect(() => {
 		if (selection?.kind !== 'source') return;
-		if (!data.gatewayConfig?.devices?.some((d) => d.deviceId === selection.id)) return;
+		if (!data.gatewayConfig?.sources?.some((d) => d.deviceId === selection.id)) return;
 		workspaceTabs.open({ name: selection.id, kind: 'source' });
 	});
 

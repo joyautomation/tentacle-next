@@ -102,7 +102,7 @@ export interface BrowseCache {
 
 export interface GatewayConfig {
   gatewayId: string;
-  devices: GatewayDevice[];
+  sources: GatewayDevice[];
   variables: GatewayVariable[];
   udtTemplates?: GatewayUdtTemplate[];
   udtVariables?: GatewayUdtVariable[];

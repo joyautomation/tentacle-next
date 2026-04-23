@@ -76,6 +76,12 @@ func Apply(b bus.Bus, resources []any, source string) (*ApplyResult, error) {
 				return result, fmt.Errorf("apply Plc %q: %w", r.Metadata.Name, err)
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindPlc, Name: r.Metadata.Name})
+
+		case *SourceResource:
+			if err := applySource(b, r, source); err != nil {
+				return result, fmt.Errorf("apply Source %q: %w", r.Metadata.Name, err)
+			}
+			result.Applied = append(result.Applied, AppliedResource{Kind: KindSource, Name: r.Metadata.Name})
 		}
 	}
 
@@ -85,14 +91,10 @@ func Apply(b bus.Bus, resources []any, source string) (*ApplyResult, error) {
 func applyGateway(b bus.Bus, r *GatewayResource, source string) error {
 	kv := itypes.GatewayConfigKV{
 		GatewayID:    r.Metadata.Name,
-		Devices:      r.Spec.Devices,
 		Variables:    r.Spec.Variables,
 		UdtTemplates: r.Spec.UdtTemplates,
 		UdtVariables: r.Spec.UdtVariables,
 		UpdatedAt:    time.Now().UnixMilli(),
-	}
-	if kv.Devices == nil {
-		kv.Devices = make(map[string]itypes.GatewayDeviceConfig)
 	}
 	if kv.Variables == nil {
 		kv.Variables = make(map[string]itypes.GatewayVariableConfig)
@@ -227,14 +229,10 @@ func applyNetwork(b bus.Bus, r *NetworkResource, source string) error {
 func applyPlc(b bus.Bus, r *PlcResource, source string) error {
 	kv := itypes.PlcConfigKV{
 		PlcID:        r.Metadata.Name,
-		Devices:      r.Spec.Devices,
 		Variables:    r.Spec.Variables,
 		UdtTemplates: r.Spec.UdtTemplates,
 		Tasks:        r.Spec.Tasks,
 		UpdatedAt:    time.Now().UnixMilli(),
-	}
-	if kv.Devices == nil {
-		kv.Devices = make(map[string]itypes.PlcDeviceConfigKV)
 	}
 	if kv.Variables == nil {
 		kv.Variables = make(map[string]itypes.PlcVariableConfigKV)
@@ -274,6 +272,18 @@ func applyPlc(b bus.Bus, r *PlcResource, source string) error {
 		writeSourceMetadata(b, topics.BucketPlcPrograms, progName, source)
 	}
 
+	return nil
+}
+
+func applySource(b bus.Bus, r *SourceResource, source string) error {
+	data, err := json.Marshal(r.Spec)
+	if err != nil {
+		return err
+	}
+	if _, err := b.KVPut(topics.BucketSources, r.Metadata.Name, data); err != nil {
+		return err
+	}
+	writeSourceMetadata(b, topics.BucketSources, r.Metadata.Name, source)
 	return nil
 }
 

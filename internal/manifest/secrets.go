@@ -20,8 +20,8 @@ func RedactSecrets(resources []any) {
 		switch r := res.(type) {
 		case *ModuleConfigResource:
 			redactModuleConfig(r)
-		case *GatewayResource:
-			redactGateway(r)
+		case *SourceResource:
+			redactSource(r)
 		}
 	}
 }
@@ -46,12 +46,9 @@ func redactModuleConfig(r *ModuleConfigResource) {
 	}
 }
 
-func redactGateway(r *GatewayResource) {
-	for id, dev := range r.Spec.Devices {
-		if dev.V3Auth != nil {
-			dev.V3Auth.AuthPassword = ""
-			dev.V3Auth.PrivPassword = ""
-			r.Spec.Devices[id] = dev
-		}
+func redactSource(r *SourceResource) {
+	if r.Spec.V3Auth != nil {
+		r.Spec.V3Auth.AuthPassword = ""
+		r.Spec.V3Auth.PrivPassword = ""
 	}
 }

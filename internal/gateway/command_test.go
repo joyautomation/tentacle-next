@@ -3,6 +3,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"sync"
@@ -10,11 +11,45 @@ import (
 	"time"
 
 	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/scanner"
+	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 )
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// seedSources creates the sources bucket on b and writes the provided
+// SourceConfigs, then starts a Registry and waits for it to populate.
+// Returns the registry so tests can hold it.
+func seedSources(t *testing.T, b bus.Bus, log *slog.Logger, sources map[string]itypes.SourceConfig) *scanner.Registry {
+	t.Helper()
+	if err := b.KVCreate(topics.BucketSources, bus.KVBucketConfig{History: 1}); err != nil {
+		t.Fatalf("create sources bucket: %v", err)
+	}
+	for id, cfg := range sources {
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatalf("marshal source %s: %v", id, err)
+		}
+		if _, err := b.KVPut(topics.BucketSources, id, data); err != nil {
+			t.Fatalf("put source %s: %v", id, err)
+		}
+	}
+	reg := scanner.NewRegistry(b, log)
+	if err := reg.Start(nil); err != nil {
+		t.Fatalf("start registry: %v", err)
+	}
+	// Let the watcher flush initial entries.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if reg.Count() >= len(sources) {
+			return reg
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return reg
 }
 
 func TestCommandRouting_UdtMemberWrite(t *testing.T) {
@@ -24,12 +59,13 @@ func TestCommandRouting_UdtMemberWrite(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
+	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
+	})
+	defer g.sources.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
-		GatewayID: "gateway",
-		Devices: map[string]itypes.GatewayDeviceConfig{
-			"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
-		},
+		GatewayID:    "gateway",
 		Variables:    map[string]itypes.GatewayVariableConfig{},
 		UdtTemplates: map[string]itypes.GatewayUdtTemplateConfig{},
 		UdtVariables: map[string]itypes.GatewayUdtVariableConfig{
@@ -94,12 +130,13 @@ func TestCommandRouting_AtomicBidirectionalWrite(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
+	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
+	})
+	defer g.sources.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
 		GatewayID: "gateway",
-		Devices: map[string]itypes.GatewayDeviceConfig{
-			"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
-		},
 		Variables: map[string]itypes.GatewayVariableConfig{
 			"Motor_Speed": {
 				ID: "Motor_Speed", DeviceID: "marq_plc1", Tag: "Motor_Speed",
@@ -158,12 +195,13 @@ func TestCommandRouting_NonBidirectionalIgnored(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
+	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
+	})
+	defer g.sources.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
 		GatewayID: "gateway",
-		Devices: map[string]itypes.GatewayDeviceConfig{
-			"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
-		},
 		Variables: map[string]itypes.GatewayVariableConfig{
 			"ReadOnlyTag": {
 				ID: "ReadOnlyTag", DeviceID: "marq_plc1", Tag: "ReadOnlyTag",
@@ -200,12 +238,13 @@ func TestCommandRouting_UnknownUdtMember(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
+	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
+	})
+	defer g.sources.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
-		GatewayID: "gateway",
-		Devices: map[string]itypes.GatewayDeviceConfig{
-			"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
-		},
+		GatewayID:    "gateway",
 		Variables:    map[string]itypes.GatewayVariableConfig{},
 		UdtTemplates: map[string]itypes.GatewayUdtTemplateConfig{},
 		UdtVariables: map[string]itypes.GatewayUdtVariableConfig{

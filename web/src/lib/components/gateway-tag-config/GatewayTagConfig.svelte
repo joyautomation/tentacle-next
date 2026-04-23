@@ -28,7 +28,7 @@
   // ── Derived data ──
   const templates = $derived(gatewayConfig?.udtTemplates ?? []);
   const allConfigInstances = $derived(gatewayConfig?.udtVariables ?? []);
-  const devices = $derived(gatewayConfig?.devices ?? []);
+  const devices = $derived(gatewayConfig?.sources ?? []);
 
   // ── UDT state ──
   let expandedInstances: Set<string> = $state(new Set());
@@ -1190,7 +1190,7 @@
 
   // ── Browse/refresh ──
   async function refreshDevice(deviceId: string) {
-    const device = gatewayConfig?.devices?.find(d => d.deviceId === deviceId);
+    const device = gatewayConfig?.sources?.find(d => d.deviceId === deviceId);
     if (!device) return;
     try {
       const input: Record<string, unknown> = { deviceId, protocol: device.protocol };

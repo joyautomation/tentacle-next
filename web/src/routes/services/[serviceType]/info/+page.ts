@@ -21,9 +21,9 @@ export const load: PageLoad = async ({ params }) => {
       const [browseCaches, browseStates] = await Promise.all([
         (async () => {
           const caches: BrowseCache[] = [];
-          if (config?.devices) {
+          if (config?.sources) {
             const cacheResults = await Promise.allSettled(
-              config.devices.map(async (device) => {
+              config.sources.map(async (device) => {
                 const cacheResult = await api<BrowseCache>(`/gateways/gateway/browse-cache/${device.deviceId}`);
                 return cacheResult.data ?? null;
               })
@@ -85,9 +85,9 @@ export const load: PageLoad = async ({ params }) => {
 
       // Fetch browse caches for each gateway device
       const browseCaches: BrowseCache[] = [];
-      if (gatewayConfig?.devices) {
+      if (gatewayConfig?.sources) {
         const cacheResults = await Promise.allSettled(
-          gatewayConfig.devices.map(async (device) => {
+          gatewayConfig.sources.map(async (device) => {
             const cacheResult = await api<BrowseCache>(`/gateways/gateway/browse-cache/${device.deviceId}`);
             return cacheResult.data ?? null;
           })

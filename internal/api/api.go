@@ -233,11 +233,15 @@ func (m *Module) routes() http.Handler {
 		r.Get("/services/{serviceType}/logs", m.handleGetServiceLogs)
 		r.Get("/services/{serviceType}/logs/stream", m.handleStreamServiceLogs)
 
+		// Sources (shared device configs — consumed by gateway + PLC)
+		r.Get("/sources", m.handleListSources)
+		r.Get("/sources/{deviceId}", m.handleGetSource)
+		r.Put("/sources/{deviceId}", m.handleSetSource)
+		r.Delete("/sources/{deviceId}", m.handleDeleteSource)
+
 		// Gateways
 		r.Get("/gateways", m.handleListGateways)
 		r.Get("/gateways/{gatewayId}", m.handleGetGateway)
-		r.Put("/gateways/{gatewayId}/devices", m.handleSetGatewayDevice)
-		r.Delete("/gateways/{gatewayId}/devices/{deviceId}", m.handleDeleteGatewayDevice)
 		r.Put("/gateways/{gatewayId}/devices/{deviceId}/template-overrides", m.handleSetTemplateOverrides)
 		r.Put("/gateways/{gatewayId}/variables", m.handleSetGatewayVariables)
 		r.Put("/gateways/{gatewayId}/variables/{variableId}", m.handleSetGatewayVariable)

@@ -38,11 +38,11 @@
   ] as const;
 
   const moduleDevices = $derived(
-    (gatewayConfig?.devices?.filter(d => d.autoManaged) ?? [])
+    (gatewayConfig?.sources?.filter(d => d.autoManaged) ?? [])
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId))
   );
   const externalDevices = $derived(
-    (gatewayConfig?.devices?.filter(d => !d.autoManaged) ?? [])
+    (gatewayConfig?.sources?.filter(d => !d.autoManaged) ?? [])
       .sort((a, b) => a.protocol.localeCompare(b.protocol) || a.deviceId.localeCompare(b.deviceId))
   );
 
@@ -120,7 +120,6 @@
     saving = true;
     try {
       const input: Record<string, unknown> = {
-        deviceId: device.deviceId,
         protocol: device.protocol,
         ...(device.protocol !== 'opcua' && editHost ? { host: editHost } : {}),
         ...(editPort ? { port: parseInt(editPort) } : {}),
@@ -141,7 +140,7 @@
         };
       }
 
-      const result = await apiPut('/gateways/gateway/devices', input);
+      const result = await apiPut(`/sources/${encodeURIComponent(device.deviceId)}`, input);
 
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
@@ -161,7 +160,6 @@
     saving = true;
     try {
       const deviceBody: Record<string, unknown> = {
-        deviceId: newDevice.deviceId,
         protocol: newDevice.protocol,
         ...(newDevice.protocol !== 'opcua' && newDevice.host ? { host: newDevice.host } : {}),
         ...(newDevice.port ? { port: parseInt(newDevice.port) } : {}),
@@ -170,7 +168,7 @@
         ...(newDevice.protocol === 'snmp' ? { version: newDevice.version, community: newDevice.community } : {}),
         ...(newDevice.protocol === 'modbus' && newDevice.unitId ? { unitId: parseInt(newDevice.unitId) } : {}),
       };
-      const result = await apiPut('/gateways/gateway/devices', deviceBody);
+      const result = await apiPut(`/sources/${encodeURIComponent(newDevice.deviceId)}`, deviceBody);
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
@@ -189,7 +187,7 @@
   async function removeDevice(deviceId: string) {
     saving = true;
     try {
-      const result = await apiDelete(`/gateways/gateway/devices/${deviceId}`);
+      const result = await apiDelete(`/sources/${encodeURIComponent(deviceId)}`);
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {

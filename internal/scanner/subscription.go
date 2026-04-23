@@ -10,6 +10,20 @@ import (
 	"github.com/joyautomation/tentacle/types"
 )
 
+// TagSpec is a protocol-neutral bundle of per-tag metadata for building a
+// scanner subscribe request. Callers (gateway, PLC) translate their own
+// variable configs into a []TagSpec before calling WriteSubscription.
+type TagSpec struct {
+	Tag            string
+	CipType        string                 // ethernetip
+	FunctionCode   *int                   // modbus
+	ModbusDatatype string                 // modbus
+	ByteOrder      string                 // modbus
+	Address        *int                   // modbus
+	Deadband       *types.DeadBandConfig  // ethernetip
+	DisableRBE     bool                   // ethernetip
+}
+
 // WriteSubscription publishes a subscribe request to the protocol's scanner
 // KV bucket. The scanner watches its bucket and picks up changes whenever
 // it's ready, so this is fire-and-forget beyond the KV put itself.
@@ -22,8 +36,8 @@ import (
 func WriteSubscription(
 	b bus.Bus,
 	subscriberID, deviceID string,
-	device itypes.GatewayDeviceConfig,
-	vars map[string]itypes.GatewayVariableConfig,
+	device itypes.SourceConfig,
+	tags []TagSpec,
 	structTypes map[string]string,
 ) (handled bool, err error) {
 	if device.AutoManaged {
@@ -45,20 +59,20 @@ func WriteSubscription(
 
 	switch device.Protocol {
 	case "ethernetip":
-		tags := make([]string, 0, len(vars))
+		tagNames := make([]string, 0, len(tags))
 		cipTypes := make(map[string]string)
 		deadbands := make(map[string]types.DeadBandConfig)
 		disableRBE := make(map[string]bool)
-		for _, v := range vars {
-			tags = append(tags, v.Tag)
-			if v.CipType != "" {
-				cipTypes[v.Tag] = v.CipType
+		for _, t := range tags {
+			tagNames = append(tagNames, t.Tag)
+			if t.CipType != "" {
+				cipTypes[t.Tag] = t.CipType
 			}
-			if v.Deadband != nil {
-				deadbands[v.Tag] = *v.Deadband
+			if t.Deadband != nil {
+				deadbands[t.Tag] = *t.Deadband
 			}
-			if v.DisableRBE {
-				disableRBE[v.Tag] = true
+			if t.DisableRBE {
+				disableRBE[t.Tag] = true
 			}
 		}
 		port := 44818
@@ -71,15 +85,15 @@ func WriteSubscription(
 		}
 		req := itypes.EthernetIPSubscribeRequest{
 			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port, Slot: slot,
-			Tags: tags, ScanRate: scanRate(1000), CipTypes: cipTypes, StructTypes: structTypes,
+			Tags: tagNames, ScanRate: scanRate(1000), CipTypes: cipTypes, StructTypes: structTypes,
 			Deadbands: deadbands, DisableRBE: disableRBE,
 		}
 		payload, err = json.Marshal(req)
 
 	case "opcua":
-		nodeIDs := make([]string, 0, len(vars))
-		for _, v := range vars {
-			nodeIDs = append(nodeIDs, v.Tag)
+		nodeIDs := make([]string, 0, len(tags))
+		for _, t := range tags {
+			nodeIDs = append(nodeIDs, t.Tag)
 		}
 		req := itypes.OpcUASubscribeRequest{
 			SubscriberID: subscriberID, DeviceID: deviceID, EndpointURL: device.EndpointURL,
@@ -88,9 +102,9 @@ func WriteSubscription(
 		payload, err = json.Marshal(req)
 
 	case "snmp":
-		oids := make([]string, 0, len(vars))
-		for _, v := range vars {
-			oids = append(oids, v.Tag)
+		oids := make([]string, 0, len(tags))
+		for _, t := range tags {
+			oids = append(oids, t.Tag)
 		}
 		port := 161
 		if device.Port != nil {
@@ -104,26 +118,26 @@ func WriteSubscription(
 		payload, err = json.Marshal(req)
 
 	case "modbus":
-		tags := make([]itypes.ModbusTagConfig, 0, len(vars))
-		for _, v := range vars {
+		mtags := make([]itypes.ModbusTagConfig, 0, len(tags))
+		for _, t := range tags {
 			fc := "holding"
-			if v.FunctionCode != nil {
-				fc = itypes.FunctionCodeToString(*v.FunctionCode)
+			if t.FunctionCode != nil {
+				fc = itypes.FunctionCodeToString(*t.FunctionCode)
 			}
 			addr := 0
-			if v.Address != nil {
-				addr = *v.Address
+			if t.Address != nil {
+				addr = *t.Address
 			}
 			dt := "uint16"
-			if v.ModbusDatatype != "" {
-				dt = v.ModbusDatatype
+			if t.ModbusDatatype != "" {
+				dt = t.ModbusDatatype
 			}
 			bo := device.ByteOrder
-			if v.ByteOrder != "" {
-				bo = v.ByteOrder
+			if t.ByteOrder != "" {
+				bo = t.ByteOrder
 			}
-			tags = append(tags, itypes.ModbusTagConfig{
-				ID: v.Tag, Address: addr, FunctionCode: fc, Datatype: dt, ByteOrder: bo,
+			mtags = append(mtags, itypes.ModbusTagConfig{
+				ID: t.Tag, Address: addr, FunctionCode: fc, Datatype: dt, ByteOrder: bo,
 			})
 		}
 		port := 502
@@ -136,7 +150,7 @@ func WriteSubscription(
 		}
 		req := itypes.ModbusScannerSubscribeRequest{
 			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
-			UnitID: unitID, ByteOrder: device.ByteOrder, Tags: tags, ScanRate: scanRate(1000),
+			UnitID: unitID, ByteOrder: device.ByteOrder, Tags: mtags, ScanRate: scanRate(1000),
 		}
 		payload, err = json.Marshal(req)
 	}
@@ -150,6 +164,32 @@ func WriteSubscription(
 		return true, fmt.Errorf("write scanner config to %s: %w", bucket, err)
 	}
 	return true, nil
+}
+
+// TagSpecFromGatewayVar adapts a gateway variable config to a TagSpec.
+func TagSpecFromGatewayVar(v itypes.GatewayVariableConfig) TagSpec {
+	return TagSpec{
+		Tag:            v.Tag,
+		CipType:        v.CipType,
+		FunctionCode:   v.FunctionCode,
+		ModbusDatatype: v.ModbusDatatype,
+		ByteOrder:      v.ByteOrder,
+		Address:        v.Address,
+		Deadband:       v.Deadband,
+		DisableRBE:     v.DisableRBE,
+	}
+}
+
+// TagSpecFromPlcSource adapts a PLC variable source ref to a TagSpec.
+func TagSpecFromPlcSource(src itypes.PlcVariableSourceKV) TagSpec {
+	return TagSpec{
+		Tag:            src.Tag,
+		CipType:        src.CipType,
+		FunctionCode:   src.FunctionCode,
+		ModbusDatatype: src.ModbusDatatype,
+		ByteOrder:      src.ByteOrder,
+		Address:        src.Address,
+	}
 }
 
 // DeleteSubscription removes the subscribe request from the protocol's

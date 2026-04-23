@@ -18,6 +18,11 @@ const (
 	BucketDeviceRegistry = "device_registry"
 	BucketBrowseCache    = "browse_cache"
 
+	// BucketSources holds shared source (device) connection configuration
+	// keyed by deviceId. Both gateway and PLC watch this bucket and
+	// reference devices by deviceId from their own config.
+	BucketSources = "sources"
+
 	// Per-protocol scanner subscription config buckets.
 	// Controllers (gateway, plc) write desired subscriptions here;
 	// scanners watch their bucket and act independently.
@@ -78,6 +83,7 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketPlcVariables:    {History: 1},
 		BucketDeviceRegistry:  {History: 1},
 		BucketBrowseCache:     {History: 1},
+		BucketSources:         {History: 5},
 		BucketScannerEthernetIP: {History: 1},
 		BucketScannerOpcUA:      {History: 1},
 		BucketScannerModbus:     {History: 1},

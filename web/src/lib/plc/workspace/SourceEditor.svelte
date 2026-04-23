@@ -24,7 +24,7 @@
 	// The canonical device record from the loaded gateway config. When the
 	// user saves, invalidateAll refetches the config and this re-derives.
 	const existing = $derived<GatewayDevice | null>(
-		gatewayConfig?.devices?.find((d) => d.deviceId === name) ?? null
+		gatewayConfig?.sources?.find((d) => d.deviceId === name) ?? null
 	);
 
 	const allProtocols = [
@@ -122,10 +122,9 @@
 
 	const isAutoManaged = $derived(existing?.autoManaged === true);
 
-	function buildBody(): Record<string, unknown> {
+	function buildBody(): { deviceId: string; body: Record<string, unknown> } {
 		const effectiveId = (pendingDeviceId || name).trim();
 		const body: Record<string, unknown> = {
-			deviceId: effectiveId,
 			protocol
 		};
 		if (protocol !== 'opcua' && protocol !== 'plc' && host) body.host = host;
@@ -146,7 +145,7 @@
 			if (deadbandMaxTime) db.maxTime = parseInt(deadbandMaxTime, 10);
 			body.deadband = db;
 		}
-		return body;
+		return { deviceId: effectiveId, body };
 	}
 
 	const isDirty = $derived.by(() => {
@@ -203,7 +202,7 @@
 		if (isNew) {
 			const id = pendingDeviceId.trim();
 			if (!id) return false;
-			if (gatewayConfig?.devices?.some((d) => d.deviceId === id)) return false;
+			if (gatewayConfig?.sources?.some((d) => d.deviceId === id)) return false;
 			if (availableProtocols.length === 0) return false;
 		}
 		return isDirty || isNew;
@@ -216,13 +215,16 @@
 		if (!canSave) return;
 		saving = true;
 		try {
-			const body = buildBody();
-			const res = await apiPut('/gateways/gateway/devices', body);
+			const { deviceId: id, body } = buildBody();
+			if (!id) {
+				saltState.addNotification({ message: 'deviceId required', type: 'error' });
+				return;
+			}
+			const res = await apiPut(`/sources/${encodeURIComponent(id)}`, body);
 			if (res.error) {
 				saltState.addNotification({ message: res.error.error, type: 'error' });
 				return;
 			}
-			const id = body.deviceId as string;
 			saltState.addNotification({ message: `Saved source "${id}"`, type: 'success' });
 			if (isNew) {
 				workspaceTabs.renameTab(tabId, id);
@@ -259,7 +261,7 @@
 		deleting = true;
 		try {
 			const res = await apiDelete(
-				`/gateways/gateway/devices/${encodeURIComponent(existing.deviceId)}`
+				`/sources/${encodeURIComponent(existing.deviceId)}`
 			);
 			if (res.error) {
 				saltState.addNotification({ message: res.error.error, type: 'error' });

@@ -3,27 +3,15 @@ package types
 import ttypes "github.com/joyautomation/tentacle/types"
 
 // PlcConfigKV is the full PLC configuration stored in the plc_config
-// NATS KV bucket, keyed by plcId.
+// NATS KV bucket, keyed by plcId. Device connection config lives in the
+// shared `sources` bucket (SourceConfig), not here — input variables
+// reference sources by deviceId through PlcVariableSourceKV.
 type PlcConfigKV struct {
 	PlcID        string                             `json:"plcId"`
-	Devices      map[string]PlcDeviceConfigKV       `json:"devices"`
 	Variables    map[string]PlcVariableConfigKV      `json:"variables"`
 	UdtTemplates map[string]PlcUdtTemplateConfigKV  `json:"udtTemplates,omitempty"`
 	Tasks        map[string]PlcTaskConfigKV          `json:"tasks"`
 	UpdatedAt    int64                               `json:"updatedAt"`
-}
-
-// PlcDeviceConfigKV maps a scanner device that this PLC subscribes to.
-type PlcDeviceConfigKV struct {
-	Protocol    string `json:"protocol"`              // "ethernetip", "opcua", "modbus", "snmp"
-	Host        string `json:"host,omitempty"`
-	Port        *int   `json:"port,omitempty"`
-	Slot        *int   `json:"slot,omitempty"`         // EtherNet/IP: chassis slot (default 0)
-	EndpointURL string `json:"endpointUrl,omitempty"` // OPC UA
-	Version     string `json:"version,omitempty"`     // SNMP: "1", "2c", "3"
-	Community   string `json:"community,omitempty"`   // SNMP
-	UnitID      *int   `json:"unitId,omitempty"`      // Modbus
-	ScanRate    *int   `json:"scanRate,omitempty"`
 }
 
 // PlcVariableConfigKV defines a single PLC variable.

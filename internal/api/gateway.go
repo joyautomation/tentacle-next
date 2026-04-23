@@ -44,9 +44,6 @@ func (m *Module) putGatewayConfig(cfg *itypes.GatewayConfigKV) error {
 
 // ensureMaps initializes nil maps on a GatewayConfigKV so callers can safely write.
 func ensureMaps(cfg *itypes.GatewayConfigKV) {
-	if cfg.Devices == nil {
-		cfg.Devices = make(map[string]itypes.GatewayDeviceConfig)
-	}
 	if cfg.Variables == nil {
 		cfg.Variables = make(map[string]itypes.GatewayVariableConfig)
 	}
@@ -94,10 +91,10 @@ func (m *Module) handleListGateways(w http.ResponseWriter, r *http.Request) {
 
 // ─── 2. Get Gateway ────────────────────────────────────────────────────────
 
-// gatewayDeviceResponse is a device config with its ID included.
-type gatewayDeviceResponse struct {
+// sourceResponse is a shared source config with its ID included.
+type sourceResponse struct {
 	DeviceID string `json:"deviceId"`
-	itypes.GatewayDeviceConfig
+	itypes.SourceConfig
 }
 
 // gatewayVariableResponse is a variable config with its ID included.
@@ -117,9 +114,11 @@ type gatewayUdtVariableResponse struct {
 }
 
 // gatewayResponse transforms the map-based KV storage into arrays for the frontend.
+// Devices are returned from the shared sources bucket so the Gateway and PLC
+// workspaces see the same set.
 type gatewayResponse struct {
 	GatewayID          string                        `json:"gatewayId"`
-	Devices            []gatewayDeviceResponse       `json:"devices"`
+	Sources            []sourceResponse              `json:"sources"`
 	Variables          []gatewayVariableResponse     `json:"variables"`
 	UdtTemplates       []gatewayUdtTemplateResponse  `json:"udtTemplates"`
 	UdtVariables       []gatewayUdtVariableResponse  `json:"udtVariables"`
@@ -167,10 +166,11 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Convert device map to array
-	devices := make([]gatewayDeviceResponse, 0, len(cfg.Devices))
-	for id, dev := range cfg.Devices {
-		devices = append(devices, gatewayDeviceResponse{DeviceID: id, GatewayDeviceConfig: dev})
+	// Load shared sources from the sources bucket.
+	sources, _ := m.listSources()
+	sourceArr := make([]sourceResponse, 0, len(sources))
+	for id, src := range sources {
+		sourceArr = append(sourceArr, sourceResponse{DeviceID: id, SourceConfig: src})
 	}
 
 	// Convert variable map to array
@@ -214,7 +214,7 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 
 	resp := gatewayResponse{
 		GatewayID:          cfg.GatewayID,
-		Devices:            devices,
+		Sources:            sourceArr,
 		Variables:          variables,
 		UdtTemplates:       udtTemplates,
 		UdtVariables:       udtVariables,
@@ -224,89 +224,14 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ─── 3. Set Gateway Device ─────────────────────────────────────────────────
-
-func (m *Module) handleSetGatewayDevice(w http.ResponseWriter, r *http.Request) {
-	gatewayID := chi.URLParam(r, "gatewayId")
-
-	var body struct {
-		DeviceID string `json:"deviceId"`
-		itypes.GatewayDeviceConfig
-	}
-	if err := readJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
-		return
-	}
-	if body.DeviceID == "" {
-		writeError(w, http.StatusBadRequest, "deviceId is required")
-		return
-	}
-
-	cfg, err := m.getGatewayConfig(gatewayID)
-	if err != nil {
-		// Config doesn't exist yet — create a new one.
-		cfg = &itypes.GatewayConfigKV{
-			GatewayID:    gatewayID,
-			Devices:      make(map[string]itypes.GatewayDeviceConfig),
-			Variables:    make(map[string]itypes.GatewayVariableConfig),
-			UdtTemplates: make(map[string]itypes.GatewayUdtTemplateConfig),
-			UdtVariables: make(map[string]itypes.GatewayUdtVariableConfig),
-		}
-	}
-	ensureMaps(cfg)
-
-	cfg.Devices[body.DeviceID] = body.GatewayDeviceConfig
-
-	if err := m.putGatewayConfig(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, cfg)
-}
-
-// ─── 4. Delete Gateway Device ──────────────────────────────────────────────
-
-func (m *Module) handleDeleteGatewayDevice(w http.ResponseWriter, r *http.Request) {
-	gatewayID := chi.URLParam(r, "gatewayId")
-	deviceID := chi.URLParam(r, "deviceId")
-
-	cfg, err := m.getGatewayConfig(gatewayID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
-		return
-	}
-	ensureMaps(cfg)
-
-	delete(cfg.Devices, deviceID)
-
-	// Remove all Variables belonging to this device.
-	for id, v := range cfg.Variables {
-		if v.DeviceID == deviceID {
-			delete(cfg.Variables, id)
-		}
-	}
-
-	// Remove all UdtVariables belonging to this device.
-	for id, uv := range cfg.UdtVariables {
-		if uv.DeviceID == deviceID {
-			delete(cfg.UdtVariables, id)
-		}
-	}
-
-	// Clean up orphaned templates.
-	removeOrphanedTemplates(cfg)
-
-	if err := m.putGatewayConfig(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, cfg)
-}
+// Device CRUD is handled by the /sources endpoints — see sources.go.
 
 // ─── 5. Set Template Overrides ─────────────────────────────────────────────
 
+// handleSetTemplateOverrides updates template-name overrides on the shared
+// source config. Kept on the gateway route for URL backwards-compatibility
+// with the frontend — the override itself lives on SourceConfig.
 func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Request) {
-	gatewayID := chi.URLParam(r, "gatewayId")
 	deviceID := chi.URLParam(r, "deviceId")
 
 	var body struct {
@@ -317,26 +242,17 @@ func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
-		return
-	}
-	ensureMaps(cfg)
-
-	dev, ok := cfg.Devices[deviceID]
+	src, ok := m.getSource(deviceID)
 	if !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("device %q not found", deviceID))
+		writeError(w, http.StatusNotFound, fmt.Sprintf("source %q not found", deviceID))
 		return
 	}
-	dev.TemplateNameOverrides = body.Overrides
-	cfg.Devices[deviceID] = dev
-
-	if err := m.putGatewayConfig(cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
+	src.TemplateNameOverrides = body.Overrides
+	if err := m.putSource(deviceID, src); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put source: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg)
+	writeJSON(w, http.StatusOK, src)
 }
 
 // ─── 6. Set Gateway Variable ───────────────────────────────────────────────
@@ -525,7 +441,6 @@ func (m *Module) handleSyncGatewayDeviceVariables(w http.ResponseWriter, r *http
 	if err != nil {
 		cfg = &itypes.GatewayConfigKV{
 			GatewayID:    gatewayID,
-			Devices:      make(map[string]itypes.GatewayDeviceConfig),
 			Variables:    make(map[string]itypes.GatewayVariableConfig),
 			UdtTemplates: make(map[string]itypes.GatewayUdtTemplateConfig),
 			UdtVariables: make(map[string]itypes.GatewayUdtVariableConfig),
@@ -591,7 +506,6 @@ func (m *Module) handleImportGatewayBrowse(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		cfg = &itypes.GatewayConfigKV{
 			GatewayID:    gatewayID,
-			Devices:      make(map[string]itypes.GatewayDeviceConfig),
 			Variables:    make(map[string]itypes.GatewayVariableConfig),
 			UdtTemplates: make(map[string]itypes.GatewayUdtTemplateConfig),
 			UdtVariables: make(map[string]itypes.GatewayUdtVariableConfig),

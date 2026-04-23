@@ -43,9 +43,9 @@ export const load: PageLoad = async ({ params }) => {
     const [browseCaches, browseStates] = await Promise.all([
       (async () => {
         const caches: BrowseCache[] = [];
-        if (config?.devices) {
+        if (config?.sources) {
           const cacheResults = await Promise.allSettled(
-            config.devices.map(async (device) => {
+            config.sources.map(async (device) => {
               const cacheResult = await api<BrowseCache>(`/gateways/gateway/browse-cache/${device.deviceId}`);
               return cacheResult.data ?? null;
             })

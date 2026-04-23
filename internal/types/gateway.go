@@ -3,33 +3,15 @@ package types
 import ttypes "github.com/joyautomation/tentacle/types"
 
 // GatewayConfigKV is the full gateway configuration stored in the gateway_config
-// NATS KV bucket, keyed by gatewayId.
+// NATS KV bucket, keyed by gatewayId. Device connection config lives in the
+// shared `sources` bucket (SourceConfig), not here — gateway variables
+// reference sources by deviceId.
 type GatewayConfigKV struct {
 	GatewayID    string                              `json:"gatewayId"`
-	Devices      map[string]GatewayDeviceConfig       `json:"devices"`
-	Variables    map[string]GatewayVariableConfig      `json:"variables"`
+	Variables    map[string]GatewayVariableConfig     `json:"variables"`
 	UdtTemplates map[string]GatewayUdtTemplateConfig  `json:"udtTemplates,omitempty"`
 	UdtVariables map[string]GatewayUdtVariableConfig  `json:"udtVariables,omitempty"`
 	UpdatedAt    int64                                `json:"updatedAt"`
-}
-
-// GatewayDeviceConfig is a protocol-specific device connection configuration.
-type GatewayDeviceConfig struct {
-	Protocol              string                   `json:"protocol"` // "ethernetip", "opcua", "snmp", "modbus"
-	AutoManaged           bool                     `json:"autoManaged,omitempty"` // true for module-created devices (network, gateway status, etc.)
-	Host                  string                   `json:"host,omitempty"`
-	Port                  *int                     `json:"port,omitempty"`
-	Slot                  *int                     `json:"slot,omitempty"`        // EtherNet/IP: chassis slot (default 0)
-	EndpointURL           string                   `json:"endpointUrl,omitempty"` // OPC UA
-	Version               string                   `json:"version,omitempty"`     // SNMP: "1", "2c", "3"
-	Community             string                   `json:"community,omitempty"`   // SNMP
-	V3Auth                *V3Auth                  `json:"v3Auth,omitempty"`      // SNMP v3
-	UnitID                *int                     `json:"unitId,omitempty"`      // Modbus
-	ByteOrder             string                   `json:"byteOrder,omitempty"`   // Modbus: "ABCD", "BADC", "CDAB", "DCBA"
-	ScanRate              *int                     `json:"scanRate,omitempty"`
-	Deadband              *ttypes.DeadBandConfig   `json:"deadband,omitempty"`
-	DisableRBE            *bool                    `json:"disableRBE,omitempty"`
-	TemplateNameOverrides map[string]string         `json:"templateNameOverrides,omitempty"`
 }
 
 // V3Auth holds SNMP v3 authentication credentials.

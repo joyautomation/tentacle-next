@@ -58,7 +58,6 @@ func TestPlcConfig_PutThenGetRoundTrip(t *testing.T) {
 
 	cfg := itypes.PlcConfigKV{
 		PlcID:     "plc",
-		Devices:   map[string]itypes.PlcDeviceConfigKV{},
 		Variables: map[string]itypes.PlcVariableConfigKV{},
 		Tasks:     map[string]itypes.PlcTaskConfigKV{},
 	}

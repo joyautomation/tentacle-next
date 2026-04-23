@@ -14,6 +14,7 @@ const (
 	KindNftables     = "Nftables"
 	KindNetwork      = "Network"
 	KindPlc          = "Plc"
+	KindSource       = "Source"
 )
 
 // AllKinds lists every known resource kind.
@@ -24,6 +25,7 @@ var AllKinds = []string{
 	KindNftables,
 	KindNetwork,
 	KindPlc,
+	KindSource,
 }
 
 // ResourceHeader is the common envelope for all manifest resources.
@@ -47,8 +49,8 @@ type GatewayResource struct {
 }
 
 // GatewaySpec is the gateway config without runtime fields (gatewayId, updatedAt).
+// Device connection config is managed via KindSource resources, not here.
 type GatewaySpec struct {
-	Devices      map[string]itypes.GatewayDeviceConfig      `yaml:"devices" json:"devices"`
 	Variables    map[string]itypes.GatewayVariableConfig     `yaml:"variables" json:"variables"`
 	UdtTemplates map[string]itypes.GatewayUdtTemplateConfig `yaml:"udtTemplates,omitempty" json:"udtTemplates,omitempty"`
 	UdtVariables map[string]itypes.GatewayUdtVariableConfig `yaml:"udtVariables,omitempty" json:"udtVariables,omitempty"`
@@ -117,8 +119,8 @@ type PlcResource struct {
 }
 
 // PlcSpec is the PLC config for GitOps.
+// Device connection config is managed via KindSource resources, not here.
 type PlcSpec struct {
-	Devices      map[string]itypes.PlcDeviceConfigKV      `yaml:"devices" json:"devices"`
 	Variables    map[string]itypes.PlcVariableConfigKV     `yaml:"variables" json:"variables"`
 	UdtTemplates map[string]itypes.PlcUdtTemplateConfigKV `yaml:"udtTemplates,omitempty" json:"udtTemplates,omitempty"`
 	Tasks        map[string]itypes.PlcTaskConfigKV         `yaml:"tasks" json:"tasks"`
@@ -130,6 +132,15 @@ type PlcProgramSpec struct {
 	Language string `yaml:"language" json:"language"` // "ladder", "st", "starlark"
 	Source   string `yaml:"source" json:"source"`
 	StSource string `yaml:"stSource,omitempty" json:"stSource,omitempty"`
+}
+
+// ─── Source ─────────────────────────────────────────────────────────────────
+
+// SourceResource is the manifest representation of a shared source (device)
+// connection config. The metadata.name is the deviceId.
+type SourceResource struct {
+	ResourceHeader `yaml:",inline"`
+	Spec           itypes.SourceConfig `yaml:"spec" json:"spec"`
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

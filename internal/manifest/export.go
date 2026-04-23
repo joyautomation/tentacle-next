@@ -82,6 +82,16 @@ func Export(b bus.Bus, opts ExportOptions) ([]any, error) {
 		}
 	}
 
+	// Source (device) configs from the shared sources bucket.
+	if includeAll || kindSet[KindSource] {
+		sources, err := exportSources(b)
+		if err != nil {
+			slog.Warn("export: skipping sources", "error", err)
+		} else {
+			resources = append(resources, sources...)
+		}
+	}
+
 	// Network config — skip if module isn't running.
 	if includeAll || kindSet[KindNetwork] {
 		if isServiceRunning(b, "network") {
@@ -119,14 +129,10 @@ func exportGateways(b bus.Bus) ([]any, error) {
 		res := &GatewayResource{
 			ResourceHeader: NewHeader(KindGateway, key),
 			Spec: GatewaySpec{
-				Devices:      kv.Devices,
 				Variables:    kv.Variables,
 				UdtTemplates: kv.UdtTemplates,
 				UdtVariables: kv.UdtVariables,
 			},
-		}
-		if res.Spec.Devices == nil {
-			res.Spec.Devices = make(map[string]itypes.GatewayDeviceConfig)
 		}
 		if res.Spec.Variables == nil {
 			res.Spec.Variables = make(map[string]itypes.GatewayVariableConfig)
@@ -294,14 +300,10 @@ func exportPlcs(b bus.Bus) ([]any, error) {
 		}
 
 		spec := PlcSpec{
-			Devices:      kv.Devices,
 			Variables:    kv.Variables,
 			UdtTemplates: kv.UdtTemplates,
 			Tasks:        kv.Tasks,
 			Programs:     make(map[string]PlcProgramSpec),
-		}
-		if spec.Devices == nil {
-			spec.Devices = make(map[string]itypes.PlcDeviceConfigKV)
 		}
 		if spec.Variables == nil {
 			spec.Variables = make(map[string]itypes.PlcVariableConfigKV)
@@ -336,6 +338,32 @@ func exportPlcs(b bus.Bus) ([]any, error) {
 		resources = append(resources, &PlcResource{
 			ResourceHeader: NewHeader(KindPlc, key),
 			Spec:           spec,
+		})
+	}
+	return resources, nil
+}
+
+func exportSources(b bus.Bus) ([]any, error) {
+	keys, err := b.KVKeys(topics.BucketSources)
+	if err != nil {
+		return nil, fmt.Errorf("list source keys: %w", err)
+	}
+
+	var resources []any
+	for _, key := range keys {
+		data, _, err := b.KVGet(topics.BucketSources, key)
+		if err != nil {
+			slog.Warn("export: skipping source", "key", key, "error", err)
+			continue
+		}
+		var cfg itypes.SourceConfig
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			slog.Warn("export: skipping source", "key", key, "error", err)
+			continue
+		}
+		resources = append(resources, &SourceResource{
+			ResourceHeader: NewHeader(KindSource, key),
+			Spec:           cfg,
 		})
 	}
 	return resources, nil

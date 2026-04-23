@@ -52,6 +52,7 @@ type Gateway struct {
 
 	mu        sync.RWMutex
 	config    *itypes.GatewayConfigKV
+	sources   *scanner.Registry
 	variables map[string]*TrackedVariable
 
 	// Maps scanner subject tokens to gateway variable IDs.
@@ -87,6 +88,23 @@ func New(gatewayID string) *Gateway {
 	}
 }
 
+// device looks up a source by deviceID from the shared sources registry.
+// Caller must hold g.mu at least for read.
+func (g *Gateway) device(deviceID string) (itypes.SourceConfig, bool) {
+	if g.sources == nil {
+		return itypes.SourceConfig{}, false
+	}
+	return g.sources.Get(deviceID)
+}
+
+// sourceCount returns the current number of known sources.
+func (g *Gateway) sourceCount() int {
+	if g.sources == nil {
+		return 0
+	}
+	return g.sources.Count()
+}
+
 func (g *Gateway) ModuleID() string    { return g.gatewayID }
 func (g *Gateway) ServiceType() string { return serviceType }
 
@@ -98,12 +116,22 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 	// Ensure required KV buckets exist
 	for _, bucket := range []string{
 		topics.BucketGatewayConfig, topics.BucketServiceEnabled,
+		topics.BucketSources,
 		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
 		topics.BucketScannerModbus, topics.BucketScannerSNMP,
 	} {
 		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
 			g.log.Warn("gateway: failed to create bucket", "bucket", bucket, "error", err)
 		}
+	}
+
+	// Migrate any legacy gateway_config.devices to the shared sources bucket.
+	scanner.MigrateLegacyDevices(b, g.log, topics.BucketGatewayConfig, g.gatewayID)
+
+	// Start the shared sources registry watcher.
+	g.sources = scanner.NewRegistry(b, g.log)
+	if err := g.sources.Start(g.onSourcesChanged); err != nil {
+		g.log.Error("gateway: failed to start sources registry", "error", err)
 	}
 
 	g.startedAt = time.Now()
@@ -157,7 +185,6 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 		g.log.Info("gateway: no existing config found, seeding empty config")
 		emptyConfig := &itypes.GatewayConfigKV{
 			GatewayID:    g.gatewayID,
-			Devices:      make(map[string]itypes.GatewayDeviceConfig),
 			Variables:    make(map[string]itypes.GatewayVariableConfig),
 			UdtTemplates: make(map[string]itypes.GatewayUdtTemplateConfig),
 			UdtVariables: make(map[string]itypes.GatewayUdtVariableConfig),
@@ -183,7 +210,6 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 			return
 		}
 		g.log.Info("gateway: config updated, rebuilding subscriptions",
-			"devices", len(config.Devices),
 			"variables", len(config.Variables),
 			"udtTemplates", len(config.UdtTemplates),
 			"udtVariables", len(config.UdtVariables))
@@ -252,11 +278,9 @@ func (g *Gateway) HasConfig() bool {
 // (Using module.PublishStatus would publish on gateway.data.gateway.{name} which
 // the gateway also subscribes to, causing a self-routing loop and duplicate metrics.)
 func (g *Gateway) publishStatus() {
+	deviceCount := g.sourceCount()
+
 	g.mu.RLock()
-	deviceCount := 0
-	if g.config != nil {
-		deviceCount = len(g.config.Devices)
-	}
 	varCount := len(g.variables)
 	udtCount := len(g.udtAssemblers)
 	g.mu.RUnlock()
@@ -297,9 +321,9 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 
 	// Build tracked variables and tag index for atomic variables
 	for varID, varCfg := range config.Variables {
-		device, ok := config.Devices[varCfg.DeviceID]
+		device, ok := g.device(varCfg.DeviceID)
 		if !ok {
-			g.log.Warn("gateway: variable references unknown device", "variable", varID, "device", varCfg.DeviceID)
+			g.log.Warn("gateway: variable references unknown source", "variable", varID, "deviceId", varCfg.DeviceID)
 			continue
 		}
 
@@ -328,7 +352,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 	// Build UDT assemblers and member tag index
 	udtVarCount := 0
 	for varID, udtVar := range config.UdtVariables {
-		device, ok := config.Devices[udtVar.DeviceID]
+		device, ok := g.device(udtVar.DeviceID)
 		if !ok {
 			continue
 		}
@@ -395,7 +419,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 		"atomicVars", len(g.variables),
 		"udtVars", udtVarCount,
 		"templates", len(config.UdtTemplates),
-		"devices", len(config.Devices))
+		"sources", g.sourceCount())
 
 	g.subscribeToScannersLocked()
 	g.setupVariablesHandlerLocked()
@@ -438,14 +462,14 @@ func (g *Gateway) subscribeToScannersLocked() {
 	}
 
 	type deviceGroup struct {
-		device    itypes.GatewayDeviceConfig
+		device    itypes.SourceConfig
 		deviceID  string
 		variables map[string]itypes.GatewayVariableConfig
 	}
 	groups := make(map[string]*deviceGroup)
 
 	for varID, varCfg := range g.config.Variables {
-		device, ok := g.config.Devices[varCfg.DeviceID]
+		device, ok := g.device(varCfg.DeviceID)
 		if !ok {
 			continue
 		}
@@ -459,7 +483,7 @@ func (g *Gateway) subscribeToScannersLocked() {
 
 	// Add UDT member tags as synthetic variables for subscription
 	for _, udtVar := range g.config.UdtVariables {
-		device, ok := g.config.Devices[udtVar.DeviceID]
+		device, ok := g.device(udtVar.DeviceID)
 		if !ok {
 			continue
 		}
@@ -520,7 +544,7 @@ func (g *Gateway) subscribeToScannersLocked() {
 	}
 }
 
-func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
+func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.SourceConfig, vars map[string]itypes.GatewayVariableConfig) {
 	sanitizedDevice := types.SanitizeForSubject(deviceID)
 	protocol := device.Protocol
 
@@ -553,7 +577,7 @@ func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.Gateway
 // Scanner subscribe/unsubscribe requests
 // ═══════════════════════════════════════════════════════════════════════════
 
-func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
+func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.SourceConfig, vars map[string]itypes.GatewayVariableConfig) {
 	subscriberID := scanner.SubscriberID(serviceType, g.gatewayID)
 
 	var structTypes map[string]string
@@ -566,7 +590,12 @@ func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.Gateway
 		}
 	}
 
-	handled, err := scanner.WriteSubscription(g.b, subscriberID, deviceID, device, vars, structTypes)
+	tags := make([]scanner.TagSpec, 0, len(vars))
+	for _, v := range vars {
+		tags = append(tags, scanner.TagSpecFromGatewayVar(v))
+	}
+
+	handled, err := scanner.WriteSubscription(g.b, subscriberID, deviceID, device, tags, structTypes)
 	if err != nil {
 		g.log.Error("gateway: failed to write scanner config", "device", deviceID, "protocol", device.Protocol, "error", err)
 		return
@@ -587,7 +616,7 @@ func (g *Gateway) deleteSubscriptionConfigsLocked() {
 	seen := make(map[devKey]bool)
 
 	for _, varCfg := range g.config.Variables {
-		device, ok := g.config.Devices[varCfg.DeviceID]
+		device, ok := g.device(varCfg.DeviceID)
 		if !ok {
 			continue
 		}
@@ -600,7 +629,7 @@ func (g *Gateway) deleteSubscriptionConfigsLocked() {
 	}
 
 	for _, udtVar := range g.config.UdtVariables {
-		device, ok := g.config.Devices[udtVar.DeviceID]
+		device, ok := g.device(udtVar.DeviceID)
 		if !ok {
 			continue
 		}
@@ -611,6 +640,20 @@ func (g *Gateway) deleteSubscriptionConfigsLocked() {
 		seen[dk] = true
 		scanner.DeleteSubscription(g.b, subscriberID, udtVar.DeviceID, device.Protocol)
 	}
+}
+
+// onSourcesChanged is invoked by the shared sources Registry whenever a source
+// is added, updated, or deleted. It re-applies the current config so that
+// subscriptions, tag indexes, and UDT assemblers are rebuilt against the new
+// source set.
+func (g *Gateway) onSourcesChanged() {
+	g.mu.RLock()
+	cfg := g.config
+	g.mu.RUnlock()
+	if cfg == nil {
+		return
+	}
+	g.ApplyConfig(cfg)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -784,7 +827,7 @@ func (g *Gateway) setupCommandRoutingLocked() {
 		// Try atomic variable lookup (bidirectional tags only)
 		for _, v := range g.variables {
 			if types.SanitizeForSubject(v.Config.Tag) == cmdTag && v.Config.Bidirectional {
-				device, ok := g.config.Devices[v.Config.DeviceID]
+				device, ok := g.device(v.Config.DeviceID)
 				if !ok {
 					return
 				}
@@ -808,7 +851,7 @@ func (g *Gateway) setupCommandRoutingLocked() {
 				g.log.Warn("gateway: DCMD for unknown UDT member", "udt", udtID, "member", memberName)
 				return
 			}
-			device, ok := g.config.Devices[udtVar.DeviceID]
+			device, ok := g.device(udtVar.DeviceID)
 			if !ok {
 				return
 			}
