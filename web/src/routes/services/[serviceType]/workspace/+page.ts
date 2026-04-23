@@ -8,6 +8,7 @@ import type {
 	ProgramListItem,
 	TestListItem
 } from '$lib/types/plc';
+import type { GatewayConfig } from '$lib/types/gateway';
 
 export interface LogEntry {
 	timestamp: string;
@@ -26,6 +27,7 @@ export interface WorkspaceLoadData {
 	tests: TestListItem[];
 	templates: PlcTemplate[];
 	plcConfig: PlcConfig | null;
+	gatewayConfig: GatewayConfig | null;
 	initialLogs: LogEntry[];
 	error: string | null;
 }
@@ -41,19 +43,24 @@ export const load: PageLoad = async ({ params }): Promise<WorkspaceLoadData> => 
 		tests: [],
 		templates: [],
 		plcConfig: null,
+		gatewayConfig: null,
 		initialLogs: [],
 		error: null
 	};
 
 	if (serviceType !== 'plc') return empty;
 
-	const [configResult, tasksResult, programsResult, testsResult, logsResult, templatesResult] = await Promise.all([
+	const [configResult, tasksResult, programsResult, testsResult, logsResult, templatesResult, gatewayResult] = await Promise.all([
 		api<PlcConfig>('/plcs/plc/config'),
 		api<Record<string, PlcTaskConfig>>('/plcs/plc/tasks'),
 		api<ProgramListItem[]>('/plcs/plc/programs'),
 		api<TestListItem[]>('/plcs/plc/tests'),
 		api<LogEntry[]>(`/services/${serviceType}/logs`),
-		api<PlcTemplate[]>('/plcs/plc/templates')
+		api<PlcTemplate[]>('/plcs/plc/templates'),
+		// Gateway devices double as PLC "sources" — one shared device registry
+		// per instance. Errors here are non-fatal: the rest of the workspace
+		// loads fine, just with an empty Sources section.
+		api<GatewayConfig>('/gateways/gateway')
 	]);
 
 	return {
@@ -64,6 +71,7 @@ export const load: PageLoad = async ({ params }): Promise<WorkspaceLoadData> => 
 		tests: testsResult.data ?? [],
 		templates: templatesResult.data ?? [],
 		plcConfig: configResult.data ?? null,
+		gatewayConfig: gatewayResult.data ?? null,
 		initialLogs: logsResult.data ?? [],
 		error:
 			configResult.error?.error ??

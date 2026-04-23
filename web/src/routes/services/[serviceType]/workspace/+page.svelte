@@ -63,6 +63,12 @@
 		workspaceTabs.open({ name: selection.id, kind: 'type' });
 	});
 
+	$effect(() => {
+		if (selection?.kind !== 'source') return;
+		if (!data.gatewayConfig?.devices?.some((d) => d.deviceId === selection.id)) return;
+		workspaceTabs.open({ name: selection.id, kind: 'source' });
+	});
+
 	// Ctrl/Cmd+S saves the active tab's draft. Each editor registers its
 	// own save handler in workspaceEditorSaves; the handler no-ops when
 	// there's nothing to persist (saving=false, clean, invalid, etc.).
@@ -175,6 +181,7 @@
 											templates={data.templates}
 											programs={data.programs}
 											tests={data.tests}
+											gatewayConfig={data.gatewayConfig}
 											onCreate={(kind) => (createKind = kind)}
 											onRunAllTests={runAllTests}
 											testsRunning={runningAllTests}
@@ -195,6 +202,7 @@
 											tasks={data.tasks}
 											programs={data.programs}
 											tests={data.tests}
+											gatewayConfig={data.gatewayConfig}
 										/>
 									{:else}
 										<div class="placeholder-card muted">

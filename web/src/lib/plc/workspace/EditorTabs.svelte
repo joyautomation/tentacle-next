@@ -4,6 +4,7 @@
 	import TaskEditor from './TaskEditor.svelte';
 	import TestEditor from './TestEditor.svelte';
 	import TypeEditor from './TypeEditor.svelte';
+	import SourceEditor from './SourceEditor.svelte';
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
@@ -14,6 +15,7 @@
 		ProgramListItem,
 		TestListItem
 	} from '$lib/types/plc';
+	import type { GatewayConfig } from '$lib/types/gateway';
 	import { XMark } from '@joyautomation/salt/icons';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 
@@ -24,9 +26,10 @@
 		tasks: Record<string, PlcTaskConfig>;
 		programs: ProgramListItem[];
 		tests: TestListItem[];
+		gatewayConfig: GatewayConfig | null;
 	};
 
-	let { variableNames, plcConfig, templates, tasks, programs, tests }: Props = $props();
+	let { variableNames, plcConfig, templates, tasks, programs, tests, gatewayConfig }: Props = $props();
 
 	type EditorTab = TabItem & { kind: EditorTabKind; language?: string };
 
@@ -60,6 +63,7 @@
 		if (tab.kind === 'task') return 'TASK';
 		if (tab.kind === 'test') return 'TEST';
 		if (tab.kind === 'type') return 'TYPE';
+		if (tab.kind === 'source') return 'SRC';
 		const lang = tab.language ?? '';
 		if (lang === 'starlark') return 'PY';
 		if (lang === 'st' || lang === 'structured-text') return 'ST';
@@ -83,6 +87,7 @@
 				class:task-badge={tab.kind === 'task'}
 				class:test-badge={tab.kind === 'test'}
 				class:type-badge={tab.kind === 'type'}
+				class:source-badge={tab.kind === 'source'}
 			>{badgeLabel(tab)}</span>
 			<span class="name">{tab.label}</span>
 			{#if workspaceTabs.dirty[tab.id]}
@@ -133,6 +138,13 @@
 						name={tab.name}
 						{templates}
 						{plcConfig}
+						isNew={tab.isNew ?? false}
+					/>
+				{:else if tab.kind === 'source'}
+					<SourceEditor
+						tabId={tab.id}
+						name={tab.name}
+						{gatewayConfig}
 						isNew={tab.isNew ?? false}
 					/>
 				{:else}
@@ -188,6 +200,11 @@
 		&.type-badge {
 			color: var(--theme-primary);
 			background: color-mix(in srgb, var(--theme-primary) 14%, transparent);
+		}
+
+		&.source-badge {
+			color: var(--theme-warning, #f59e0b);
+			background: color-mix(in srgb, var(--theme-warning, #f59e0b) 14%, transparent);
 		}
 	}
 

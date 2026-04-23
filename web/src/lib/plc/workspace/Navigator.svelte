@@ -7,6 +7,7 @@
     ProgramListItem,
     TestListItem,
   } from "$lib/types/plc";
+  import type { GatewayConfig } from "$lib/types/gateway";
   import { workspaceSelection, workspaceTabs } from "../workspace-state.svelte";
   import { ChevronRight, Plus } from "@joyautomation/salt/icons";
   import { apiPut } from "$lib/api/client";
@@ -19,6 +20,7 @@
     templates: PlcTemplate[];
     programs: ProgramListItem[];
     tests: TestListItem[];
+    gatewayConfig: GatewayConfig | null;
     onCreate?: (kind: "variable" | "task") => void;
     onRunAllTests?: () => void;
     testsRunning?: boolean;
@@ -30,6 +32,7 @@
     templates,
     programs,
     tests,
+    gatewayConfig,
     onCreate,
     onRunAllTests,
     testsRunning,
@@ -53,7 +56,12 @@
     workspaceTabs.openNew("type");
   }
 
+  function newSourceTab() {
+    workspaceTabs.openNew("source");
+  }
+
   let sections = $state({
+    sources: true,
     variables: true,
     types: true,
     tasks: true,
@@ -91,6 +99,35 @@
       .filter((t) => matchesFilter(t.name))
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
+
+  // Source = Gateway device. Sharing the Gateway store means PLC sources
+  // and Gateway devices stay in one source of truth — no sync, no drift.
+  const sourceEntries = $derived(
+    (gatewayConfig?.devices ?? [])
+      .filter((d) => matchesFilter(d.deviceId))
+      .sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
+  );
+
+  // Count variables bound to each source so the user can see at a glance
+  // which sources are actually in use.
+  const sourceVarCounts = $derived.by(() => {
+    const counts: Record<string, number> = {};
+    for (const v of Object.values(variables)) {
+      const deviceId = v.source?.deviceId;
+      if (!deviceId) continue;
+      counts[deviceId] = (counts[deviceId] ?? 0) + 1;
+    }
+    return counts;
+  });
+
+  function protocolBadge(protocol: string): string {
+    if (protocol === "ethernetip") return "EIP";
+    if (protocol === "opcua") return "OPC";
+    if (protocol === "modbus") return "MOD";
+    if (protocol === "snmp") return "SNMP";
+    if (protocol === "plc") return "PLC";
+    return protocol.slice(0, 4).toUpperCase();
+  }
 
   const programEntries = $derived(
     programs
@@ -195,6 +232,64 @@
   </div>
 
   <div class="sections">
+    <section class="section">
+      <div class="section-header-row">
+        <button
+          type="button"
+          class="section-header"
+          onclick={() => toggle("sources")}
+          aria-expanded={sections.sources}
+        >
+          <span class="chevron" class:open={sections.sources}
+            ><ChevronRight size="0.75rem" /></span
+          >
+          <span class="label">Sources</span>
+          <span class="count">{sourceEntries.length}</span>
+        </button>
+        <button
+          type="button"
+          class="add-btn"
+          onclick={newSourceTab}
+          title="New source"
+          aria-label="New source"
+        >
+          <Plus size="0.875rem" />
+        </button>
+      </div>
+      {#if sections.sources}
+        <ul class="items" transition:slide={{ duration: 150 }}>
+          {#each sourceEntries as device (device.deviceId)}
+            <li>
+              <button
+                type="button"
+                class="item"
+                class:selected={workspaceSelection.isSelected(
+                  "source",
+                  device.deviceId,
+                )}
+                onclick={() =>
+                  workspaceSelection.select("source", device.deviceId)}
+                title={device.autoManaged
+                  ? `${device.protocol} · auto-managed by a module`
+                  : `${device.protocol} · ${device.host ?? device.endpointUrl ?? ""}`}
+              >
+                <span class="badge source">{protocolBadge(device.protocol)}</span>
+                <span class="name">{device.deviceId}</span>
+                {#if device.autoManaged}
+                  <span class="item-tag">auto</span>
+                {/if}
+                {#if sourceVarCounts[device.deviceId]}
+                  <span class="meta">{sourceVarCounts[device.deviceId]}</span>
+                {/if}
+              </button>
+            </li>
+          {:else}
+            <li class="empty">No sources</li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
     <section class="section">
       <div class="section-header-row">
         <button
@@ -736,6 +831,10 @@
 
   .badge.lang {
     color: var(--theme-primary);
+  }
+
+  .badge.source {
+    color: var(--theme-warning, #f59e0b);
   }
 
   .meta {
