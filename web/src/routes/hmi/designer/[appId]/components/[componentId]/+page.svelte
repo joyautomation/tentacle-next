@@ -81,13 +81,21 @@
       classes = { ...(c.classes ?? {}) };
       containerProps = { ...(c.containerProps ?? {}) };
       containerCss = c.containerCss ?? '';
+      // position:fixed traps the editor — strip it on load so the user can
+      // recover from a previously-saved value. Marks dirty so the next save
+      // persists the cleaned state.
+      let migrated = false;
+      if (containerProps.position === 'fixed') {
+        delete containerProps.position;
+        migrated = true;
+      }
       if (udtTemplateName) {
         const tr = await listHmiUdts();
         if (!tr.error) {
           template = (tr.data ?? []).find((t) => t.name === udtTemplateName) ?? null;
         }
       }
-      dirty = false;
+      dirty = migrated;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       console.error('component refresh failed', e);
