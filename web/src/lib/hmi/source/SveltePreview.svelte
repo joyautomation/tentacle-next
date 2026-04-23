@@ -143,6 +143,12 @@
   });
 
   // --- Element drag-to-position (only when container is positioned) ---
+  // We track every pointerdown over a tagged element as a *candidate* and
+  // only commit to a drag once the pointer moves more than DRAG_THRESHOLD
+  // pixels. That keeps casual clicks (e.g. on a <button>) working while
+  // still letting the user reposition any element by drag.
+
+  const DRAG_THRESHOLD = 4;
 
   let drag: {
     idx: number;
@@ -152,6 +158,7 @@
     startClientY: number;
     startLeft: number;
     startTop: number;
+    committed: boolean;
   } | null = null;
 
   function snap(v: number): number {
@@ -164,9 +171,6 @@
     if (e.button !== 0) return;
     const hit = elementAt(e.target);
     if (!hit) return;
-    // Don't hijack inputs/buttons/links etc — only divs/spans-style containers.
-    const tag = hit.el.tagName.toLowerCase();
-    if (['input', 'select', 'textarea', 'button', 'a', 'label'].includes(tag)) return;
     const surfaceRect = surfaceEl.getBoundingClientRect();
     const elRect = hit.el.getBoundingClientRect();
     drag = {
@@ -177,32 +181,49 @@
       startClientY: e.clientY,
       startLeft: elRect.left - surfaceRect.left,
       startTop: elRect.top - surfaceRect.top,
+      committed: false,
     };
-    hit.el.style.position = 'absolute';
-    hit.el.style.left = `${drag.startLeft}px`;
-    hit.el.style.top = `${drag.startTop}px`;
-    hit.el.classList.add('hmi-dragging');
-    surfaceEl.setPointerCapture(e.pointerId);
-    e.preventDefault();
+  }
+
+  function commitDrag() {
+    if (!drag || !surfaceEl) return;
+    drag.committed = true;
+    drag.el.style.position = 'absolute';
+    drag.el.style.left = `${drag.startLeft}px`;
+    drag.el.style.top = `${drag.startTop}px`;
+    drag.el.classList.add('hmi-dragging');
+    surfaceEl.setPointerCapture(drag.pointerId);
   }
 
   function onPointerMove(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.pointerId) return;
-    const left = snap(drag.startLeft + (e.clientX - drag.startClientX));
-    const top = snap(drag.startTop + (e.clientY - drag.startClientY));
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    if (!drag.committed) {
+      if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+      commitDrag();
+    }
+    const left = snap(drag.startLeft + dx);
+    const top = snap(drag.startTop + dy);
     drag.el.style.left = `${left}px`;
     drag.el.style.top = `${top}px`;
+    e.preventDefault();
   }
 
   function onPointerUp(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.pointerId) return;
-    const left = snap(drag.startLeft + (e.clientX - drag.startClientX));
-    const top = snap(drag.startTop + (e.clientY - drag.startClientY));
-    drag.el.classList.remove('hmi-dragging');
-    surfaceEl?.releasePointerCapture(e.pointerId);
-    const idx = drag.idx;
-    drag = null;
-    onElementMove?.(idx, left, top);
+    const wasCommitted = drag.committed;
+    if (wasCommitted) {
+      const left = snap(drag.startLeft + (e.clientX - drag.startClientX));
+      const top = snap(drag.startTop + (e.clientY - drag.startClientY));
+      drag.el.classList.remove('hmi-dragging');
+      surfaceEl?.releasePointerCapture(e.pointerId);
+      const idx = drag.idx;
+      drag = null;
+      onElementMove?.(idx, left, top);
+    } else {
+      drag = null;
+    }
   }
 </script>
 
