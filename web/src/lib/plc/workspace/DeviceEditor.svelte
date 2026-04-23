@@ -31,8 +31,7 @@
 		{ value: 'ethernetip', label: 'EtherNet/IP', defaultScanRate: 1000 },
 		{ value: 'opcua', label: 'OPC UA', defaultScanRate: 1000 },
 		{ value: 'snmp', label: 'SNMP', defaultScanRate: 5000 },
-		{ value: 'modbus', label: 'Modbus TCP', defaultScanRate: 1000 },
-		{ value: 'plc', label: 'PLC', defaultScanRate: 1000 }
+		{ value: 'modbus', label: 'Modbus TCP', defaultScanRate: 1000 }
 	] as const;
 
 	const protocolLabels: Record<string, string> = Object.fromEntries(
@@ -127,7 +126,7 @@
 		const body: Record<string, unknown> = {
 			protocol
 		};
-		if (protocol !== 'opcua' && protocol !== 'plc' && host) body.host = host;
+		if (protocol !== 'opcua' && host) body.host = host;
 		if (port) body.port = parseInt(port, 10);
 		if (protocol === 'ethernetip' && slot) body.slot = parseInt(slot, 10);
 		if (protocol === 'opcua' && endpointUrl) body.endpointUrl = endpointUrl;
@@ -363,12 +362,7 @@
 				<div class="section" transition:slide={{ duration: 150 }}>
 					<div class="section-label">Connection</div>
 					<div class="grid">
-						{#if protocol === 'plc'}
-							<p class="hint muted">
-								The PLC publishes directly on the internal bus — no connection details
-								needed.
-							</p>
-						{:else if protocol === 'opcua'}
+						{#if protocol === 'opcua'}
 							<label class="field wide">
 								<span>Endpoint URL</span>
 								<input

@@ -34,7 +34,6 @@
     { value: 'opcua', label: 'OPC UA', defaultScanRate: 1000 },
     { value: 'snmp', label: 'SNMP', defaultScanRate: 5000 },
     { value: 'modbus', label: 'Modbus TCP', defaultScanRate: 1000 },
-    { value: 'plc', label: 'PLC', defaultScanRate: 1000 },
   ] as const;
 
   const moduleDevices = $derived(
@@ -308,9 +307,7 @@
             </select>
           {/if}
         </div>
-        {#if newDevice.protocol === 'plc'}
-          <!-- PLC publishes directly on the internal bus — no connection settings needed -->
-        {:else if newDevice.protocol === 'opcua'}
+        {#if newDevice.protocol === 'opcua'}
           <div class="form-row">
             <label for="gw-endpoint">Endpoint URL</label>
             <input id="gw-endpoint" type="text" bind:value={newDevice.endpointUrl} placeholder="opc.tcp://192.168.1.50:4840" />
@@ -393,7 +390,7 @@
                         <label for="edit-endpoint-{device.deviceId}">Endpoint URL</label>
                         <input id="edit-endpoint-{device.deviceId}" type="text" bind:value={editEndpointUrl} placeholder="opc.tcp://192.168.1.50:4840" />
                       </div>
-                    {:else if device.protocol !== 'plc'}
+                    {:else}
                       <div class="form-row">
                         <label for="edit-host-{device.deviceId}">Host</label>
                         <input id="edit-host-{device.deviceId}" type="text" bind:value={editHost} placeholder="192.168.1.100" />
