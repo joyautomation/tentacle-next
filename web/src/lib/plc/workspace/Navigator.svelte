@@ -11,6 +11,7 @@
   import { workspaceSelection, workspaceTabs } from "../workspace-state.svelte";
   import { ChevronRight, Plus } from "@joyautomation/salt/icons";
   import { api, apiPost, apiPut } from "$lib/api/client";
+  import { subscribe } from "$lib/api/subscribe";
   import { invalidateAll } from "$app/navigation";
   import { state as saltState } from "@joyautomation/salt";
 
@@ -187,7 +188,17 @@
 
   let expandedDevices = $state<Record<string, boolean>>({});
   let browseCaches = $state<Record<string, BrowseEntry>>({});
-  let browsingDevices = $state<Record<string, boolean>>({});
+
+  type BrowseProgress = {
+    browseId: string;
+    status: "browsing" | "completed" | "failed" | "cancelled";
+    phase: string;
+    discoveredCount: number;
+    totalCount: number;
+    message: string;
+  };
+  let liveProgress = $state<Record<string, BrowseProgress>>({});
+  const browseSubs = new Map<string, () => void>();
 
   async function loadBrowseCache(deviceId: string) {
     browseCaches[deviceId] = { status: "loading" };
@@ -221,6 +232,13 @@
     }
   }
 
+  function clearProgressLater(deviceId: string, ms = 2000) {
+    setTimeout(() => {
+      const { [deviceId]: _drop, ...rest } = liveProgress;
+      liveProgress = rest;
+    }, ms);
+  }
+
   async function rebrowseDevice(device: GatewayDevice, e: MouseEvent) {
     e.stopPropagation();
     if (device.autoManaged) {
@@ -230,53 +248,119 @@
       });
       return;
     }
-    if (browsingDevices[device.deviceId]) return;
-    browsingDevices[device.deviceId] = true;
-    try {
-      const res = await apiPost(
-        `/gateways/${encodeURIComponent(gatewayId)}/browse`,
-        { deviceId: device.deviceId, protocol: device.protocol },
-      );
-      if (res.error) {
-        saltState.addNotification({
-          message: res.error.error ?? "Browse failed",
-          type: "error",
-        });
-        return;
-      }
+    if (liveProgress[device.deviceId]?.status === "browsing") return;
+
+    const payload: Record<string, unknown> = {
+      deviceId: device.deviceId,
+      protocol: device.protocol,
+    };
+    if (device.host) payload.host = device.host;
+    if (device.port) payload.port = device.port;
+    if (device.protocol === "ethernetip" && device.slot != null) payload.slot = device.slot;
+    if (device.endpointUrl) payload.endpointUrl = device.endpointUrl;
+    if (device.version) payload.version = device.version;
+    if (device.community) payload.community = device.community;
+
+    const res = await apiPost<{ browseId: string }>(
+      `/gateways/${encodeURIComponent(gatewayId)}/browse`,
+      payload,
+    );
+    if (res.error || !res.data?.browseId) {
       saltState.addNotification({
-        message: `Browse started for "${device.deviceId}"`,
-        type: "info",
+        message: res.error?.error ?? "Browse failed to start",
+        type: "error",
       });
-      // Poll the cache until it updates. 500ms × 20 = 10s window — covers
-      // typical EIP browses. User can expand again later if slower.
-      const started = Date.now();
-      const prevCache =
-        browseCaches[device.deviceId]?.status === "ready"
-          ? (browseCaches[device.deviceId] as { cache: BrowseCache }).cache
-          : null;
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setTimeout(r, 500));
-        const poll = await api<BrowseCache>(
-          `/gateways/${encodeURIComponent(gatewayId)}/browse-cache/${encodeURIComponent(device.deviceId)}`,
-        );
-        if (poll.data && poll.data.cachedAt) {
-          if (!prevCache || poll.data.cachedAt !== prevCache.cachedAt) {
-            browseCaches[device.deviceId] = { status: "ready", cache: poll.data };
-            if (!expandedDevices[device.deviceId]) {
-              expandedDevices[device.deviceId] = true;
-            }
+      return;
+    }
+
+    const deviceId = device.deviceId;
+    const browseId = res.data.browseId;
+
+    // Expand the row so the user immediately sees progress + incoming tags.
+    if (!expandedDevices[deviceId]) expandedDevices[deviceId] = true;
+
+    liveProgress = {
+      ...liveProgress,
+      [deviceId]: {
+        browseId,
+        status: "browsing",
+        phase: "connecting",
+        discoveredCount: 0,
+        totalCount: 0,
+        message: "Starting browse…",
+      },
+    };
+
+    browseSubs.get(deviceId)?.();
+    const cleanup = subscribe<{
+      phase: string;
+      discoveredCount?: number;
+      totalCount?: number;
+      message?: string;
+    }>(
+      `/gateways/${encodeURIComponent(gatewayId)}/browse/${encodeURIComponent(browseId)}/progress`,
+      async (p) => {
+        const terminal =
+          p.phase === "completed" || p.phase === "failed" || p.phase === "cancelled";
+        liveProgress = {
+          ...liveProgress,
+          [deviceId]: {
+            browseId,
+            status: terminal
+              ? (p.phase as "completed" | "failed" | "cancelled")
+              : "browsing",
+            phase: p.phase,
+            discoveredCount: p.discoveredCount ?? 0,
+            totalCount: p.totalCount ?? 0,
+            message: p.message ?? "",
+          },
+        };
+        if (terminal) {
+          browseSubs.get(deviceId)?.();
+          browseSubs.delete(deviceId);
+          if (p.phase === "completed") {
+            await loadBrowseCache(deviceId);
+          } else if (p.phase === "failed") {
+            browseCaches[deviceId] = {
+              status: "error",
+              message: p.message || "Browse failed",
+            };
             saltState.addNotification({
-              message: `Browse complete: ${poll.data.items.length} tag(s)`,
-              type: "success",
+              message: `Browse failed for "${deviceId}": ${p.message ?? ""}`,
+              type: "error",
             });
-            return;
           }
+          clearProgressLater(deviceId);
         }
-        if (Date.now() - started > 15_000) break;
-      }
-    } finally {
-      browsingDevices[device.deviceId] = false;
+      },
+      () => {
+        // Stream dropped (network/server). Leave cache state alone and
+        // surface the loss so the user can retry instead of silently stalling.
+        if (liveProgress[deviceId]?.status === "browsing") {
+          saltState.addNotification({
+            message: `Lost browse progress stream for "${deviceId}"`,
+            type: "error",
+          });
+          browseSubs.get(deviceId)?.();
+          browseSubs.delete(deviceId);
+          clearProgressLater(deviceId, 500);
+        }
+      },
+    );
+    browseSubs.set(deviceId, cleanup);
+  }
+
+  async function cancelBrowse(device: GatewayDevice, e: MouseEvent) {
+    e.stopPropagation();
+    const info = liveProgress[device.deviceId];
+    if (!info || info.status !== "browsing") return;
+    try {
+      await apiPost(
+        `/gateways/${encodeURIComponent(gatewayId)}/browse/${encodeURIComponent(info.browseId)}/cancel`,
+        {},
+      );
+    } catch {
+      // best-effort — server terminal event will also reach us via SSE
     }
   }
 
@@ -441,26 +525,97 @@
                   {/if}
                 </button>
                 {#if !device.autoManaged}
-                  <button
-                    type="button"
-                    class="row-action"
-                    onclick={(e) => rebrowseDevice(device, e)}
-                    disabled={browsingDevices[device.deviceId]}
-                    title={browsingDevices[device.deviceId]
-                      ? "Browsing…"
-                      : "Rebrowse tags"}
-                    aria-label="Rebrowse tags"
-                  >
-                    <span
-                      class="refresh-icon"
-                      class:spinning={browsingDevices[device.deviceId]}
-                    >↻</span>
-                  </button>
+                  {@const progress = liveProgress[device.deviceId]}
+                  {#if progress}
+                    <div
+                      class="browse-progress"
+                      class:ok={progress.status === "completed"}
+                      class:err={progress.status === "failed"}
+                      title={progress.message || progress.phase}
+                    >
+                      <svg
+                        class="progress-ring"
+                        class:spin={progress.status === "browsing" &&
+                          progress.totalCount === 0}
+                        viewBox="0 0 20 20"
+                        width="14"
+                        height="14"
+                        aria-hidden="true"
+                      >
+                        <circle
+                          cx="10"
+                          cy="10"
+                          r="8"
+                          fill="none"
+                          stroke="var(--theme-border)"
+                          stroke-width="2.5"
+                        />
+                        <circle
+                          cx="10"
+                          cy="10"
+                          r="8"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-dasharray={progress.status === "completed"
+                            ? "50.3 0"
+                            : progress.totalCount > 0
+                              ? `${Math.min(50.3, Math.round((progress.discoveredCount / progress.totalCount) * 50.3))} 50.3`
+                              : "12 50.3"}
+                          stroke-dashoffset="12.6"
+                        />
+                      </svg>
+                      {#if progress.status === "completed"}
+                        <span class="progress-count">done</span>
+                      {:else if progress.status === "failed"}
+                        <span class="progress-count">failed</span>
+                      {:else if progress.status === "cancelled"}
+                        <span class="progress-count">cancelled</span>
+                      {:else if progress.totalCount > 0}
+                        <span class="progress-count"
+                          >{progress.discoveredCount}/{progress.totalCount}</span
+                        >
+                      {:else if progress.discoveredCount > 0}
+                        <span class="progress-count"
+                          >{progress.discoveredCount}</span
+                        >
+                      {:else}
+                        <span class="progress-count">{progress.phase}</span>
+                      {/if}
+                      {#if progress.status === "browsing"}
+                        <button
+                          type="button"
+                          class="row-action cancel"
+                          onclick={(e) => cancelBrowse(device, e)}
+                          title="Cancel browse"
+                          aria-label="Cancel browse"
+                        >×</button>
+                      {/if}
+                    </div>
+                  {:else}
+                    <button
+                      type="button"
+                      class="row-action"
+                      onclick={(e) => rebrowseDevice(device, e)}
+                      title="Rebrowse tags"
+                      aria-label="Rebrowse tags"
+                    >
+                      <span class="refresh-icon">↻</span>
+                    </button>
+                  {/if}
                 {/if}
               </div>
               {#if expandedDevices[device.deviceId]}
                 <div class="tag-tree" transition:slide={{ duration: 120 }}>
-                  {#if browseCaches[device.deviceId]?.status === "loading"}
+                  {#if liveProgress[device.deviceId]?.status === "browsing"}
+                    <div class="tag-status">
+                      {liveProgress[device.deviceId].phase}
+                      {#if liveProgress[device.deviceId].message}
+                        — {liveProgress[device.deviceId].message}
+                      {/if}
+                    </div>
+                  {:else if browseCaches[device.deviceId]?.status === "loading"}
                     <div class="tag-status">Loading…</div>
                   {:else if browseCaches[device.deviceId]?.status === "error"}
                     <div class="tag-status err">
@@ -1232,15 +1387,51 @@
 
   .refresh-icon {
     display: inline-block;
-
-    &.spinning {
-      animation: spin 0.9s linear infinite;
-    }
   }
 
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+
+  .browse-progress {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-right: 0.125rem;
+    color: var(--badge-teal-text, var(--theme-primary));
+    font-size: 0.625rem;
+    font-family: 'IBM Plex Mono', monospace;
+    line-height: 1;
+
+    &.ok { color: var(--theme-success, var(--badge-teal-text)); }
+    &.err { color: var(--theme-danger, #e5484d); }
+  }
+
+  .progress-ring {
+    flex-shrink: 0;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    transition: stroke-dasharray 0.2s ease;
+
+    &.spin {
+      animation: spin 1.1s linear infinite;
+    }
+  }
+
+  .progress-count {
+    color: var(--theme-text-muted);
+    white-space: nowrap;
+  }
+
+  .row-action.cancel {
+    width: 1.125rem;
+    height: 1.125rem;
+    font-size: 0.875rem;
+    margin-right: 0.125rem;
+
+    &:hover { color: var(--theme-danger, #e5484d); }
   }
 
   .tag-tree {
