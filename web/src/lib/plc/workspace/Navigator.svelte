@@ -7,9 +7,18 @@
     ProgramListItem,
     TestListItem,
   } from "$lib/types/plc";
-  import type { BrowseCache, GatewayConfig, GatewayDevice } from "$lib/types/gateway";
+  import type { BrowseCache, BrowseCacheItem, GatewayConfig, GatewayDevice } from "$lib/types/gateway";
   import { workspaceSelection, workspaceTabs } from "../workspace-state.svelte";
   import { ChevronRight, Plus } from "@joyautomation/salt/icons";
+  import DeviceTagTree from "./DeviceTagTree.svelte";
+
+  type TagTreeNode = {
+    key: string;
+    label: string;
+    leaf?: BrowseCacheItem;
+    children: TagTreeNode[];
+    leafCount: number;
+  };
   import { api, apiPost, apiPut } from "$lib/api/client";
   import { subscribe } from "$lib/api/subscribe";
   import { invalidateAll } from "$app/navigation";
@@ -374,6 +383,53 @@
     );
   }
 
+  // Build a trie from tag names. Splits on both '.' (UDT member paths used
+  // by the scanner) and '_' (common naming convention on atomic tags like
+  // `RTU60_13XFR9_GLV_001_HINC`) so deeply-prefixed flat names collapse into
+  // an explorable hierarchy rather than an overwhelming 500+ row list.
+  function buildTagTree(items: BrowseCacheItem[]): TagTreeNode[] {
+    const root: TagTreeNode = { key: "", label: "", children: [], leafCount: 0 };
+    for (const item of items) {
+      const parts = item.tag.split(/[._]/).filter((p) => p.length > 0);
+      if (parts.length === 0) continue;
+      let cur = root;
+      let acc = "";
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        acc = acc ? acc + "/" + part : part;
+        let child = cur.children.find((c) => c.label === part);
+        if (!child) {
+          child = { key: acc, label: part, children: [], leafCount: 0 };
+          cur.children.push(child);
+        }
+        if (i === parts.length - 1) {
+          child.leaf = item;
+        }
+        cur = child;
+      }
+    }
+    const sortCount = (n: TagTreeNode): number => {
+      n.children.sort((a, b) => a.label.localeCompare(b.label));
+      let count = n.leaf ? 1 : 0;
+      for (const c of n.children) count += sortCount(c);
+      n.leafCount = count;
+      return count;
+    };
+    for (const c of root.children) sortCount(c);
+    root.children.sort((a, b) => a.label.localeCompare(b.label));
+    return root.children;
+  }
+
+  let treeExpanded = $state<Record<string, Record<string, boolean>>>({});
+
+  function toggleTreeNode(deviceId: string, key: string) {
+    const cur = treeExpanded[deviceId] ?? {};
+    treeExpanded = {
+      ...treeExpanded,
+      [deviceId]: { ...cur, [key]: !cur[key] },
+    };
+  }
+
   function onBrowseTagDragStart(
     e: DragEvent,
     device: GatewayDevice,
@@ -632,31 +688,22 @@
                     {#if items.length === 0}
                       <div class="tag-status muted">No tags match filter.</div>
                     {:else}
-                      <ul class="tag-list">
-                        {#each items as item (item.tag)}
-                          <li>
-                            <button
-                              type="button"
-                              class="tag-item draggable"
-                              draggable="true"
-                              ondragstart={(e) =>
-                                onBrowseTagDragStart(
-                                  e,
-                                  device,
-                                  item.tag,
-                                  item.datatype,
-                                )}
-                              title={`${item.datatype} · drag into editor to insert read_tag()`}
-                            >
-                              <span class="grip" aria-hidden="true">⋮⋮</span>
-                              <span class="badge type">
-                                {typeBadge(item.datatype)}
-                              </span>
-                              <span class="name">{item.name || item.tag}</span>
-                            </button>
-                          </li>
-                        {/each}
-                      </ul>
+                      {@const tree = buildTagTree(items)}
+                      <DeviceTagTree
+                        nodes={tree}
+                        {device}
+                        expandedNodes={treeExpanded[device.deviceId] ?? {}}
+                        forceExpandAll={!!filter}
+                        onToggle={(key) =>
+                          toggleTreeNode(device.deviceId, key)}
+                        onDragStart={(e, item) =>
+                          onBrowseTagDragStart(
+                            e,
+                            device,
+                            item.tag,
+                            item.datatype,
+                          )}
+                      />
                     {/if}
                   {/if}
                 </div>
@@ -1440,12 +1487,6 @@
     margin-left: 0.75rem;
   }
 
-  .tag-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
   .tag-status {
     padding: 0.25rem 0.5rem;
     font-size: 0.6875rem;
@@ -1455,40 +1496,6 @@
     &.err {
       color: var(--theme-error, #e5484d);
       font-style: normal;
-    }
-  }
-
-  .tag-item {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    width: 100%;
-    padding: 0.1875rem 0.375rem;
-    background: transparent;
-    border: none;
-    color: var(--theme-text);
-    font-size: 0.75rem;
-    text-align: left;
-    cursor: grab;
-
-    &:hover {
-      background: var(--theme-surface);
-
-      .grip {
-        opacity: 0.5;
-      }
-    }
-
-    &:active {
-      cursor: grabbing;
-    }
-
-    .name {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-family: var(--font-mono, monospace);
     }
   }
 </style>
