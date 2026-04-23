@@ -22,6 +22,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/heartbeat"
 	"github.com/joyautomation/tentacle/internal/module"
 	"github.com/joyautomation/tentacle/internal/rbe"
+	"github.com/joyautomation/tentacle/internal/scanner"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"github.com/joyautomation/tentacle/types"
@@ -553,151 +554,34 @@ func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.Gateway
 // ═══════════════════════════════════════════════════════════════════════════
 
 func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.GatewayDeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
-	// Auto-managed devices (network, module status) self-publish their data
-	// and don't need scanner subscription config.
-	if device.AutoManaged {
-		return
+	subscriberID := scanner.SubscriberID(serviceType, g.gatewayID)
+
+	var structTypes map[string]string
+	if device.Protocol == "ethernetip" && g.config != nil {
+		structTypes = make(map[string]string)
+		for _, udtVar := range g.config.UdtVariables {
+			if udtVar.DeviceID == deviceID {
+				structTypes[udtVar.Tag] = udtVar.TemplateName
+			}
+		}
 	}
 
-	subscriberID := fmt.Sprintf("gateway-%s", g.gatewayID)
-
-	bucket := topics.ScannerBucket(device.Protocol)
-	if bucket == "" {
-		g.log.Debug("gateway: no scanner bucket for protocol (self-publishing source)", "protocol", device.Protocol, "device", deviceID)
-		return
-	}
-
-	var payload []byte
-	var err error
-
-	scanRate := func(defaultRate int) int {
-		if device.ScanRate != nil {
-			return *device.ScanRate
-		}
-		return defaultRate
-	}
-
-	switch device.Protocol {
-	case "ethernetip":
-		tags := make([]string, 0, len(vars))
-		cipTypes := make(map[string]string)
-		structTypes := make(map[string]string)
-		deadbands := make(map[string]types.DeadBandConfig)
-		disableRBE := make(map[string]bool)
-		for _, v := range vars {
-			tags = append(tags, v.Tag)
-			if v.CipType != "" {
-				cipTypes[v.Tag] = v.CipType
-			}
-			if v.Deadband != nil {
-				deadbands[v.Tag] = *v.Deadband
-			}
-			if v.DisableRBE {
-				disableRBE[v.Tag] = true
-			}
-		}
-		if g.config != nil {
-			for _, udtVar := range g.config.UdtVariables {
-				if udtVar.DeviceID == deviceID {
-					structTypes[udtVar.Tag] = udtVar.TemplateName
-				}
-			}
-		}
-		port := 44818
-		if device.Port != nil {
-			port = *device.Port
-		}
-		slot := 0
-		if device.Slot != nil {
-			slot = *device.Slot
-		}
-		req := itypes.EthernetIPSubscribeRequest{
-			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port, Slot: slot,
-			Tags: tags, ScanRate: scanRate(1000), CipTypes: cipTypes, StructTypes: structTypes,
-			Deadbands: deadbands, DisableRBE: disableRBE,
-		}
-		payload, err = json.Marshal(req)
-
-	case "opcua":
-		nodeIDs := make([]string, 0, len(vars))
-		for _, v := range vars {
-			nodeIDs = append(nodeIDs, v.Tag)
-		}
-		req := itypes.OpcUASubscribeRequest{
-			SubscriberID: subscriberID, DeviceID: deviceID, EndpointURL: device.EndpointURL,
-			NodeIDs: nodeIDs, ScanRate: scanRate(1000),
-		}
-		payload, err = json.Marshal(req)
-
-	case "snmp":
-		oids := make([]string, 0, len(vars))
-		for _, v := range vars {
-			oids = append(oids, v.Tag)
-		}
-		port := 161
-		if device.Port != nil {
-			port = *device.Port
-		}
-		req := itypes.SNMPSubscribeRequest{
-			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
-			Version: device.Version, Community: device.Community, V3Auth: device.V3Auth,
-			OIDs: oids, ScanRate: scanRate(5000),
-		}
-		payload, err = json.Marshal(req)
-
-	case "modbus":
-		tags := make([]itypes.ModbusTagConfig, 0, len(vars))
-		for _, v := range vars {
-			fc := "holding"
-			if v.FunctionCode != nil {
-				fc = itypes.FunctionCodeToString(*v.FunctionCode)
-			}
-			addr := 0
-			if v.Address != nil {
-				addr = *v.Address
-			}
-			dt := "uint16"
-			if v.ModbusDatatype != "" {
-				dt = v.ModbusDatatype
-			}
-			bo := device.ByteOrder
-			if v.ByteOrder != "" {
-				bo = v.ByteOrder
-			}
-			tags = append(tags, itypes.ModbusTagConfig{ID: v.Tag, Address: addr, FunctionCode: fc, Datatype: dt, ByteOrder: bo})
-		}
-		port := 502
-		if device.Port != nil {
-			port = *device.Port
-		}
-		unitID := 1
-		if device.UnitID != nil {
-			unitID = *device.UnitID
-		}
-		req := itypes.ModbusScannerSubscribeRequest{
-			SubscriberID: subscriberID, DeviceID: deviceID, Host: device.Host, Port: port,
-			UnitID: unitID, ByteOrder: device.ByteOrder, Tags: tags, ScanRate: scanRate(1000),
-		}
-		payload, err = json.Marshal(req)
-	}
-
+	handled, err := scanner.WriteSubscription(g.b, subscriberID, deviceID, device, vars, structTypes)
 	if err != nil {
-		g.log.Error("gateway: failed to marshal subscribe config", "device", deviceID, "error", err)
+		g.log.Error("gateway: failed to write scanner config", "device", deviceID, "protocol", device.Protocol, "error", err)
 		return
 	}
-
-	// Write to the scanner's KV bucket — fire and forget.
-	// The scanner watches this bucket and will pick it up whenever it's ready.
-	key := fmt.Sprintf("%s.%s", subscriberID, deviceID)
-	if _, err := g.b.KVPut(bucket, key, payload); err != nil {
-		g.log.Error("gateway: failed to write scanner config", "bucket", bucket, "key", key, "error", err)
+	if !handled {
+		if !device.AutoManaged {
+			g.log.Debug("gateway: no scanner bucket for protocol (self-publishing source)", "protocol", device.Protocol, "device", deviceID)
+		}
 		return
 	}
-	g.log.Info("gateway: wrote scanner config", "protocol", device.Protocol, "device", deviceID, "bucket", bucket)
+	g.log.Info("gateway: wrote scanner config", "protocol", device.Protocol, "device", deviceID)
 }
 
 func (g *Gateway) deleteSubscriptionConfigsLocked() {
-	subscriberID := fmt.Sprintf("gateway-%s", g.gatewayID)
+	subscriberID := scanner.SubscriberID(serviceType, g.gatewayID)
 
 	type devKey struct{ protocol, deviceID string }
 	seen := make(map[devKey]bool)
@@ -712,16 +596,9 @@ func (g *Gateway) deleteSubscriptionConfigsLocked() {
 			continue
 		}
 		seen[dk] = true
-
-		bucket := topics.ScannerBucket(device.Protocol)
-		if bucket == "" {
-			continue
-		}
-		key := fmt.Sprintf("%s.%s", subscriberID, varCfg.DeviceID)
-		_ = g.b.KVDelete(bucket, key)
+		scanner.DeleteSubscription(g.b, subscriberID, varCfg.DeviceID, device.Protocol)
 	}
 
-	// Also clean up UDT variable devices
 	for _, udtVar := range g.config.UdtVariables {
 		device, ok := g.config.Devices[udtVar.DeviceID]
 		if !ok {
@@ -732,13 +609,7 @@ func (g *Gateway) deleteSubscriptionConfigsLocked() {
 			continue
 		}
 		seen[dk] = true
-
-		bucket := topics.ScannerBucket(device.Protocol)
-		if bucket == "" {
-			continue
-		}
-		key := fmt.Sprintf("%s.%s", subscriberID, udtVar.DeviceID)
-		_ = g.b.KVDelete(bucket, key)
+		scanner.DeleteSubscription(g.b, subscriberID, udtVar.DeviceID, device.Protocol)
 	}
 }
 
