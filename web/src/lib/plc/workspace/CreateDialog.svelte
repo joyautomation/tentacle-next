@@ -27,7 +27,6 @@
 
 	let varName = $state('');
 	let varDatatype = $state<string>('number');
-	let varDirection = $state<'internal' | 'output' | 'input'>('internal');
 	let varDefault = $state('');
 
 	const templateByName = $derived.by(() => {
@@ -107,7 +106,7 @@
 				const body = {
 					id: name,
 					datatype: varDatatype,
-					direction: varDirection,
+					direction: 'internal',
 					default: def
 				};
 				const res = await apiPut(`/plcs/plc/variables/${encodeURIComponent(name)}`, body);
@@ -212,14 +211,6 @@
 								{/each}
 							</optgroup>
 						{/if}
-					</select>
-				</label>
-				<label class="field">
-					<span>Direction</span>
-					<select bind:value={varDirection}>
-						<option value="internal">internal</option>
-						<option value="output">output</option>
-						<option value="input">input</option>
 					</select>
 				</label>
 				{#if isPrimitiveDatatype(varDatatype)}

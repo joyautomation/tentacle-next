@@ -54,7 +54,6 @@
 	}
 
 	let datatype = $state('number');
-	let direction = $state<'internal' | 'output' | 'input'>('internal');
 	let primitiveDefault = $state<string>('0');
 	let templateDefaults = $state<Record<string, unknown>>({});
 	let description = $state('');
@@ -68,7 +67,6 @@
 		if (!current || key === lastLoadedFor) return;
 		lastLoadedFor = key;
 		datatype = current.datatype;
-		direction = (current.direction as 'internal' | 'output' | 'input') ?? 'internal';
 		description = current.description ?? '';
 		if (isPrimitiveDatatype(current.datatype)) {
 			const d = current.default;
@@ -281,7 +279,6 @@
 	const isDirty = $derived.by(() => {
 		if (!current) return false;
 		if (datatype !== current.datatype) return true;
-		if (direction !== current.direction) return true;
 		if ((description ?? '') !== (current.description ?? '')) return true;
 		const baseline = isPrimitiveDatatype(datatype)
 			? current.default
@@ -299,7 +296,6 @@
 		if (!current) return;
 		workspaceVariableDrafts.set(name, {
 			datatype,
-			direction,
 			description: description.trim() || undefined,
 			default: buildDefault()
 		});
@@ -315,7 +311,7 @@
 			const body: Record<string, unknown> = {
 				id: name,
 				datatype,
-				direction,
+				direction: current.direction || 'internal',
 				default: buildDefault()
 			};
 			if (description.trim()) body.description = description.trim();
@@ -368,7 +364,7 @@
 			const body: Record<string, unknown> = {
 				id: name,
 				datatype,
-				direction,
+				direction: current.direction || 'internal',
 				default: buildDefault()
 			};
 			if (description.trim()) body.description = description.trim();
@@ -418,14 +414,6 @@
 
 		<div class="body">
 			<div class="form-row">
-				<label class="field">
-					<span>Direction</span>
-					<select bind:value={direction} class="input">
-						<option value="internal">internal</option>
-						<option value="output">output</option>
-						<option value="input">input</option>
-					</select>
-				</label>
 				<label class="field">
 					<span>Datatype</span>
 					<select bind:value={datatype} class="input">

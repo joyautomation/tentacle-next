@@ -65,7 +65,6 @@ function loadViewPrefs(): { showInlineValues: boolean } {
 
 export type VariableDraft = {
 	datatype: string;
-	direction: string;
 	description?: string;
 	default?: unknown;
 };

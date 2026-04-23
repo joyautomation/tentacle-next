@@ -8,6 +8,9 @@
   } from "$lib/types/plc";
   import { workspaceSelection, workspaceTabs } from "../workspace-state.svelte";
   import { ChevronRight, Plus } from "@joyautomation/salt/icons";
+  import { apiPut } from "$lib/api/client";
+  import { invalidateAll } from "$app/navigation";
+  import { state as saltState } from "@joyautomation/salt";
 
   type Props = {
     variables: Record<string, PlcVariableConfig>;
@@ -116,13 +119,29 @@
     return lang.slice(0, 2).toUpperCase();
   }
 
-  function directionLabel(dir: string): string {
-    if (dir === "source") return "→";
-    if (dir === "sink") return "←";
-    return "·";
-  }
-
   const VARIABLE_MIME = "application/x-plc-variable";
+
+  let togglingTask = $state<string | null>(null);
+
+  async function toggleTaskEnabled(task: PlcTaskConfig, e: MouseEvent) {
+    e.stopPropagation();
+    if (togglingTask) return;
+    togglingTask = task.name;
+    try {
+      const body: PlcTaskConfig = { ...task, enabled: !task.enabled };
+      const res = await apiPut(
+        `/plcs/plc/tasks/${encodeURIComponent(task.name)}`,
+        body,
+      );
+      if (res.error) {
+        saltState.addNotification({ message: res.error.error, type: "error" });
+        return;
+      }
+      await invalidateAll();
+    } finally {
+      togglingTask = null;
+    }
+  }
 
   function onVariableDragStart(e: DragEvent, name: string, datatype: string) {
     if (!e.dataTransfer) return;
@@ -194,12 +213,11 @@
                 onclick={() => workspaceSelection.select("variable", name)}
                 draggable="true"
                 ondragstart={(e) => onVariableDragStart(e, name, cfg.datatype)}
-                title="{cfg.datatype} · {cfg.direction} · drag into editor to insert"
+                title="{cfg.datatype} · drag into editor to insert"
               >
                 <span class="grip" aria-hidden="true">⋮⋮</span>
                 <span class="badge type">{cfg.datatype.slice(0, 4)}</span>
                 <span class="name">{name}</span>
-                <span class="meta">{directionLabel(cfg.direction)}</span>
               </button>
             </li>
           {:else}
@@ -236,7 +254,7 @@
       {#if sections.tasks}
         <ul class="items" transition:slide={{ duration: 150 }}>
           {#each taskEntries as task (task.name)}
-            <li>
+            <li class="task-row">
               <button
                 type="button"
                 class="item"
@@ -249,9 +267,21 @@
               >
                 <span class="badge rate">{task.scanRateMs}ms</span>
                 <span class="name">{task.name}</span>
-                <span class="meta" class:off={!task.enabled}
-                  >{task.enabled ? "●" : "○"}</span
-                >
+              </button>
+              <button
+                type="button"
+                class="task-toggle"
+                class:on={task.enabled}
+                onclick={(e) => toggleTaskEnabled(task, e)}
+                disabled={togglingTask === task.name}
+                role="switch"
+                aria-checked={task.enabled}
+                aria-label={task.enabled
+                  ? `Disable task ${task.name}`
+                  : `Enable task ${task.name}`}
+                title={task.enabled ? "Disable task" : "Enable task"}
+              >
+                <span class="task-toggle-thumb"></span>
               </button>
             </li>
           {:else}
@@ -649,6 +679,68 @@
     &.off {
       opacity: 0.4;
     }
+  }
+
+  .task-row {
+    display: flex;
+    align-items: center;
+
+    .item {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+  .task-toggle {
+    flex-shrink: 0;
+    position: relative;
+    width: 1.75rem;
+    height: 0.875rem;
+    margin-right: 0.5rem;
+    padding: 0;
+    background: var(--theme-border);
+    border: 0;
+    border-radius: 0.4375rem;
+    cursor: pointer;
+    transition: background 0.15s ease;
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--theme-text-muted) 40%, var(--theme-border));
+    }
+
+    &.on {
+      background: var(--theme-primary);
+
+      &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--theme-primary) 80%, black);
+      }
+
+      .task-toggle-thumb {
+        transform: translateX(0.875rem);
+        background: var(--theme-on-primary, white);
+      }
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--theme-primary);
+      outline-offset: 2px;
+    }
+  }
+
+  .task-toggle-thumb {
+    position: absolute;
+    top: 0.125rem;
+    left: 0.125rem;
+    width: 0.625rem;
+    height: 0.625rem;
+    background: var(--theme-text);
+    border-radius: 50%;
+    transition: transform 0.15s ease, background 0.15s ease;
   }
 
   .empty {

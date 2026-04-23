@@ -93,7 +93,6 @@
 			? {
 					...(persisted ?? {}),
 					datatype: draft.datatype,
-					direction: draft.direction,
 					description: draft.description ?? persisted?.description,
 					default: draft.default
 				} as PlcVariableConfig
@@ -212,10 +211,6 @@
 				<div class="field">
 					<span class="k">Datatype</span>
 					<span class="val">{v.config.datatype}</span>
-				</div>
-				<div class="field">
-					<span class="k">Direction</span>
-					<span class="val">{v.config.direction}</span>
 				</div>
 				{#if v.config.description}
 					<div class="field">

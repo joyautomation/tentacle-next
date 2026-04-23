@@ -172,11 +172,28 @@ func TestPlcVariables_PutAndDelete(t *testing.T) {
 	}
 }
 
-func TestPlcVariables_RequiresDatatypeAndDirection(t *testing.T) {
+func TestPlcVariables_RequiresDatatype(t *testing.T) {
 	_, h := newPlcTestModule(t)
 	rr := doJSON(t, h, http.MethodPut, "/api/v1/plcs/plc/variables/x", itypes.PlcVariableConfigKV{})
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestPlcVariables_DefaultsDirectionToInternal(t *testing.T) {
+	_, h := newPlcTestModule(t)
+	v := itypes.PlcVariableConfigKV{ID: "x", Datatype: "number"}
+	rr := doJSON(t, h, http.MethodPut, "/api/v1/plcs/plc/variables/x", v)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT var: expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	rr = doJSON(t, h, http.MethodGet, "/api/v1/plcs/plc/variables", nil)
+	var vars map[string]itypes.PlcVariableConfigKV
+	if err := json.NewDecoder(rr.Body).Decode(&vars); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if vars["x"].Direction != "internal" {
+		t.Fatalf("expected direction=internal, got %q", vars["x"].Direction)
 	}
 }
 

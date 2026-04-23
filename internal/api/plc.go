@@ -233,8 +233,7 @@ func (m *Module) handlePutPlcConfigVariable(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if v.Direction == "" {
-		writeError(w, http.StatusBadRequest, "direction is required")
-		return
+		v.Direction = "internal"
 	}
 
 	cfg, err := m.getPlcConfig(plcID)
