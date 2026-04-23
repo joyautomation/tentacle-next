@@ -8,6 +8,7 @@
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
+	import TagInput from './TagInput.svelte';
 	import {
 		workspaceDiagnostics,
 		workspaceTabs,
@@ -29,7 +30,7 @@
 	interface PlcProgramKV {
 		name: string;
 		description?: string;
-		module?: string;
+		tags?: string[];
 		language: string;
 		source: string;
 		stSource?: string;
@@ -81,17 +82,17 @@
 	const TRY_TIMEOUT_SECONDS = 120;
 	let serverSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let serverStSource = $state('');
-	let serverModule = $state('');
+	let serverTags = $state<string[]>([]);
 	let language = $state<string>(isNew ? initialLanguage : 'starlark');
 	let draftSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let draftStSource = $state('');
-	let draftModule = $state('');
+	let draftTags = $state<string[]>([]);
 
 	const dirty = $derived(
 		isNew
 			|| draftSource !== serverSource
 			|| draftStSource !== serverStSource
-			|| draftModule !== serverModule
+			|| !sameTags(draftTags, serverTags)
 	);
 
 	// Diff view appears whenever the draft differs from the running code —
@@ -120,6 +121,14 @@
 		if (!pendingName) return false;
 		if (!isNew && pendingName === name) return false;
 		return programs.some((p) => p.name === pendingName);
+	});
+
+	const tagSuggestions = $derived.by(() => {
+		const set = new Set<string>();
+		for (const p of programs) {
+			for (const t of p.tags ?? []) set.add(t);
+		}
+		return Array.from(set).sort();
 	});
 
 	// Effective program name for LSP / display: the saved name while it
@@ -248,10 +257,10 @@
 		language = full.language;
 		serverSource = full.source ?? '';
 		serverStSource = full.stSource ?? '';
-		serverModule = full.module ?? '';
+		serverTags = (full.tags ?? []).slice();
 		draftSource = serverSource;
 		draftStSource = serverStSource;
-		draftModule = serverModule;
+		draftTags = serverTags.slice();
 	}
 
 	function onEditorChange(val: string) {
@@ -297,7 +306,7 @@
 				name: bodyName,
 				language,
 				source: draftSource,
-				module: normalizeModule(draftModule),
+				tags: draftTags,
 				updatedBy: 'gui'
 			};
 			if (language === 'st') body.stSource = draftStSource;
@@ -308,8 +317,7 @@
 			}
 			serverSource = draftSource;
 			serverStSource = draftStSource;
-			serverModule = normalizeModule(draftModule);
-			draftModule = serverModule;
+			serverTags = draftTags.slice();
 			const renamed = !isNew && bodyName !== name;
 			if (isNew || renamed) {
 				workspaceTabs.renameTab(tabId, bodyName);
@@ -329,18 +337,13 @@
 	function revert() {
 		draftSource = serverSource;
 		draftStSource = serverStSource;
-		draftModule = serverModule;
+		draftTags = serverTags.slice();
 	}
 
-	// normalizeModule trims whitespace and leading/trailing slashes and
-	// collapses runs of slashes. Empty strings stay empty so the program
-	// shows up at the Navigator root.
-	function normalizeModule(m: string): string {
-		const cleaned = m
-			.trim()
-			.replace(/^\/+|\/+$/g, '')
-			.replace(/\/{2,}/g, '/');
-		return cleaned;
+	function sameTags(a: string[], b: string[]): boolean {
+		if (a.length !== b.length) return false;
+		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+		return true;
 	}
 
 	// canTry gates the Try button: only Starlark (engine-level hot-swap),
@@ -469,12 +472,10 @@
 				</span>
 			{/if}
 			<span class="lang-badge">{language}</span>
-			<input
-				type="text"
-				class="module-input"
-				placeholder="module/path"
-				title="Module path — slash-delimited, used to group functions in the Navigator"
-				bind:value={draftModule}
+			<TagInput
+				value={draftTags}
+				suggestions={tagSuggestions}
+				onchange={(t) => (draftTags = t)}
 			/>
 			{#if dirty}
 				<DirtyIcon size="0.875rem" />
@@ -670,25 +671,6 @@
 		border-radius: 0.1875rem;
 	}
 
-	.module-input {
-		width: 12rem;
-		padding: 0.1875rem 0.4375rem;
-		font-family: var(--font-mono, monospace);
-		font-size: 0.75rem;
-		color: var(--theme-text);
-		background: var(--theme-background);
-		border: 1px solid var(--theme-border);
-		border-radius: 0.25rem;
-
-		&:focus {
-			outline: none;
-			border-color: var(--theme-primary);
-		}
-
-		&::placeholder {
-			color: var(--theme-text-muted);
-		}
-	}
 
 	.btn {
 		padding: 0.3125rem 0.75rem;

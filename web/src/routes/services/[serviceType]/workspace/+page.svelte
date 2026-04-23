@@ -173,6 +173,7 @@
 											templates={data.templates}
 											tasks={data.tasks}
 											programs={data.programs}
+											tests={data.tests}
 										/>
 									{:else}
 										<div class="placeholder-card muted">

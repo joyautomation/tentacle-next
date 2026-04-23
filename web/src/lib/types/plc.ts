@@ -71,7 +71,7 @@ export interface PlcFunctionSig {
 export interface ProgramListItem {
   name: string;
   description?: string;
-  module?: string;
+  tags?: string[];
   language: string;
   signature?: PlcFunctionSig | null;
   updatedAt: number;
@@ -93,6 +93,7 @@ export interface PlcTestResult {
 export interface PlcTest {
   name: string;
   description?: string;
+  tags?: string[];
   source: string;
   updatedAt: number;
   updatedBy?: string;
@@ -102,6 +103,7 @@ export interface PlcTest {
 export interface TestListItem {
   name: string;
   description?: string;
+  tags?: string[];
   updatedAt: number;
   updatedBy?: string;
   lastResult?: PlcTestResult;

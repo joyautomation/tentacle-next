@@ -6,7 +6,13 @@
 	import Tabs, { type TabItem } from '$lib/components/Tabs.svelte';
 	import { workspaceTabs, workspaceSelection } from '../workspace-state.svelte';
 	import type { EditorTabKind } from '../workspace-state.svelte';
-	import type { PlcConfig, PlcTaskConfig, PlcTemplate, ProgramListItem } from '$lib/types/plc';
+	import type {
+		PlcConfig,
+		PlcTaskConfig,
+		PlcTemplate,
+		ProgramListItem,
+		TestListItem
+	} from '$lib/types/plc';
 	import { XMark } from '@joyautomation/salt/icons';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 
@@ -16,9 +22,10 @@
 		templates: PlcTemplate[];
 		tasks: Record<string, PlcTaskConfig>;
 		programs: ProgramListItem[];
+		tests: TestListItem[];
 	};
 
-	let { variableNames, plcConfig, templates, tasks, programs }: Props = $props();
+	let { variableNames, plcConfig, templates, tasks, programs, tests }: Props = $props();
 
 	type EditorTab = TabItem & { kind: EditorTabKind; language?: string };
 
@@ -113,6 +120,8 @@
 						isNew={tab.isNew ?? false}
 						initialSource={tab.initialSource}
 						{variableNames}
+						{tests}
+						{programs}
 						onDirtyChange={(d) => workspaceTabs.setDirty(tab.id, d)}
 					/>
 				{:else}

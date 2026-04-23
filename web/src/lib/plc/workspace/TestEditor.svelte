@@ -5,8 +5,9 @@
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
+	import TagInput from './TagInput.svelte';
 	import { workspaceTabs } from '../workspace-state.svelte';
-	import type { PlcTest, PlcTestResult } from '$lib/types/plc';
+	import type { PlcTest, PlcTestResult, TestListItem, ProgramListItem } from '$lib/types/plc';
 
 	type Props = {
 		tabId: string;
@@ -14,10 +15,27 @@
 		isNew?: boolean;
 		variableNames?: string[];
 		initialSource?: string;
+		tests?: TestListItem[];
+		programs?: ProgramListItem[];
 		onDirtyChange?: (dirty: boolean) => void;
 	};
 
-	let { tabId, name, isNew = false, variableNames = [], initialSource, onDirtyChange }: Props = $props();
+	let {
+		tabId,
+		name,
+		isNew = false,
+		variableNames = [],
+		initialSource,
+		tests = [],
+		programs = [],
+		onDirtyChange
+	}: Props = $props();
+
+	function sameTags(a: string[], b: string[]): boolean {
+		if (a.length !== b.length) return false;
+		for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+		return true;
+	}
 
 	const STARTER_SOURCE = `# Unit test — runs against the live engine.
 # Use assert_eq / assert_true / assert_near / assert_raises.
@@ -35,6 +53,8 @@ test_example()
 	let editValue = $state(isNew ? (initialSource ?? STARTER_SOURCE) : '');
 	let description = $state('');
 	let newName = $state('');
+	let serverTags = $state<string[]>([]);
+	let draftTags = $state<string[]>([]);
 
 	let saving = $state(false);
 	let deleting = $state(false);
@@ -56,6 +76,8 @@ test_example()
 		loaded = res.data ?? null;
 		editValue = loaded?.source ?? '';
 		description = loaded?.description ?? '';
+		serverTags = (loaded?.tags ?? []).slice();
+		draftTags = serverTags.slice();
 		result = loaded?.lastResult ?? null;
 		loading = false;
 	}
@@ -79,11 +101,20 @@ test_example()
 	});
 
 	const dirty = $derived.by(() => {
-		if (isNew) return editValue.trim().length > 0;
+		if (isNew) return editValue.trim().length > 0 || draftTags.length > 0;
 		if (!loaded) return false;
 		if (editValue !== (loaded.source ?? '')) return true;
 		if ((description ?? '') !== (loaded.description ?? '')) return true;
+		if (!sameTags(draftTags, serverTags)) return true;
 		return false;
+	});
+
+	const tagSuggestions = $derived.by(() => {
+		const all = new Set<string>();
+		for (const t of tests) for (const tag of t.tags ?? []) all.add(tag);
+		for (const p of programs) for (const tag of p.tags ?? []) all.add(tag);
+		for (const tag of draftTags) all.delete(tag);
+		return Array.from(all).sort();
 	});
 
 	$effect(() => {
@@ -101,6 +132,7 @@ test_example()
 			const body: Record<string, unknown> = {
 				name: effectiveName,
 				description: description.trim() || undefined,
+				tags: draftTags,
 				source: editValue
 			};
 			const res = await apiPut(
@@ -147,6 +179,7 @@ test_example()
 		if (!loaded) return;
 		editValue = loaded.source ?? '';
 		description = loaded.description ?? '';
+		draftTags = serverTags.slice();
 	}
 
 	async function del() {
@@ -181,6 +214,11 @@ test_example()
 			{/if}
 			<span class="test-name">{effectiveName || 'Untitled'}</span>
 			<span class="kind-badge">Test</span>
+			<TagInput
+				value={draftTags}
+				suggestions={tagSuggestions}
+				onchange={(t) => (draftTags = t)}
+			/>
 			{#if dirty}
 				<DirtyIcon size="0.875rem" />
 			{/if}

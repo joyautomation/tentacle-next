@@ -80,7 +80,7 @@ type PlcTaskConfigKV struct {
 type PlcProgramKV struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
-	Module      string          `json:"module,omitempty"`    // slash-delimited group path, e.g. "motors/utility"
+	Tags        []string        `json:"tags,omitempty"`      // free-form labels shared across programs/tests/templates
 	Language    string          `json:"language"`            // "ladder", "st", "starlark"
 	Source      string          `json:"source"`              // Starlark source (for ladder, this IS the DSL)
 	StSource    string          `json:"stSource,omitempty"`  // Original ST source (for ST programs only)
@@ -132,6 +132,7 @@ type PlcFunctionReturn struct {
 type PlcTestKV struct {
 	Name        string           `json:"name"`
 	Description string           `json:"description,omitempty"`
+	Tags        []string         `json:"tags,omitempty"`
 	Source      string           `json:"source"`
 	UpdatedAt   int64            `json:"updatedAt"`
 	UpdatedBy   string           `json:"updatedBy,omitempty"`

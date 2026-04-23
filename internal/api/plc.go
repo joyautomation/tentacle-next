@@ -278,7 +278,7 @@ func (m *Module) handleDeletePlcConfigVariable(w http.ResponseWriter, r *http.Re
 type programListItem struct {
 	Name             string                 `json:"name"`
 	Description      string                 `json:"description,omitempty"`
-	Module           string                 `json:"module,omitempty"`
+	Tags             []string               `json:"tags,omitempty"`
 	Language         string                 `json:"language"`
 	Signature        *itypes.PlcFunctionSig `json:"signature,omitempty"`
 	UpdatedAt        int64                  `json:"updatedAt"`
@@ -305,7 +305,7 @@ func (m *Module) handleListPlcPrograms(w http.ResponseWriter, r *http.Request) {
 		out = append(out, programListItem{
 			Name:             prog.Name,
 			Description:      prog.Description,
-			Module:           prog.Module,
+			Tags:             prog.Tags,
 			Language:         prog.Language,
 			Signature:        prog.Signature,
 			UpdatedAt:        prog.UpdatedAt,
@@ -855,6 +855,7 @@ func (m *Module) putPlcTest(t *itypes.PlcTestKV) error {
 type testListItem struct {
 	Name        string                `json:"name"`
 	Description string                `json:"description,omitempty"`
+	Tags        []string              `json:"tags,omitempty"`
 	UpdatedAt   int64                 `json:"updatedAt"`
 	UpdatedBy   string                `json:"updatedBy,omitempty"`
 	LastResult  *itypes.PlcTestResult `json:"lastResult,omitempty"`
@@ -876,6 +877,7 @@ func (m *Module) handleListPlcTests(w http.ResponseWriter, r *http.Request) {
 		out = append(out, testListItem{
 			Name:        t.Name,
 			Description: t.Description,
+			Tags:        t.Tags,
 			UpdatedAt:   t.UpdatedAt,
 			UpdatedBy:   t.UpdatedBy,
 			LastResult:  t.LastResult,
