@@ -5,6 +5,8 @@
 
   interface Props {
     source: string;
+    /** Auto-injected `<script>` body. */
+    scriptHeader?: string;
     /** Props passed into the compiled component (e.g. `{ udt: {...} }`). */
     props?: Record<string, unknown>;
     /** App-wide CSS classes (selectors stay bare). */
@@ -15,19 +17,26 @@
     prefix?: string;
     /** Debounce ms for recompiling on source changes. */
     debounceMs?: number;
+    /** Called when a class chip is dropped on the preview surface. The host
+     * is expected to splice the class onto the source's Nth element. */
+    onClassDrop?: (idx: number, className: string) => void;
   }
 
   let {
     source,
+    scriptHeader,
     props = {},
     appClasses,
     componentClasses,
     prefix = '',
     debounceMs = 300,
+    onClassDrop,
   }: Props = $props();
 
   let compiling = $state(false);
   let error = $state<string | null>(null);
+  let surfaceEl: HTMLDivElement | undefined = $state();
+  let dropTargetIdx = $state<number | null>(null);
 
   const css = $derived.by(() => {
     const parts: string[] = [];
@@ -48,6 +57,63 @@
     }
     setHmiStyleContext(ctx);
   });
+
+  /** Walk up from a target node to find the nearest element carrying a
+   * `data-hmi-el` marker. Returns the index, or null if none. */
+  function elementIdxAt(target: EventTarget | null): number | null {
+    let el: HTMLElement | null = target instanceof HTMLElement ? target : null;
+    while (el && el !== surfaceEl) {
+      const v = el.dataset?.hmiEl;
+      if (v !== undefined && v !== '') {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function onDragOver(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    if (!Array.from(e.dataTransfer.types).includes('application/x-hmi-class')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropTargetIdx = elementIdxAt(e.target);
+  }
+
+  function onDragLeave(e: DragEvent) {
+    if (e.target === surfaceEl) dropTargetIdx = null;
+  }
+
+  function onDrop(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    const raw = e.dataTransfer.getData('application/x-hmi-class');
+    if (!raw) return;
+    e.preventDefault();
+    const idx = elementIdxAt(e.target);
+    dropTargetIdx = null;
+    if (idx === null) return;
+    try {
+      const { name } = JSON.parse(raw) as { name: string };
+      if (!name) return;
+      onClassDrop?.(idx, name);
+    } catch {
+      // ignore malformed
+    }
+  }
+
+  // Highlight the hovered drop target by toggling a CSS attribute on the
+  // surface — the actual element is found by selector.
+  $effect(() => {
+    if (!surfaceEl) return;
+    surfaceEl
+      .querySelectorAll<HTMLElement>('[data-hmi-el].hmi-drop-target')
+      .forEach((el) => el.classList.remove('hmi-drop-target'));
+    if (dropTargetIdx !== null) {
+      const el = surfaceEl.querySelector<HTMLElement>(`[data-hmi-el="${dropTargetIdx}"]`);
+      el?.classList.add('hmi-drop-target');
+    }
+  });
 </script>
 
 {#if css}
@@ -55,9 +121,18 @@
 {/if}
 
 <div class="preview-shell">
-  <div class="surface">
+  <div
+    class="surface"
+    bind:this={surfaceEl}
+    ondragover={onDragOver}
+    ondragleave={onDragLeave}
+    ondrop={onDrop}
+    role="region"
+  >
     <SvelteHost
       {source}
+      {scriptHeader}
+      markElements={true}
       componentProps={props}
       {debounceMs}
       onStatus={(s) => {
@@ -94,6 +169,10 @@
     width: 100%;
     height: 100%;
     box-sizing: border-box;
+    :global(.hmi-drop-target) {
+      outline: 2px dashed var(--theme-text);
+      outline-offset: 2px;
+    }
   }
   .badge {
     position: absolute;

@@ -30,6 +30,34 @@
     view.focus();
   }
 
+  function onClassDragOver(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    if (!Array.from(e.dataTransfer.types).includes('application/x-hmi-class')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onClassDrop(e: DragEvent) {
+    if (!view || !e.dataTransfer) return;
+    const raw = e.dataTransfer.getData('application/x-hmi-class');
+    if (!raw) return;
+    e.preventDefault();
+    let name: string | undefined;
+    try {
+      ({ name } = JSON.parse(raw) as { name: string });
+    } catch {
+      return;
+    }
+    if (!name) return;
+    const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.selection.main.from;
+    const insert = ` class="${name}"`;
+    view.dispatch({
+      changes: { from: pos, to: pos, insert },
+      selection: { anchor: pos + insert.length },
+    });
+    view.focus();
+  }
+
   onMount(() => {
     if (!host) return;
     const updateListener = EditorView.updateListener.of((u) => {
@@ -75,7 +103,14 @@
   });
 </script>
 
-<div class="editor" bind:this={host}>
+<div
+  class="editor"
+  bind:this={host}
+  ondragover={onClassDragOver}
+  ondrop={onClassDrop}
+  role="textbox"
+  tabindex="-1"
+>
   {#if !value && placeholder}
     <div class="placeholder">{placeholder}</div>
   {/if}

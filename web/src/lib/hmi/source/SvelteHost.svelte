@@ -1,10 +1,18 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { compileComponent, mountComponent } from './svelteRuntime';
+  import { injectMarkers } from './markupTools';
 
   interface Props {
-    /** Svelte source. Re-compile + re-mount when this changes. */
+    /** User markup. Re-compile + re-mount when this changes. */
     source: string;
+    /** Auto-injected `<script>` body. Glued onto the markup before compile so
+     * the user's source stays markup-only. */
+    scriptHeader?: string;
+    /** When true, every element open tag in the markup is augmented with a
+     * `data-hmi-el="N"` attribute so a host can map DOM clicks back to
+     * source positions. */
+    markElements?: boolean;
     /** Reactive props passed through to the mounted component. Mutating the
      * input object triggers reactivity inside the component. */
     componentProps?: Record<string, unknown>;
@@ -14,7 +22,20 @@
     onStatus?: (s: { compiling: boolean; error: string | null }) => void;
   }
 
-  let { source, componentProps = {}, debounceMs = 0, onStatus }: Props = $props();
+  let {
+    source,
+    scriptHeader,
+    markElements = false,
+    componentProps = {},
+    debounceMs = 0,
+    onStatus,
+  }: Props = $props();
+
+  function buildFullSource(): string {
+    const markup = markElements ? injectMarkers(source) : source;
+    if (!scriptHeader) return markup;
+    return `<script>\n${scriptHeader}\n</` + `script>\n\n${markup}`;
+  }
 
   let host: HTMLDivElement | undefined = $state();
   let unmount: (() => void) | null = null;
@@ -47,24 +68,28 @@
       return;
     }
     syncProps(componentProps);
-    const result = await compileComponent(source);
+    const fullSource = buildFullSource();
+    const result = await compileComponent(fullSource);
     if (!result.ok) {
       onStatus?.({ compiling: false, error: result.error.message });
       return;
     }
     try {
       unmount = mountComponent(result.Component, host, liveProps);
-      lastCompiledSource = source;
+      lastCompiledSource = fullSource;
       onStatus?.({ compiling: false, error: null });
     } catch (e: any) {
       onStatus?.({ compiling: false, error: `Mount failed: ${e?.message ?? String(e)}` });
     }
   }
 
-  // Re-compile when the source changes (debounced).
+  // Re-compile when the source / scriptHeader / marker mode changes (debounced).
   $effect(() => {
     void source;
-    if (source === lastCompiledSource) return;
+    void scriptHeader;
+    void markElements;
+    const next = buildFullSource();
+    if (next === lastCompiledSource) return;
     if (pendingTimer) clearTimeout(pendingTimer);
     if (debounceMs > 0) {
       pendingTimer = setTimeout(recompile, debounceMs);

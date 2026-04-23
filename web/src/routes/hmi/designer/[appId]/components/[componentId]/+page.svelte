@@ -7,6 +7,7 @@
   import HtmlPalette from '$lib/hmi/source/HtmlPalette.svelte';
   import CodeEditor from '$lib/hmi/source/CodeEditor.svelte';
   import SveltePreview from '$lib/hmi/source/SveltePreview.svelte';
+  import { stripScriptBlock, addClassToElement } from '$lib/hmi/source/markupTools';
   import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember } from '$lib/types/hmi';
 
   const appId = $derived($page.params.appId as string);
@@ -53,6 +54,7 @@
   }
 
   const previewProps = $derived<Record<string, unknown>>(inUdtMode ? { udt: mockUdt } : {});
+  const scriptHeader = $derived(inUdtMode ? 'let { udt } = $props();' : '');
 
   async function refresh() {
     loading = true;
@@ -69,7 +71,8 @@
         error = `Component "${componentId}" not found.`;
         return;
       }
-      source = c.source ?? defaultSource(c);
+      const raw = c.source ?? defaultSource();
+      source = stripScriptBlock(raw).markup.trimStart();
       componentName = c.name;
       udtTemplateName = c.udtTemplate ?? '';
       classes = { ...(c.classes ?? {}) };
@@ -88,9 +91,16 @@
     }
   }
 
-  function defaultSource(c: HmiComponentConfig): string {
-    const propsLine = c.udtTemplate ? '  let { udt } = $props();\n' : '';
-    return `<script>\n${propsLine}</` + `script>\n\n<div>\n  \n</div>\n`;
+  function defaultSource(): string {
+    return '<div>\n  \n</div>\n';
+  }
+
+  function onClassDrop(idx: number, name: string) {
+    const next = addClassToElement(source, idx, name);
+    if (next === null) return;
+    if (next === source) return;
+    source = next;
+    dirty = true;
   }
 
   function onSourceChange(next: string) {
@@ -110,11 +120,14 @@
   async function save() {
     saving = true;
     saveError = null;
+    const fullSource = scriptHeader
+      ? `<script>\n  ${scriptHeader}\n</` + `script>\n\n${source}`
+      : source;
     const payload: HmiComponentConfig = {
       componentId,
       name: componentName,
       udtTemplate: udtTemplateName || undefined,
-      source,
+      source: fullSource,
       classes,
     };
     const r = await putHmiComponent(appId, componentId, payload);
@@ -161,10 +174,12 @@
         <div class="preview-pane">
           <SveltePreview
             {source}
+            {scriptHeader}
             props={previewProps}
             appClasses={app?.classes}
             componentClasses={classes}
             {prefix}
+            {onClassDrop}
           />
         </div>
         <div class="editor-pane">
@@ -172,7 +187,9 @@
             bind:this={editorRef}
             value={source}
             onChange={onSourceChange}
-            placeholder={'<script>\n  // your code here\n</' + 'script>\n\n<div>...</div>'}
+            placeholder={inUdtMode
+              ? '<div>\n  <span>{udt.member}</span>\n</div>'
+              : '<div>...</div>'}
           />
         </div>
       </div>
