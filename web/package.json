@@ -15,6 +15,7 @@
     "test:all": "vitest run && playwright test"
   },
   "dependencies": {
+    "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/lint": "^6.9.5",
     "@codemirror/theme-one-dark": "^6.1.3",

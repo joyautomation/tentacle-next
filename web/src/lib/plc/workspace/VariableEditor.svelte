@@ -12,11 +12,11 @@
 	} from '$lib/types/plc';
 	import {
 		workspaceTabs,
+		workspaceSelection,
 		workspaceVariableDrafts,
 		workspaceEditorSaves
 	} from '../workspace-state.svelte';
 	import { watchVariable, liveValuesVersion, getLiveValue } from '../live-values.svelte';
-	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
 	import { XMark } from '@joyautomation/salt/icons';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
@@ -423,7 +423,7 @@
 							<option value="string">string</option>
 						</optgroup>
 						{#if templates.length > 0}
-							<optgroup label="Templates">
+							<optgroup label="Types">
 								{#each templates as tmpl (tmpl.name)}
 									<option value={tmpl.name}>{tmpl.name}</option>
 								{/each}
@@ -535,7 +535,18 @@
 					{/if}
 				</div>
 
-				<TemplateDefinitionEditor template={selectedTemplate} {templates} {plcConfig} />
+				<div class="type-link-row">
+					<button
+						type="button"
+						class="type-link"
+						onclick={() => {
+							workspaceTabs.open({ name: selectedTemplate.name, kind: 'type' });
+							workspaceSelection.select('type', selectedTemplate.name);
+						}}
+					>
+						Edit type <code>{selectedTemplate.name}</code> →
+					</button>
+				</div>
 			{/if}
 
 			{#if current.source}
@@ -682,6 +693,34 @@
 
 		&:focus {
 			outline: none;
+			border-color: var(--theme-primary);
+		}
+	}
+
+	.type-link-row {
+		display: flex;
+	}
+
+	.type-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.3125rem 0.5rem;
+		font-size: 0.8125rem;
+		color: var(--theme-primary);
+		background: transparent;
+		border: 1px dashed color-mix(in srgb, var(--theme-primary) 40%, var(--theme-border));
+		border-radius: 0.3125rem;
+		cursor: pointer;
+
+		code {
+			font-family: var(--font-mono, monospace);
+			font-size: 0.8125rem;
+			color: var(--theme-text);
+		}
+
+		&:hover {
+			background: color-mix(in srgb, var(--theme-primary) 10%, transparent);
 			border-color: var(--theme-primary);
 		}
 	}

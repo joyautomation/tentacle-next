@@ -3,6 +3,7 @@
   import type {
     PlcVariableConfig,
     PlcTaskConfig,
+    PlcTemplate,
     ProgramListItem,
     TestListItem,
   } from "$lib/types/plc";
@@ -15,6 +16,7 @@
   type Props = {
     variables: Record<string, PlcVariableConfig>;
     tasks: Record<string, PlcTaskConfig>;
+    templates: PlcTemplate[];
     programs: ProgramListItem[];
     tests: TestListItem[];
     onCreate?: (kind: "variable" | "task") => void;
@@ -25,6 +27,7 @@
   let {
     variables,
     tasks,
+    templates,
     programs,
     tests,
     onCreate,
@@ -43,8 +46,16 @@
     workspaceTabs.openNew("test", "starlark");
   }
 
+  function newTypeTab() {
+    // Types are created the same way programs are: a blank tab opens, the
+    // user names the type in-editor, renameTab promotes the synthetic id on
+    // first save.
+    workspaceTabs.openNew("type");
+  }
+
   let sections = $state({
     variables: true,
+    types: true,
     tasks: true,
     programs: true,
     tests: true,
@@ -71,6 +82,12 @@
 
   const taskEntries = $derived(
     Object.values(tasks)
+      .filter((t) => matchesFilter(t.name))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  );
+
+  const typeEntries = $derived(
+    templates
       .filter((t) => matchesFilter(t.name))
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
@@ -222,6 +239,56 @@
             </li>
           {:else}
             <li class="empty">No variables</li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <section class="section">
+      <div class="section-header-row">
+        <button
+          type="button"
+          class="section-header"
+          onclick={() => toggle("types")}
+          aria-expanded={sections.types}
+        >
+          <span class="chevron" class:open={sections.types}
+            ><ChevronRight size="0.75rem" /></span
+          >
+          <span class="label">Types</span>
+          <span class="count">{typeEntries.length}</span>
+        </button>
+        <button
+          type="button"
+          class="add-btn"
+          onclick={newTypeTab}
+          title="New type"
+          aria-label="New type"
+        >
+          <Plus size="0.875rem" />
+        </button>
+      </div>
+      {#if sections.types}
+        <ul class="items" transition:slide={{ duration: 150 }}>
+          {#each typeEntries as tmpl (tmpl.name)}
+            <li>
+              <button
+                type="button"
+                class="item"
+                class:selected={workspaceSelection.isSelected(
+                  "type",
+                  tmpl.name,
+                )}
+                onclick={() => workspaceSelection.select("type", tmpl.name)}
+                title={tmpl.description ?? `${tmpl.fields.length} field(s)`}
+              >
+                <span class="badge type">TYPE</span>
+                <span class="name">{tmpl.name}</span>
+                <span class="meta">{tmpl.fields.length}</span>
+              </button>
+            </li>
+          {:else}
+            <li class="empty">No types</li>
           {/each}
         </ul>
       {/if}

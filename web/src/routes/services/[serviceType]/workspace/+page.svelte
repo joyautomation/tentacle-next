@@ -57,6 +57,12 @@
 		workspaceTabs.open({ name: selection.id, kind: 'test' });
 	});
 
+	$effect(() => {
+		if (selection?.kind !== 'type') return;
+		if (!data.templates.some((t) => t.name === selection.id)) return;
+		workspaceTabs.open({ name: selection.id, kind: 'type' });
+	});
+
 	// Ctrl/Cmd+S saves the active tab's draft. Each editor registers its
 	// own save handler in workspaceEditorSaves; the handler no-ops when
 	// there's nothing to persist (saving=false, clean, invalid, etc.).
@@ -166,6 +172,7 @@
 										<Navigator
 											variables={data.variables}
 											tasks={data.tasks}
+											templates={data.templates}
 											programs={data.programs}
 											tests={data.tests}
 											onCreate={(kind) => (createKind = kind)}

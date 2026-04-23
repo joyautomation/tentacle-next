@@ -205,7 +205,7 @@
 							<option value="string">string</option>
 						</optgroup>
 						{#if templates.length > 0}
-							<optgroup label="Templates">
+							<optgroup label="Types">
 								{#each templates as tmpl (tmpl.name)}
 									<option value={tmpl.name}>{tmpl.name}</option>
 								{/each}
@@ -224,7 +224,7 @@
 					</label>
 				{:else if selectedTemplate}
 					<p class="template-hint">
-						Uses template defaults. Edit field values after creating.
+						Uses type defaults. Edit field values after creating.
 					</p>
 				{/if}
 			{/if}

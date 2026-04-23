@@ -7,6 +7,7 @@
   import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from '@codemirror/autocomplete';
   import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
   import { python } from '@codemirror/lang-python';
+  import { json } from '@codemirror/lang-json';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { structuredText } from '$lib/lang/structured-text';
   import { createVarCompletion } from '$lib/editor/var-completion';
@@ -20,7 +21,7 @@
 
   interface Props {
     value: string;
-    language?: 'python' | 'starlark' | 'starlark-test' | 'st';
+    language?: 'python' | 'starlark' | 'starlark-test' | 'st' | 'json';
     readonly?: boolean;
     onchange?: (value: string) => void;
     variableNames?: string[];
@@ -70,6 +71,7 @@
 
   function getLanguageExtension() {
     if (language === 'st') return structuredText();
+    if (language === 'json') return json();
     // 'starlark-test' is a Starlark dialect — same CodeMirror mode.
     return python();
   }
