@@ -50,12 +50,16 @@ func newScannerBridge(b bus.Bus, plcID string, vars *VariableStore, devices *sca
 	}
 }
 
-// subscribe sets up subscriptions based on the PLC config's input variables.
-func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
+// subscribe sets up subscriptions based on the PLC config's input variables
+// plus any read_tag("dev", "tag") calls extracted from program source. The
+// two paths are unioned so users can either declare a variable explicitly
+// (when they need deadband/RBE config) or just reference the tag in code
+// and have the runtime subscribe it automatically.
+func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV, programSources map[string]string) {
 	sb.unsubscribe()
 	sb.tagIndex = make(map[string][]string)
 
-	if config == nil || sb.devices == nil {
+	if sb.devices == nil {
 		return
 	}
 
@@ -65,31 +69,61 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 	type deviceGroup struct {
 		deviceID string
 		tags     []scanner.TagSpec
+		// seenTag dedupes tag names within a device when the same tag is
+		// both declared as a variable and referenced by read_tag().
+		seenTag map[string]struct{}
 	}
 	groups := make(map[string]*deviceGroup)
+	getGroup := func(deviceID string) *deviceGroup {
+		grp, ok := groups[deviceID]
+		if !ok {
+			grp = &deviceGroup{deviceID: deviceID, seenTag: make(map[string]struct{})}
+			groups[deviceID] = grp
+		}
+		return grp
+	}
 
-	for _, vcfg := range config.Variables {
-		if vcfg.Direction != "input" || vcfg.Source == nil {
+	if config != nil {
+		for _, vcfg := range config.Variables {
+			if vcfg.Direction != "input" || vcfg.Source == nil {
+				continue
+			}
+			src := vcfg.Source
+			device, ok := sb.devices.Get(src.DeviceID)
+			if !ok {
+				sb.log.Warn("scanner_bridge: device not found for variable",
+					"variable", vcfg.ID, "deviceId", src.DeviceID)
+				continue
+			}
+
+			sanitizedTag := types.SanitizeForSubject(src.Tag)
+			key := device.Protocol + "." + src.DeviceID + "." + sanitizedTag
+			sb.tagIndex[key] = append(sb.tagIndex[key], vcfg.ID)
+
+			grp := getGroup(src.DeviceID)
+			if _, dup := grp.seenTag[src.Tag]; dup {
+				continue
+			}
+			grp.seenTag[src.Tag] = struct{}{}
+			grp.tags = append(grp.tags, scanner.TagSpecFromPlcSource(*src))
+		}
+	}
+
+	// Fold in read_tag() refs. We only add a TagSpec if no declared variable
+	// already covers the (device, tag) pair — declared variables carry
+	// deadband/RBE config we want to preserve.
+	for _, ref := range collectReadTagRefs(programSources) {
+		if _, ok := sb.devices.Get(ref.DeviceID); !ok {
+			sb.log.Warn("scanner_bridge: read_tag references unknown device",
+				"deviceId", ref.DeviceID, "tag", ref.Tag)
 			continue
 		}
-		src := vcfg.Source
-		device, ok := sb.devices.Get(src.DeviceID)
-		if !ok {
-			sb.log.Warn("scanner_bridge: device not found for variable",
-				"variable", vcfg.ID, "deviceId", src.DeviceID)
+		grp := getGroup(ref.DeviceID)
+		if _, dup := grp.seenTag[ref.Tag]; dup {
 			continue
 		}
-
-		sanitizedTag := types.SanitizeForSubject(src.Tag)
-		key := device.Protocol + "." + src.DeviceID + "." + sanitizedTag
-		sb.tagIndex[key] = append(sb.tagIndex[key], vcfg.ID)
-
-		grp, ok := groups[src.DeviceID]
-		if !ok {
-			grp = &deviceGroup{deviceID: src.DeviceID}
-			groups[src.DeviceID] = grp
-		}
-		grp.tags = append(grp.tags, scanner.TagSpecFromPlcSource(*src))
+		grp.seenTag[ref.Tag] = struct{}{}
+		grp.tags = append(grp.tags, scanner.TagSpec{Tag: ref.Tag})
 	}
 
 	subscriberID := scanner.SubscriberID(serviceType, sb.plcID)

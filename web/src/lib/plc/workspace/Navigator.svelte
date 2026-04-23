@@ -426,75 +426,6 @@
     };
   }
 
-  function mapBrowseDatatype(d: string): "number" | "boolean" | "string" {
-    const lower = (d ?? "").toLowerCase();
-    if (lower === "bool" || lower === "boolean") return "boolean";
-    if (lower === "string") return "string";
-    return "number";
-  }
-
-  function defaultForDatatype(dt: "number" | "boolean" | "string"): unknown {
-    if (dt === "boolean") return false;
-    if (dt === "string") return "";
-    return 0;
-  }
-
-  // Sanitize a browsed tag path into a valid Starlark identifier so it can
-  // back a PLC input variable. `RTU60_13XFR9_PLC_TOD.SECOND` → `RTU60_13XFR9_PLC_TOD_SECOND`.
-  function browseTagToVariableId(tag: string): string {
-    let id = tag.replace(/[^A-Za-z0-9_]/g, "_");
-    if (/^[0-9]/.test(id)) id = "_" + id;
-    return id;
-  }
-
-  const subscribedBrowseTags = new Set<string>();
-
-  async function ensureBrowseTagSubscribed(
-    device: GatewayDevice,
-    item: BrowseCacheItem,
-  ) {
-    const key = `${device.deviceId}::${item.tag}`;
-    if (subscribedBrowseTags.has(key)) return;
-    const variableId = browseTagToVariableId(item.name || item.tag);
-    const existing = variables[variableId];
-    if (
-      existing &&
-      existing.direction === "input" &&
-      existing.source?.deviceId === device.deviceId &&
-      existing.source?.tag === item.tag
-    ) {
-      subscribedBrowseTags.add(key);
-      return;
-    }
-    const dt = mapBrowseDatatype(item.datatype);
-    const body = {
-      id: variableId,
-      datatype: dt,
-      default: defaultForDatatype(dt),
-      direction: "input",
-      source: {
-        protocol: device.protocol,
-        deviceId: device.deviceId,
-        tag: item.tag,
-        cipType: item.protocolType || "",
-      },
-    };
-    subscribedBrowseTags.add(key);
-    const res = await apiPut(
-      `/plcs/plc/variables/${encodeURIComponent(variableId)}`,
-      body,
-    );
-    if (res.error) {
-      subscribedBrowseTags.delete(key);
-      saltState.addNotification({
-        message: `Subscribe ${item.tag}: ${res.error.error}`,
-        type: "error",
-      });
-      return;
-    }
-    await invalidateAll();
-  }
-
   function onBrowseTagDragStart(
     e: DragEvent,
     device: GatewayDevice,
@@ -510,7 +441,6 @@
     e.dataTransfer.setData(BROWSE_TAG_MIME, payload);
     e.dataTransfer.setData("text/plain", item.tag);
     e.dataTransfer.effectAllowed = "copy";
-    void ensureBrowseTagSubscribed(device, item);
   }
 
   function typeBadge(datatype: string): string {

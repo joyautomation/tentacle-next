@@ -226,6 +226,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		if op == bus.KVOpDelete {
 			eng.Remove(key)
 			m.log.Info("plc: program removed, engine updated", "program", key)
+			m.refreshSubscriptions()
 			return
 		}
 		var prog itypes.PlcProgramKV
@@ -241,6 +242,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 			return
 		}
 		m.log.Info("plc: program recompiled", "program", prog.Name)
+		m.refreshSubscriptions()
 	})
 	if err != nil {
 		m.log.Error("plc: failed to watch programs KV", "error", err)
@@ -403,6 +405,22 @@ func (m *Module) onDevicesChanged() {
 	m.applyConfig(cfg)
 }
 
+// refreshSubscriptions re-runs the scanner bridge against the current config
+// and latest program sources. Called after a program hot-swap so read_tag
+// refs added/removed in code propagate to scanner subscriptions without a
+// full engine rebuild.
+func (m *Module) refreshSubscriptions() {
+	m.mu.RLock()
+	bridge := m.bridge
+	cfg := m.config
+	eng := m.engine
+	m.mu.RUnlock()
+	if bridge == nil || eng == nil {
+		return
+	}
+	bridge.subscribe(cfg, eng.AllSources())
+}
+
 // applyConfig rebuilds the variable store, engine, tasks, publisher, and scanner bridge.
 func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	m.mu.Lock()
@@ -519,9 +537,11 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 		m.log.Info("plc: compiled program", "program", prog.Name, "language", prog.Language)
 	}
 
-	// Start scanner bridge.
+	// Start scanner bridge. Subscription set is the union of declared input
+	// variables and read_tag() refs harvested from compiled program source,
+	// so ad-hoc read_tag calls subscribe automatically.
 	m.bridge = newScannerBridge(m.b, m.plcID, m.variables, m.devices, m.log)
-	m.bridge.subscribe(config)
+	m.bridge.subscribe(config, m.engine.AllSources())
 
 	// Start publisher.
 	m.pub = newPublisher(m.b, m.plcID, m.variables, m.log)

@@ -323,6 +323,19 @@ func (e *Engine) ProgramCount() int {
 	return len(e.programs)
 }
 
+// AllSources returns a snapshot of every compiled program's source, keyed by
+// program name. Used by the scanner bridge to harvest read_tag(...) call
+// sites from live code.
+func (e *Engine) AllSources() map[string]string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	out := make(map[string]string, len(e.sources))
+	for k, v := range e.sources {
+		out[k] = v
+	}
+	return out
+}
+
 // AddErrorObserver registers fn to be called whenever a task reports a
 // runtime error. Returns a remove func the caller uses to deregister.
 func (e *Engine) AddErrorObserver(fn ErrorObserver) (remove func()) {
