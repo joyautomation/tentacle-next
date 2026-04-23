@@ -113,6 +113,56 @@
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
 
+  // Types are grouped by the namespace prefix in their name. Templates
+  // auto-imported from a scanner are named `{deviceId}.{typeName}` —
+  // those share a device group. Hand-authored templates have bare names
+  // and land in the "Global" group at the top.
+  type TypeGroup = {
+    key: string;
+    label: string;
+    isGlobal: boolean;
+    items: typeof typeEntries;
+  };
+  const typeGroups = $derived.by<TypeGroup[]>(() => {
+    const byDevice = new Map<string, typeof typeEntries>();
+    const global: typeof typeEntries = [];
+    for (const t of typeEntries) {
+      const dot = t.name.indexOf(".");
+      if (dot > 0) {
+        const dev = t.name.slice(0, dot);
+        const list = byDevice.get(dev) ?? [];
+        list.push(t);
+        byDevice.set(dev, list);
+      } else {
+        global.push(t);
+      }
+    }
+    const groups: TypeGroup[] = [];
+    if (global.length > 0) {
+      groups.push({ key: "__global", label: "Global", isGlobal: true, items: global });
+    }
+    for (const [dev, items] of [...byDevice].sort(([a], [b]) => a.localeCompare(b))) {
+      groups.push({ key: dev, label: dev, isGlobal: false, items });
+    }
+    return groups;
+  });
+
+  let typeGroupsOpen = $state<Record<string, boolean>>({});
+  function toggleTypeGroup(key: string) {
+    typeGroupsOpen = { ...typeGroupsOpen, [key]: !(typeGroupsOpen[key] ?? true) };
+  }
+  function isTypeGroupOpen(key: string): boolean {
+    // Default-open; also force-open when a filter is active so matches
+    // aren't hidden under a collapsed device group.
+    if (filter) return true;
+    return typeGroupsOpen[key] ?? true;
+  }
+
+  function typeDisplayLabel(fullName: string): string {
+    const dot = fullName.indexOf(".");
+    return dot > 0 ? fullName.slice(dot + 1) : fullName;
+  }
+
   // Devices are shared across Gateway and PLC — one source of truth in the
   // `devices` KV bucket, exposed on the gateway config as `devices`.
   const deviceEntries = $derived(
@@ -833,26 +883,53 @@
       </div>
       {#if sections.types}
         <ul class="items" transition:slide={{ duration: 150 }}>
-          {#each typeEntries as tmpl (tmpl.name)}
-            <li>
-              <button
-                type="button"
-                class="item"
-                class:selected={workspaceSelection.isSelected(
-                  "type",
-                  tmpl.name,
-                )}
-                onclick={() => workspaceSelection.select("type", tmpl.name)}
-                title={tmpl.description ?? `${tmpl.fields.length} field(s)`}
-              >
-                <span class="t-icon">T</span>
-                <span class="name">{tmpl.name}</span>
-                <span class="meta">{tmpl.fields.length}</span>
-              </button>
-            </li>
-          {:else}
+          {#if typeGroups.length === 0}
             <li class="empty">No types</li>
-          {/each}
+          {:else}
+            {#each typeGroups as group (group.key)}
+              {@const open = isTypeGroupOpen(group.key)}
+              <li class="type-group">
+                <button
+                  type="button"
+                  class="type-group-header"
+                  onclick={() => toggleTypeGroup(group.key)}
+                  aria-expanded={open}
+                >
+                  <span class="chevron small" class:open>
+                    <ChevronRight size="0.625rem" />
+                  </span>
+                  <span class="type-group-label" class:global={group.isGlobal}
+                    >{group.label}</span
+                  >
+                  <span class="count">{group.items.length}</span>
+                </button>
+                {#if open}
+                  <ul class="type-group-items" transition:slide={{ duration: 120 }}>
+                    {#each group.items as tmpl (tmpl.name)}
+                      <li>
+                        <button
+                          type="button"
+                          class="item"
+                          class:selected={workspaceSelection.isSelected(
+                            "type",
+                            tmpl.name,
+                          )}
+                          onclick={() =>
+                            workspaceSelection.select("type", tmpl.name)}
+                          title={tmpl.description ??
+                            `${tmpl.name} · ${tmpl.fields.length} field(s)`}
+                        >
+                          <span class="t-icon">T</span>
+                          <span class="name">{typeDisplayLabel(tmpl.name)}</span>
+                          <span class="meta">{tmpl.fields.length}</span>
+                        </button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </li>
+            {/each}
+          {/if}
         </ul>
       {/if}
     </section>
@@ -1313,6 +1390,54 @@
     background: var(--badge-purple-bg);
     color: var(--badge-purple-text);
     flex-shrink: 0;
+  }
+
+  .type-group {
+    list-style: none;
+  }
+
+  .type-group-header {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    width: 100%;
+    padding: 0.1875rem 0.5rem 0.1875rem 0.375rem;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--theme-text-muted);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-align: left;
+
+    &:hover {
+      background: var(--theme-surface);
+      color: var(--theme-text);
+    }
+  }
+
+  .type-group-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .type-group-label.global {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.625rem;
+  }
+
+  .type-group-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .type-group-items .item {
+    padding-left: 1.25rem;
   }
 
   .badge.device {

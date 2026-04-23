@@ -22,7 +22,9 @@ import (
 // pattern used for plc programs.
 
 var (
-	templateNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// Bare name (e.g. Motor) for hand-authored templates, or device-qualified
+	// (e.g. rtu60.UDT_PIT) for templates auto-imported from a scanner browse.
+	templateNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 	fieldNameRE    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	primitiveTypes = map[string]bool{
 		"bool":    true,
