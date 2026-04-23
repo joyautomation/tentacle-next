@@ -28,6 +28,8 @@
 
 	interface PlcProgramKV {
 		name: string;
+		description?: string;
+		module?: string;
 		language: string;
 		source: string;
 		stSource?: string;
@@ -79,12 +81,17 @@
 	const TRY_TIMEOUT_SECONDS = 120;
 	let serverSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let serverStSource = $state('');
+	let serverModule = $state('');
 	let language = $state<string>(isNew ? initialLanguage : 'starlark');
 	let draftSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
 	let draftStSource = $state('');
+	let draftModule = $state('');
 
 	const dirty = $derived(
-		isNew || draftSource !== serverSource || draftStSource !== serverStSource
+		isNew
+			|| draftSource !== serverSource
+			|| draftStSource !== serverStSource
+			|| draftModule !== serverModule
 	);
 
 	// Diff view appears whenever the draft differs from the running code —
@@ -241,8 +248,10 @@
 		language = full.language;
 		serverSource = full.source ?? '';
 		serverStSource = full.stSource ?? '';
+		serverModule = full.module ?? '';
 		draftSource = serverSource;
 		draftStSource = serverStSource;
+		draftModule = serverModule;
 	}
 
 	function onEditorChange(val: string) {
@@ -288,6 +297,7 @@
 				name: bodyName,
 				language,
 				source: draftSource,
+				module: normalizeModule(draftModule),
 				updatedBy: 'gui'
 			};
 			if (language === 'st') body.stSource = draftStSource;
@@ -298,6 +308,8 @@
 			}
 			serverSource = draftSource;
 			serverStSource = draftStSource;
+			serverModule = normalizeModule(draftModule);
+			draftModule = serverModule;
 			const renamed = !isNew && bodyName !== name;
 			if (isNew || renamed) {
 				workspaceTabs.renameTab(tabId, bodyName);
@@ -317,6 +329,18 @@
 	function revert() {
 		draftSource = serverSource;
 		draftStSource = serverStSource;
+		draftModule = serverModule;
+	}
+
+	// normalizeModule trims whitespace and leading/trailing slashes and
+	// collapses runs of slashes. Empty strings stay empty so the program
+	// shows up at the Navigator root.
+	function normalizeModule(m: string): string {
+		const cleaned = m
+			.trim()
+			.replace(/^\/+|\/+$/g, '')
+			.replace(/\/{2,}/g, '/');
+		return cleaned;
 	}
 
 	// canTry gates the Try button: only Starlark (engine-level hot-swap),
@@ -445,6 +469,13 @@
 				</span>
 			{/if}
 			<span class="lang-badge">{language}</span>
+			<input
+				type="text"
+				class="module-input"
+				placeholder="module/path"
+				title="Module path — slash-delimited, used to group functions in the Navigator"
+				bind:value={draftModule}
+			/>
 			{#if dirty}
 				<DirtyIcon size="0.875rem" />
 			{/if}
@@ -637,6 +668,26 @@
 		color: var(--theme-primary);
 		background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
 		border-radius: 0.1875rem;
+	}
+
+	.module-input {
+		width: 12rem;
+		padding: 0.1875rem 0.4375rem;
+		font-family: var(--font-mono, monospace);
+		font-size: 0.75rem;
+		color: var(--theme-text);
+		background: var(--theme-background);
+		border: 1px solid var(--theme-border);
+		border-radius: 0.25rem;
+
+		&:focus {
+			outline: none;
+			border-color: var(--theme-primary);
+		}
+
+		&::placeholder {
+			color: var(--theme-text-muted);
+		}
 	}
 
 	.btn {

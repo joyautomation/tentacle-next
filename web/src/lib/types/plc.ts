@@ -71,6 +71,7 @@ export interface PlcFunctionSig {
 export interface ProgramListItem {
   name: string;
   description?: string;
+  module?: string;
   language: string;
   signature?: PlcFunctionSig | null;
   updatedAt: number;

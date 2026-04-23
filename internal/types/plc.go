@@ -80,6 +80,7 @@ type PlcTaskConfigKV struct {
 type PlcProgramKV struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
+	Module      string          `json:"module,omitempty"`    // slash-delimited group path, e.g. "motors/utility"
 	Language    string          `json:"language"`            // "ladder", "st", "starlark"
 	Source      string          `json:"source"`              // Starlark source (for ladder, this IS the DSL)
 	StSource    string          `json:"stSource,omitempty"`  // Original ST source (for ST programs only)
