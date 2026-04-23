@@ -203,13 +203,27 @@ export const workspaceTabs = {
 	close(id: string) {
 		const idx = state.tabs.findIndex((t) => t.id === id);
 		if (idx === -1) return;
+		const closed = state.tabs[idx];
 		const next = state.tabs.filter((t) => t.id !== id);
+		const wasSelected =
+			state.selection?.kind === closed.kind && state.selection.id === closed.name;
+		const newActive =
+			state.activeTab === id
+				? (next[idx]?.id ?? next[idx - 1]?.id ?? next[next.length - 1]?.id ?? null)
+				: state.activeTab;
+		// If the closed tab matched the current selection, retarget selection
+		// to the newly active tab (or clear) BEFORE mutating state.tabs.
+		// Otherwise the navigator-driven $effect that reopens tabs on
+		// selection change would see the stale selection during the tabs
+		// mutation and immediately resurrect the closed tab.
+		if (wasSelected) {
+			const activeTab = newActive ? next.find((t) => t.id === newActive) : null;
+			state.selection =
+				activeTab && !activeTab.isNew ? { kind: activeTab.kind, id: activeTab.name } : null;
+		}
 		state.tabs = next;
 		delete state.dirty[id];
-		if (state.activeTab === id) {
-			state.activeTab =
-				next[idx]?.id ?? next[idx - 1]?.id ?? next[next.length - 1]?.id ?? null;
-		}
+		state.activeTab = newActive;
 	},
 	// setTabLabel updates only the display name for a tab. Intended for
 	// unsaved ("new") tabs whose name is being derived live from the def
