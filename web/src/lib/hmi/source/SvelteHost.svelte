@@ -112,5 +112,8 @@
 <div class="svelte-host" bind:this={host}></div>
 
 <style lang="scss">
-  .svelte-host { width: 100%; height: 100%; }
+  // display:contents removes this wrapper from the layout tree so the user's
+  // top-level markup becomes a direct flex/grid child of the surrounding
+  // container — required for container display modes (flex, grid) to apply.
+  .svelte-host { display: contents; }
 </style>
