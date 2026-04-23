@@ -120,6 +120,13 @@ const state = $state<{
 // wrap function values and break CodeMirror's `this` bindings on dispatch.
 const editorGotos = new Map<string, EditorGoto>();
 
+// EditorSave is the per-tab "save current draft" hook each editor
+// registers on mount so the workspace-level Ctrl/Cmd+S shortcut can
+// invoke it. Returning a promise lets the caller wait for the save to
+// resolve, though the shortcut handler doesn't currently need it.
+export type EditorSave = () => void | Promise<void>;
+const editorSaves = new Map<string, EditorSave>();
+
 function persistView() {
 	if (typeof localStorage === 'undefined') return;
 	try {
@@ -358,6 +365,25 @@ export const workspaceEditorGotos = {
 		const goto = editorGotos.get(tabId);
 		if (!goto) return false;
 		goto(line, col);
+		return true;
+	}
+};
+
+// workspaceEditorSaves mirrors workspaceEditorGotos for the save-action
+// side: each editor registers a save handler on mount so workspace-level
+// shortcuts (Ctrl/Cmd+S) can trigger it without needing to know about
+// each editor's internals.
+export const workspaceEditorSaves = {
+	register(tabId: string, save: EditorSave) {
+		editorSaves.set(tabId, save);
+	},
+	unregister(tabId: string) {
+		editorSaves.delete(tabId);
+	},
+	invoke(tabId: string): boolean {
+		const save = editorSaves.get(tabId);
+		if (!save) return false;
+		void save();
 		return true;
 	}
 };

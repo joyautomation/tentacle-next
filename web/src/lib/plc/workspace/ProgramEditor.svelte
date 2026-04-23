@@ -15,6 +15,7 @@
 		workspaceSelection,
 		workspaceView,
 		workspaceEditorGotos,
+		workspaceEditorSaves,
 		type DiagnosticSeverity
 	} from '$lib/plc/workspace-state.svelte';
 	import { startLiveValues, liveValuesVersion, liveValuesSnapshot } from '$lib/plc/live-values.svelte';
@@ -234,8 +235,13 @@
 		return () => window.clearInterval(id);
 	});
 
+	onMount(() => {
+		workspaceEditorSaves.register(tabId, save);
+	});
+
 	onDestroy(() => {
 		workspaceEditorGotos.unregister(tabId);
+		workspaceEditorSaves.unregister(tabId);
 	});
 
 	$effect(() => {

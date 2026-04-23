@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
@@ -10,7 +10,11 @@
 		PlcVariableConfig,
 		PlcVariableSource
 	} from '$lib/types/plc';
-	import { workspaceTabs, workspaceVariableDrafts } from '../workspace-state.svelte';
+	import {
+		workspaceTabs,
+		workspaceVariableDrafts,
+		workspaceEditorSaves
+	} from '../workspace-state.svelte';
 	import { watchVariable, liveValuesVersion, getLiveValue } from '../live-values.svelte';
 	import TemplateDefinitionEditor from './TemplateDefinitionEditor.svelte';
 	import ValueTree from '$lib/components/ValueTree.svelte';
@@ -164,7 +168,11 @@
 		if (!name) return;
 		return watchVariable(name);
 	});
-	onDestroy(() => workspaceVariableDrafts.clear(name));
+	onMount(() => workspaceEditorSaves.register(tabId, save));
+	onDestroy(() => {
+		workspaceVariableDrafts.clear(name);
+		workspaceEditorSaves.unregister(tabId);
+	});
 
 	const currentValues = $derived.by(() => {
 		void liveValuesVersion();

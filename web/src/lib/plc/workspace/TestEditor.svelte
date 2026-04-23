@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { api, apiPut, apiPost, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { state as saltState } from '@joyautomation/salt';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 	import TagInput from './TagInput.svelte';
-	import { workspaceTabs } from '../workspace-state.svelte';
+	import { workspaceTabs, workspaceEditorSaves } from '../workspace-state.svelte';
 	import type { PlcTest, PlcTestResult, TestListItem, ProgramListItem } from '$lib/types/plc';
 
 	type Props = {
@@ -82,7 +82,11 @@ test_example()
 		loading = false;
 	}
 
-	onMount(load);
+	onMount(() => {
+		void load();
+		workspaceEditorSaves.register(tabId, save);
+	});
+	onDestroy(() => workspaceEditorSaves.unregister(tabId));
 
 	function deriveName(source: string): string {
 		// Prefer the first def; otherwise leave the user-typed newName.

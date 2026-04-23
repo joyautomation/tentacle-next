@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import { apiPut, apiDelete } from '$lib/api/client';
 	import { invalidateAll } from '$app/navigation';
 	import { state as saltState } from '@joyautomation/salt';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
-	import { workspaceTabs } from '../workspace-state.svelte';
+	import { workspaceTabs, workspaceEditorSaves } from '../workspace-state.svelte';
 	import type { PlcTaskConfig, ProgramListItem } from '$lib/types/plc';
 
 	type Props = {
@@ -58,6 +59,9 @@
 	const canSave = $derived(
 		!!current && dirty && !saving && scanRateMs > 0 && programRef !== ''
 	);
+
+	onMount(() => workspaceEditorSaves.register(tabId, save));
+	onDestroy(() => workspaceEditorSaves.unregister(tabId));
 
 	async function save() {
 		if (!canSave) return;

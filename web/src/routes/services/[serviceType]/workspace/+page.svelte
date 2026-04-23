@@ -3,7 +3,8 @@
 	import { createWorkspaceLayout } from '$lib/plc/workspace-layout.svelte';
 	import {
 		workspaceSelection,
-		workspaceTabs
+		workspaceTabs,
+		workspaceEditorSaves
 	} from '$lib/plc/workspace-state.svelte';
 	import Navigator from '$lib/plc/workspace/Navigator.svelte';
 	import Inspector from '$lib/plc/workspace/Inspector.svelte';
@@ -55,6 +56,17 @@
 		if (!data.tests.some((t) => t.name === selection.id)) return;
 		workspaceTabs.open({ name: selection.id, kind: 'test' });
 	});
+
+	// Ctrl/Cmd+S saves the active tab's draft. Each editor registers its
+	// own save handler in workspaceEditorSaves; the handler no-ops when
+	// there's nothing to persist (saving=false, clean, invalid, etc.).
+	function onKeydown(e: KeyboardEvent) {
+		if (e.key !== 's' || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+		const active = workspaceTabs.active;
+		if (!active) return;
+		e.preventDefault();
+		workspaceEditorSaves.invoke(active);
+	}
 
 	let createKind = $state<'variable' | 'task' | null>(null);
 	let runningAllTests = $state(false);
@@ -110,6 +122,8 @@
 		}
 	}
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <div class="workspace">
 	<div class="split-root">
