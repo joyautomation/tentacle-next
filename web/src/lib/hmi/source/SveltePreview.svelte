@@ -273,6 +273,7 @@
     position: relative;
     width: 100%;
     height: 100%;
+    box-sizing: border-box;
     background:
       linear-gradient(to right, color-mix(in srgb, var(--theme-border) 40%, transparent) 1px, transparent 1px) 0 0 / 16px 16px,
       linear-gradient(to bottom, color-mix(in srgb, var(--theme-border) 40%, transparent) 1px, transparent 1px) 0 0 / 16px 16px,
