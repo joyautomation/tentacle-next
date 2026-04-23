@@ -166,6 +166,10 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 			m.log.Warn("failed to persist browse cache to KV", "key", cacheKey, "error", err)
 		}
 
+		// Auto-import any discovered UDTs as PlcTemplates so Starlark
+		// programs can reference the device's types without manual work.
+		m.syncBrowseCacheUdtsToPlcTemplates(cacheJSON)
+
 		go cleanupBrowse()
 	})
 	if err != nil {

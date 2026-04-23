@@ -6,6 +6,7 @@
   type TagTreeNode = {
     key: string;
     label: string;
+    kind?: "template" | "instance";
     leaf?: BrowseCacheItem;
     children: TagTreeNode[];
     leafCount: number;
@@ -59,14 +60,23 @@
         <button
           type="button"
           class="tree-row branch"
+          class:template={node.kind === "template"}
+          class:instance={node.kind === "instance"}
           style:padding-left="{0.125 + depth * 0.75}rem"
           onclick={() => onToggle(node.key)}
           aria-expanded={isOpen}
-          title={node.leaf ? `${node.leaf.datatype}` : undefined}
+          title={node.kind === "template"
+            ? `Template ${node.label} · ${node.children.length} instance(s)`
+            : node.leaf
+              ? `${node.leaf.datatype}`
+              : undefined}
         >
           <span class="chevron" class:open={isOpen}>
             <ChevronRight size="0.625rem" />
           </span>
+          {#if node.kind === "template"}
+            <span class="badge template-badge">TPL</span>
+          {/if}
           <span class="name">{node.label}</span>
           <span class="count">{node.leafCount}</span>
         </button>
@@ -153,6 +163,19 @@
     color: var(--badge-teal-text, var(--theme-primary));
     border-radius: 2px;
     letter-spacing: 0.02em;
+  }
+
+  .template-badge {
+    background: color-mix(in srgb, var(--theme-warning, #f59e0b) 18%, transparent);
+    color: var(--theme-warning, #f59e0b);
+  }
+
+  .tree-row.template .name {
+    color: var(--theme-warning, #f59e0b);
+  }
+
+  .tree-row.instance .name {
+    font-weight: 500;
   }
 
   .name {

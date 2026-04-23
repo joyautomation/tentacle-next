@@ -15,6 +15,7 @@
   type TagTreeNode = {
     key: string;
     label: string;
+    kind?: "template" | "instance";
     leaf?: BrowseCacheItem;
     children: TagTreeNode[];
     leafCount: number;
@@ -383,16 +384,54 @@
     );
   }
 
-  function buildTagTree(items: BrowseCacheItem[]): TagTreeNode[] {
+  // Tree shape: Device > Template > Instance > members. Atomic tags (whose
+  // root name isn't in structTags) go directly under the device root.
+  function buildTagTree(
+    items: BrowseCacheItem[],
+    structTags: Record<string, string>,
+  ): TagTreeNode[] {
     const root: TagTreeNode = { key: "", label: "", children: [], leafCount: 0 };
+
+    const findOrAdd = (
+      parent: TagTreeNode,
+      label: string,
+      keyPath: string,
+      kind?: "template" | "instance",
+    ): TagTreeNode => {
+      let child = parent.children.find((c) => c.label === label);
+      if (!child) {
+        child = { key: keyPath, label, kind, children: [], leafCount: 0 };
+        parent.children.push(child);
+      }
+      return child;
+    };
+
     for (const item of items) {
       const parts = item.tag.split(".").filter((p) => p.length > 0);
       if (parts.length === 0) continue;
-      let cur = root;
-      let acc = "";
-      for (let i = 0; i < parts.length; i++) {
+      const rootName = parts[0];
+      const templateName = structTags?.[rootName];
+
+      let cur: TagTreeNode;
+      let startIdx = 0;
+      if (templateName) {
+        const tplNode = findOrAdd(root, templateName, `__t/${templateName}`, "template");
+        const instNode = findOrAdd(
+          tplNode,
+          rootName,
+          `__t/${templateName}/${rootName}`,
+          "instance",
+        );
+        cur = instNode;
+        startIdx = 1;
+      } else {
+        cur = root;
+      }
+
+      let acc = parts.slice(0, startIdx).join(".");
+      for (let i = startIdx; i < parts.length; i++) {
         const part = parts[i];
-        acc = acc ? acc + "/" + part : part;
+        acc = acc ? acc + "." + part : part;
         let child = cur.children.find((c) => c.label === part);
         if (!child) {
           child = { key: acc, label: part, children: [], leafCount: 0 };
@@ -404,15 +443,27 @@
         cur = child;
       }
     }
+
     const sortCount = (n: TagTreeNode): number => {
-      n.children.sort((a, b) => a.label.localeCompare(b.label));
+      n.children.sort((a, b) => {
+        // Templates/instances first (by name), then atomic branches/leaves.
+        const aIsGroup = a.kind === "template" || a.kind === "instance";
+        const bIsGroup = b.kind === "template" || b.kind === "instance";
+        if (aIsGroup !== bIsGroup) return aIsGroup ? -1 : 1;
+        return a.label.localeCompare(b.label);
+      });
       let count = n.leaf ? 1 : 0;
       for (const c of n.children) count += sortCount(c);
       n.leafCount = count;
       return count;
     };
     for (const c of root.children) sortCount(c);
-    root.children.sort((a, b) => a.label.localeCompare(b.label));
+    root.children.sort((a, b) => {
+      const aIsGroup = a.kind === "template" || a.kind === "instance";
+      const bIsGroup = b.kind === "template" || b.kind === "instance";
+      if (aIsGroup !== bIsGroup) return aIsGroup ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
     return root.children;
   }
 
@@ -683,7 +734,8 @@
                     {#if items.length === 0}
                       <div class="tag-status muted">No tags match filter.</div>
                     {:else}
-                      {@const tree = buildTagTree(items)}
+                      {@const cache = (browseCaches[device.deviceId] as { status: "ready"; cache: BrowseCache }).cache}
+                      {@const tree = buildTagTree(items, cache.structTags ?? {})}
                       <DeviceTagTree
                         nodes={tree}
                         {device}
