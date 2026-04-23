@@ -383,14 +383,10 @@
     );
   }
 
-  // Build a trie from tag names. Splits on both '.' (UDT member paths used
-  // by the scanner) and '_' (common naming convention on atomic tags like
-  // `RTU60_13XFR9_GLV_001_HINC`) so deeply-prefixed flat names collapse into
-  // an explorable hierarchy rather than an overwhelming 500+ row list.
   function buildTagTree(items: BrowseCacheItem[]): TagTreeNode[] {
     const root: TagTreeNode = { key: "", label: "", children: [], leafCount: 0 };
     for (const item of items) {
-      const parts = item.tag.split(/[._]/).filter((p) => p.length > 0);
+      const parts = item.tag.split(".").filter((p) => p.length > 0);
       if (parts.length === 0) continue;
       let cur = root;
       let acc = "";
