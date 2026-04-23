@@ -75,7 +75,7 @@
             <ChevronRight size="0.625rem" />
           </span>
           {#if node.kind === "template"}
-            <span class="badge template-badge">TPL</span>
+            <span class="t-icon">T</span>
           {/if}
           <span class="name">{node.label}</span>
           <span class="count">{node.leafCount}</span>
@@ -165,13 +165,18 @@
     letter-spacing: 0.02em;
   }
 
-  .template-badge {
-    background: color-mix(in srgb, var(--theme-warning, #f59e0b) 18%, transparent);
-    color: var(--theme-warning, #f59e0b);
-  }
-
-  .tree-row.template .name {
-    color: var(--theme-warning, #f59e0b);
+  .t-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 2px;
+    font-size: 0.625rem;
+    font-weight: 700;
+    background: var(--badge-purple-bg);
+    color: var(--badge-purple-text);
+    flex-shrink: 0;
   }
 
   .tree-row.instance .name {

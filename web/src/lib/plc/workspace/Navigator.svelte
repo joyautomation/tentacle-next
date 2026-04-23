@@ -845,7 +845,7 @@
                 onclick={() => workspaceSelection.select("type", tmpl.name)}
                 title={tmpl.description ?? `${tmpl.fields.length} field(s)`}
               >
-                <span class="badge type">TYPE</span>
+                <span class="t-icon">T</span>
                 <span class="name">{tmpl.name}</span>
                 <span class="meta">{tmpl.fields.length}</span>
               </button>
@@ -1299,6 +1299,20 @@
 
   .badge.lang {
     color: var(--theme-primary);
+  }
+
+  .t-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 2px;
+    font-size: 0.625rem;
+    font-weight: 700;
+    background: var(--badge-purple-bg);
+    color: var(--badge-purple-text);
+    flex-shrink: 0;
   }
 
   .badge.device {
