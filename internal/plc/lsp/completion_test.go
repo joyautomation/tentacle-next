@@ -242,6 +242,40 @@ func TestCompletionParamTypeAnnotationResolvesTemplate(t *testing.T) {
 	}
 }
 
+func TestCompletionMemberAccessAfterKeyword(t *testing.T) {
+	// Regression: `if motor.` previously failed because beforeDot was
+	// `"if motor"` which didn't match any resolver pattern.
+	src := `def modeHandler(motor: Motor):
+    if motor.`
+	list := completeStarlark(src, Position{Line: 1, Character: 13}, newMotorProvider(), "", "")
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	for _, want := range []string{"speed", "running", "start"} {
+		if !seen[want] {
+			t.Errorf("expected %q in `if motor.` completion, got %v", want, completionLabels(list))
+		}
+	}
+	if seen["get_var"] {
+		t.Errorf("`if motor.` should not fall back to builtins, got %v", completionLabels(list))
+	}
+}
+
+func TestCompletionMemberAccessAfterAssignment(t *testing.T) {
+	// `x = get_var("motor1").` — assignment LHS shouldn't leak into the
+	// resolver.
+	src := `x = get_var("motor1").`
+	list := completeStarlark(src, Position{Line: 0, Character: 22}, newMotorProvider(), "", "")
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	if !seen["speed"] {
+		t.Errorf("expected speed after `x = get_var(...).`, got %v", completionLabels(list))
+	}
+}
+
 func TestCompletionIdentAssignedFromGetVar(t *testing.T) {
 	// `m = get_var("motor1")` then `m.` — member completion should
 	// follow the assignment.

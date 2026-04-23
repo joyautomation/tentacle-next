@@ -556,7 +556,10 @@ func memberCompletion(source string, pos Position, provider SymbolProvider) (Com
 	if end == 0 || prefix[end-1] != '.' {
 		return CompletionList{}, false
 	}
-	beforeDot := strings.TrimRight(prefix[:end-1], " \t")
+	beforeDot := trailingAccessExpr(prefix[:end-1])
+	if beforeDot == "" {
+		return CompletionList{}, false
+	}
 	templateName, ok := resolveExprTemplate(source, pos, beforeDot, provider)
 	if !ok {
 		return CompletionList{}, false
@@ -592,6 +595,51 @@ func memberCompletion(source string, pos Position, provider SymbolProvider) (Com
 		})
 	}
 	return CompletionList{IsIncomplete: false, Items: items}, true
+}
+
+// trailingAccessExpr extracts the expression immediately preceding a
+// member-access dot from the given line prefix. Walks backwards through
+// identifier characters and balanced parenthesized call arguments so
+// constructs like `if motor.` yield `motor` and `x = get_var("m").`
+// yields `get_var("m")`. Returns "" when the preceding text isn't a
+// shape we know how to resolve.
+func trailingAccessExpr(prefix string) string {
+	end := len(prefix)
+	for end > 0 && (prefix[end-1] == ' ' || prefix[end-1] == '\t') {
+		end--
+	}
+	start := end
+	parenDepth := 0
+	for start > 0 {
+		c := prefix[start-1]
+		if parenDepth > 0 {
+			// Inside a call argument list — accept any byte except a
+			// matching '(' that drops depth back to zero. Strings and
+			// commas are fine here.
+			switch c {
+			case '(':
+				parenDepth--
+			case ')':
+				parenDepth++
+			}
+			start--
+			continue
+		}
+		if c == ')' {
+			parenDepth++
+			start--
+			continue
+		}
+		if isIdentByte(c) || c == '.' {
+			start--
+			continue
+		}
+		break
+	}
+	if parenDepth != 0 {
+		return ""
+	}
+	return prefix[start:end]
 }
 
 // resolveExprTemplate maps a simple expression (the text just before a
