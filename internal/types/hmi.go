@@ -34,7 +34,11 @@ type HmiComponentConfig struct {
 	UdtTemplate string      `json:"udtTemplate,omitempty"`
 	Width       int         `json:"width,omitempty"`
 	Height      int         `json:"height,omitempty"`
-	Widgets     []HmiWidget `json:"widgets"`
+	// Source is the Svelte template source for this component. When non-empty
+	// it is the authoritative renderer (compiled at runtime in the browser).
+	// Widgets is retained for legacy components authored before source mode.
+	Source  string      `json:"source,omitempty"`
+	Widgets []HmiWidget `json:"widgets,omitempty"`
 	// Classes is a component-private CSS class library: className → raw CSS
 	// body. Emitted as a scoped <style> block per component instance so
 	// classes from different components don't collide.

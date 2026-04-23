@@ -7,13 +7,15 @@
     widgetClassString,
   } from '../styles/styleContext';
   import { compileScopedCss } from '../styles/cssScope';
+  import SvelteHost from '../source/SvelteHost.svelte';
+  import { tagStore } from '../tagStore.svelte';
 
   interface Props {
     /** Resolved component config (looked up by `componentId` in WidgetView). */
     component?: HmiComponentConfig;
-    /** Resolved root binding value — gateway emits the full UDT object as the
-     * variable value. We don't read it here; we just need {moduleId, udtVariable}
-     * from the binding, which WidgetView passes via udtContext. */
+    /** Resolved root binding info — gateway emits the full UDT object as the
+     * variable value. We pass it as the `udt` prop into source-mode components,
+     * and pipe it down to nested widgets via setHmiStyleContext for legacy. */
     udtContext?: { moduleId: string; udtVariable: string };
     components?: Record<string, HmiComponentConfig>;
   }
@@ -35,6 +37,17 @@
   });
 
   const css = $derived(compileScopedCss(componentClasses, prefix));
+  const isSourceMode = $derived(!!component?.source);
+
+  // For source-mode components: feed the live UDT object (or undefined) to the
+  // mounted Svelte component as the `udt` prop. The tagStore reactivity flows
+  // through SvelteHost's prop sync.
+  const sourceProps = $derived.by<Record<string, unknown>>(() => {
+    if (!isSourceMode) return {};
+    if (!udtContext) return { udt: undefined };
+    const key = `${udtContext.moduleId}/${udtContext.udtVariable}`;
+    return { udt: tagStore.values[key] };
+  });
 </script>
 
 {#if !component}
@@ -43,23 +56,30 @@
   {#if css}
     {@html `<style data-hmi-component=${component.componentId}>${css}</style>`}
   {/if}
-  <div class="root">
-    {#each component.widgets ?? [] as w (w.id)}
-      <div
-        class="slot {widgetClassString(w.props?.$classes, { appClasses: parentCtx.appClasses, component: { prefix, classes: componentClasses } })}"
-        style:left="{w.x}px"
-        style:top="{w.y}px"
-        style:width="{w.w}px"
-        style:height="{w.h}px"
-      >
-        <WidgetView widget={w} {udtContext} {components} />
-      </div>
-    {/each}
-  </div>
+  {#if isSourceMode}
+    <div class="root source">
+      <SvelteHost source={component.source ?? ''} componentProps={sourceProps} />
+    </div>
+  {:else}
+    <div class="root">
+      {#each component.widgets ?? [] as w (w.id)}
+        <div
+          class="slot {widgetClassString(w.props?.$classes, { appClasses: parentCtx.appClasses, component: { prefix, classes: componentClasses } })}"
+          style:left="{w.x}px"
+          style:top="{w.y}px"
+          style:width="{w.w}px"
+          style:height="{w.h}px"
+        >
+          <WidgetView widget={w} {udtContext} {components} />
+        </div>
+      {/each}
+    </div>
+  {/if}
 {/if}
 
 <style lang="scss">
   .root { position: relative; width: 100%; height: 100%; }
+  .root.source { position: relative; }
   .slot { position: absolute; }
   .missing {
     width: 100%; height: 100%;

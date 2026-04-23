@@ -42,7 +42,10 @@ export interface HmiComponentConfig {
   udtTemplate?: string;
   width?: number;
   height?: number;
-  widgets: HmiWidget[];
+  /** Svelte template source. When set, takes precedence over `widgets`. */
+  source?: string;
+  /** Legacy widget tree — retained for components authored before source mode. */
+  widgets?: HmiWidget[];
   /** Component-private CSS classes: className → raw CSS body. Scoped per
    * component instance at runtime. */
   classes?: Record<string, string>;

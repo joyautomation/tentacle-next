@@ -2,13 +2,12 @@
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { getHmiApp, putHmiComponent, listHmiUdts } from '$lib/api/hmi';
-  import Palette from '$lib/hmi/designer/Palette.svelte';
-  import DesignerCanvas from '$lib/hmi/designer/DesignerCanvas.svelte';
-  import Inspector from '$lib/hmi/designer/Inspector.svelte';
   import ClassRail from '$lib/hmi/styles/ClassRail.svelte';
   import ClassEditor from '$lib/hmi/styles/ClassEditor.svelte';
-  import { findWidget, findParent, removeWidget, replaceWidget, schemaByType } from '$lib/hmi/widgetSchema';
-  import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember, HmiWidget } from '$lib/types/hmi';
+  import HtmlPalette from '$lib/hmi/source/HtmlPalette.svelte';
+  import CodeEditor from '$lib/hmi/source/CodeEditor.svelte';
+  import SveltePreview from '$lib/hmi/source/SveltePreview.svelte';
+  import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember } from '$lib/types/hmi';
 
   const appId = $derived($page.params.appId as string);
   const componentId = $derived($page.params.componentId as string);
@@ -18,27 +17,42 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  let widgets = $state<HmiWidget[]>([]);
+  let source = $state('');
   let componentName = $state('');
   let udtTemplateName = $state('');
-  let width = $state(0);
-  let height = $state(400);
   let classes = $state<Record<string, string>>({});
-  let selectedId = $state<string | null>(null);
   let dirty = $state(false);
   let saving = $state(false);
   let saveError = $state<string | null>(null);
 
-  const selectedWidget = $derived<HmiWidget | null>(
-    selectedId ? findWidget(widgets, selectedId) ?? null : null
-  );
-  const selectedParent = $derived<HmiWidget | undefined>(
-    selectedId ? findParent(widgets, selectedId) : undefined
-  );
-  const parentIsContainer = $derived(!!(selectedParent && schemaByType[selectedParent.type]?.isContainer));
+  // Bound component instance — typed loosely because Svelte 5 component
+  // bind:this returns the exported context, not the constructor.
+  let editorRef: any = $state();
 
   const members = $derived<HmiUdtMember[]>(template?.members ?? []);
   const inUdtMode = $derived(!!udtTemplateName);
+  const prefix = $derived(`cmp-${componentId}`);
+
+  // Mock UDT object for preview — keeps the user's code from blowing up on
+  // null reads while editing. Real values come from tag bindings at runtime.
+  const mockUdt = $derived.by(() => {
+    const obj: Record<string, unknown> = {};
+    for (const m of members) {
+      obj[m.name] = mockValueFor(m.datatype);
+    }
+    return obj;
+  });
+
+  function mockValueFor(datatype: string): unknown {
+    const dt = (datatype || '').toLowerCase();
+    if (dt.includes('bool')) return false;
+    if (dt.includes('string')) return '';
+    if (dt.includes('real') || dt.includes('float') || dt.includes('double')) return 0;
+    if (dt.includes('int') || dt.includes('word') || dt.includes('byte')) return 0;
+    return null;
+  }
+
+  const previewProps = $derived<Record<string, unknown>>(inUdtMode ? { udt: mockUdt } : {});
 
   async function refresh() {
     loading = true;
@@ -55,15 +69,9 @@
         error = `Component "${componentId}" not found.`;
         return;
       }
-      widgets = (c.widgets ?? []).map((w) => ({
-        ...w,
-        props: { ...(w.props ?? {}) },
-        bindings: { ...(w.bindings ?? {}) },
-      }));
+      source = c.source ?? defaultSource(c);
       componentName = c.name;
       udtTemplateName = c.udtTemplate ?? '';
-      width = c.width ?? 0;
-      height = c.height ?? 400;
       classes = { ...(c.classes ?? {}) };
       if (udtTemplateName) {
         const tr = await listHmiUdts();
@@ -80,17 +88,23 @@
     }
   }
 
-  function onWidgetsChange(next: HmiWidget[]) { widgets = next; dirty = true; }
-  function onClassesChange(next: Record<string, string>) { classes = next; dirty = true; }
-  function onWidgetChange(updated: HmiWidget) {
-    widgets = replaceWidget(widgets, updated);
+  function defaultSource(c: HmiComponentConfig): string {
+    const propsLine = c.udtTemplate ? '  let { udt } = $props();\n' : '';
+    return `<script>\n${propsLine}</` + `script>\n\n<div>\n  \n</div>\n`;
+  }
+
+  function onSourceChange(next: string) {
+    source = next;
     dirty = true;
   }
-  function onWidgetDelete() {
-    if (!selectedId) return;
-    widgets = removeWidget(widgets, selectedId);
-    selectedId = null;
+
+  function onClassesChange(next: Record<string, string>) {
+    classes = next;
     dirty = true;
+  }
+
+  function onInsert(snippet: string) {
+    editorRef?.insertAtCursor(snippet);
   }
 
   async function save() {
@@ -100,9 +114,7 @@
       componentId,
       name: componentName,
       udtTemplate: udtTemplateName || undefined,
-      width: width || undefined,
-      height: height || undefined,
-      widgets,
+      source,
       classes,
     };
     const r = await putHmiComponent(appId, componentId, payload);
@@ -124,9 +136,8 @@
       <a href="/hmi/designer/{encodeURIComponent(appId)}" class="back">&larr; {app?.name ?? appId}</a>
       <h1>{componentName || componentId}</h1>
       <span class="meta">
-        {widgets.length} widgets
-        {#if udtTemplateName}· bound to <code>{udtTemplateName}</code>{/if}
-        {dirty ? ' · unsaved' : ''}
+        {#if udtTemplateName}bound to <code>{udtTemplateName}</code> · {/if}
+        {dirty ? 'unsaved' : 'saved'}
       </span>
     </div>
     <div class="right">
@@ -145,19 +156,38 @@
     <p class="muted">Component not found.</p>
   {:else}
     <div class="workspace">
-      <Palette excludeTypes={['componentInstance']} />
-      <DesignerCanvas
-        {widgets}
-        {selectedId}
-        {width}
-        {height}
-        onChange={onWidgetsChange}
-        onSelect={(id) => (selectedId = id)}
-        appClasses={app?.classes}
-        componentClasses={classes}
-        {componentId}
-      />
+      <HtmlPalette {onInsert} />
+      <div class="center">
+        <div class="preview-pane">
+          <SveltePreview
+            {source}
+            props={previewProps}
+            appClasses={app?.classes}
+            componentClasses={classes}
+            {prefix}
+          />
+        </div>
+        <div class="editor-pane">
+          <CodeEditor
+            bind:this={editorRef}
+            value={source}
+            onChange={onSourceChange}
+            placeholder={'<script>\n  // your code here\n</' + 'script>\n\n<div>...</div>'}
+          />
+        </div>
+      </div>
       <div class="right-rail">
+        {#if inUdtMode}
+          <details class="udt-info" open>
+            <summary>UDT members</summary>
+            <p class="hint">Use <code>udt.&lt;member&gt;</code> in your markup.</p>
+            <ul>
+              {#each members as m (m.name)}
+                <li><code>udt.{m.name}</code> <span class="dt">{m.datatype}</span></li>
+              {/each}
+            </ul>
+          </details>
+        {/if}
         <ClassRail
           title="App classes"
           classes={app?.classes}
@@ -169,13 +199,6 @@
           onChange={onClassesChange}
           title="Component classes"
           accent="component"
-        />
-        <Inspector
-          widget={selectedWidget}
-          onChange={onWidgetChange}
-          onDelete={onWidgetDelete}
-          udtMembers={inUdtMode ? members : undefined}
-          {parentIsContainer}
         />
       </div>
     </div>
@@ -206,8 +229,24 @@
     &:disabled { opacity: 0.5; cursor: default; }
   }
   .workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+  .center {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+  .preview-pane {
+    flex: 1 1 50%;
+    min-height: 8rem;
+  }
+  .editor-pane {
+    flex: 1 1 50%;
+    min-height: 10rem;
+  }
   .right-rail {
-    width: 20rem;
+    width: 18rem;
     flex-shrink: 0;
     border-left: 1px solid var(--theme-border);
     background: var(--theme-surface);
@@ -217,12 +256,32 @@
     gap: 0.5rem;
     padding: 0.5rem;
   }
-  .right-rail :global(.inspector) {
-    width: 100%;
-    border-left: none;
-    padding: 0;
-    background: transparent;
-    overflow: visible;
+  .udt-info {
+    background: var(--theme-background);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    padding: 0.5rem 0.625rem;
+    font-size: 0.75rem;
+    summary {
+      cursor: pointer;
+      color: var(--theme-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 0.6875rem;
+    }
+    .hint {
+      margin: 0.5rem 0 0.25rem;
+      color: var(--theme-text-muted);
+      code { font-family: 'IBM Plex Mono', monospace; }
+    }
+    ul { margin: 0; padding: 0 0 0 0.75rem; }
+    li {
+      list-style: none;
+      padding: 0.125rem 0;
+      color: var(--theme-text);
+      code { font-family: 'IBM Plex Mono', monospace; }
+      .dt { color: var(--theme-text-muted); margin-left: 0.5rem; font-size: 0.6875rem; }
+    }
   }
   .banner.error {
     margin: 0.75rem 1rem;
