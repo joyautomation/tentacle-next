@@ -9,7 +9,10 @@
 
   let { props, css, onChange }: Props = $props();
 
-  const POSITION_OPTS = ['', 'static', 'relative', 'absolute', 'fixed', 'sticky'] as const;
+  // `fixed` is intentionally omitted — it pins the wrapper to the viewport
+  // and traps the editor UI behind it (no way back out). Components live
+  // inside screens; their wrapper should never escape that context.
+  const POSITION_OPTS = ['', 'static', 'relative', 'absolute', 'sticky'] as const;
   const DISPLAY_OPTS = ['', 'block', 'inline', 'inline-block', 'flex', 'inline-flex', 'grid', 'inline-grid', 'none'] as const;
   const FLEX_DIR_OPTS = ['', 'row', 'row-reverse', 'column', 'column-reverse'] as const;
   const FLEX_WRAP_OPTS = ['', 'nowrap', 'wrap', 'wrap-reverse'] as const;
@@ -18,7 +21,7 @@
 
   const isFlex = $derived(props.display === 'flex' || props.display === 'inline-flex');
   const isGrid = $derived(props.display === 'grid' || props.display === 'inline-grid');
-  const isAbsolute = $derived(props.position === 'absolute' || props.position === 'fixed');
+  const isAbsolute = $derived(props.position === 'absolute');
 
   function setProp(key: string, value: string) {
     const next = { ...props };
