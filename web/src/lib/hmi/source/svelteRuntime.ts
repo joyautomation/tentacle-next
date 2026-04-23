@@ -81,19 +81,22 @@ export async function compileComponent(
 
   // Rewrite all import statements into local const lookups against the
   // registry, and convert the default export into a `return`.
+  // JS identifiers can include `$` — Svelte's client runtime uses `$` as
+  // the namespace identifier — so `\w` is too narrow.
+  const ID = '[a-zA-Z_$][\\w$]*';
   let code = js
     .replace(
-      /import\s*\*\s*as\s+(\w+)\s+from\s*['"]([^'"]+)['"];?/g,
+      new RegExp(`import\\s*\\*\\s*as\\s+(${ID})\\s+from\\s*['"]([^'"]+)['"];?`, 'g'),
       (_: string, ns: string, path: string) =>
         `const ${ns} = __resolve(${JSON.stringify(path)});`,
     )
     .replace(
-      /import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g,
+      /import\s*\{([\s\S]+?)\}\s*from\s*['"]([^'"]+)['"];?/g,
       (_: string, names: string, path: string) =>
         `const {${names}} = __resolve(${JSON.stringify(path)});`,
     )
     .replace(
-      /import\s+(\w+)\s+from\s*['"]([^'"]+)['"];?/g,
+      new RegExp(`import\\s+(${ID})\\s+from\\s*['"]([^'"]+)['"];?`, 'g'),
       (_: string, name: string, path: string) =>
         `const ${name} = __resolve(${JSON.stringify(path)}).default;`,
     )
@@ -103,7 +106,7 @@ export async function compileComponent(
 
   let exportName: string | null = null;
   code = code.replace(
-    /export\s+default\s+function\s+(\w+)/,
+    new RegExp(`export\\s+default\\s+function\\s+(${ID})`),
     (_: string, name: string) => {
       exportName = name;
       return `function ${name}`;
@@ -111,7 +114,7 @@ export async function compileComponent(
   );
   if (!exportName) {
     code = code.replace(
-      /export\s+default\s+(\w+);?/,
+      new RegExp(`export\\s+default\\s+(${ID});?`),
       (_: string, name: string) => {
         exportName = name;
         return '';
