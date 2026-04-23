@@ -39,7 +39,7 @@ type Module struct {
 
 	mu        sync.RWMutex
 	config    *itypes.PlcConfigKV
-	sources   *scanner.Registry
+	devices   *scanner.Registry
 	variables *VariableStore
 	engine    *Engine
 	tasks     map[string]*taskRunner
@@ -95,7 +95,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	for _, bucket := range []string{
 		topics.BucketPlcConfig, topics.BucketPlcPrograms, topics.BucketPlcTemplates,
 		topics.BucketPlcVariables, topics.BucketPlcValues,
-		topics.BucketSources,
+		topics.BucketDevices,
 		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
 		topics.BucketScannerModbus, topics.BucketScannerSNMP,
 	} {
@@ -104,13 +104,15 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 	}
 
-	// Migrate any legacy plc_config.devices to the shared sources bucket.
+	// Migrate any legacy plc_config.devices to the shared devices bucket.
 	scanner.MigrateLegacyDevices(b, m.log, topics.BucketPlcConfig, m.plcID)
+	// Drain legacy `sources` bucket into `devices` (one-shot rename migration).
+	scanner.MigrateLegacySourcesBucket(b, m.log)
 
-	// Start the shared sources registry watcher.
-	m.sources = scanner.NewRegistry(b, m.log)
-	if err := m.sources.Start(m.onSourcesChanged); err != nil {
-		m.log.Error("plc: failed to start sources registry", "error", err)
+	// Start the shared devices registry watcher.
+	m.devices = scanner.NewRegistry(b, m.log)
+	if err := m.devices.Start(m.onDevicesChanged); err != nil {
+		m.log.Error("plc: failed to start devices registry", "error", err)
 	}
 
 	// Start heartbeat.
@@ -357,10 +359,10 @@ func (m *Module) HasConfig() bool {
 	return m.config != nil
 }
 
-// onSourcesChanged is invoked by the shared sources Registry whenever a source
+// onDevicesChanged is invoked by the shared devices Registry whenever a device
 // is added, updated, or deleted. It re-applies the current config so the
-// scanner bridge picks up the new source set.
-func (m *Module) onSourcesChanged() {
+// scanner bridge picks up the new device set.
+func (m *Module) onDevicesChanged() {
 	m.mu.RLock()
 	cfg := m.config
 	m.mu.RUnlock()
@@ -486,7 +488,7 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	}
 
 	// Start scanner bridge.
-	m.bridge = newScannerBridge(m.b, m.plcID, m.variables, m.sources, m.log)
+	m.bridge = newScannerBridge(m.b, m.plcID, m.variables, m.devices, m.log)
 	m.bridge.subscribe(config)
 
 	// Start publisher.

@@ -2,13 +2,13 @@ package types
 
 import ttypes "github.com/joyautomation/tentacle/types"
 
-// SourceConfig describes a device scanner source. Lives in the shared
-// `sources` KV bucket, keyed by deviceId. Consumed by gateway (MQTT
+// DeviceConfig describes a device scanner connection. Lives in the shared
+// `devices` KV bucket, keyed by deviceId. Consumed by gateway (MQTT
 // bridging, variable binding) and PLC (input variables, ad-hoc reads).
 //
 // All fields are a superset — protocol-specific fields (V3Auth, UnitID,
 // ByteOrder, etc.) are only populated for the relevant protocol.
-type SourceConfig struct {
+type DeviceConfig struct {
 	Protocol              string                 `json:"protocol"`
 	AutoManaged           bool                   `json:"autoManaged,omitempty"`
 	Host                  string                 `json:"host,omitempty"`

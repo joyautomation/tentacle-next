@@ -91,10 +91,10 @@ func (m *Module) handleListGateways(w http.ResponseWriter, r *http.Request) {
 
 // ─── 2. Get Gateway ────────────────────────────────────────────────────────
 
-// sourceResponse is a shared source config with its ID included.
-type sourceResponse struct {
+// deviceResponse is a shared device config with its ID included.
+type deviceResponse struct {
 	DeviceID string `json:"deviceId"`
-	itypes.SourceConfig
+	itypes.DeviceConfig
 }
 
 // gatewayVariableResponse is a variable config with its ID included.
@@ -114,11 +114,11 @@ type gatewayUdtVariableResponse struct {
 }
 
 // gatewayResponse transforms the map-based KV storage into arrays for the frontend.
-// Devices are returned from the shared sources bucket so the Gateway and PLC
+// Devices are returned from the shared devices bucket so the Gateway and PLC
 // workspaces see the same set.
 type gatewayResponse struct {
 	GatewayID          string                        `json:"gatewayId"`
-	Sources            []sourceResponse              `json:"sources"`
+	Devices            []deviceResponse              `json:"devices"`
 	Variables          []gatewayVariableResponse     `json:"variables"`
 	UdtTemplates       []gatewayUdtTemplateResponse  `json:"udtTemplates"`
 	UdtVariables       []gatewayUdtVariableResponse  `json:"udtVariables"`
@@ -166,11 +166,11 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Load shared sources from the sources bucket.
-	sources, _ := m.listSources()
-	sourceArr := make([]sourceResponse, 0, len(sources))
-	for id, src := range sources {
-		sourceArr = append(sourceArr, sourceResponse{DeviceID: id, SourceConfig: src})
+	// Load shared devices from the devices bucket.
+	devices, _ := m.listDevices()
+	deviceArr := make([]deviceResponse, 0, len(devices))
+	for id, dev := range devices {
+		deviceArr = append(deviceArr, deviceResponse{DeviceID: id, DeviceConfig: dev})
 	}
 
 	// Convert variable map to array
@@ -214,7 +214,7 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 
 	resp := gatewayResponse{
 		GatewayID:          cfg.GatewayID,
-		Sources:            sourceArr,
+		Devices:            deviceArr,
 		Variables:          variables,
 		UdtTemplates:       udtTemplates,
 		UdtVariables:       udtVariables,
@@ -224,13 +224,13 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// Device CRUD is handled by the /sources endpoints — see sources.go.
+// Device CRUD is handled by the /devices endpoints — see devices.go.
 
 // ─── 5. Set Template Overrides ─────────────────────────────────────────────
 
 // handleSetTemplateOverrides updates template-name overrides on the shared
-// source config. Kept on the gateway route for URL backwards-compatibility
-// with the frontend — the override itself lives on SourceConfig.
+// device config. Kept on the gateway route for URL backwards-compatibility
+// with the frontend — the override itself lives on DeviceConfig.
 func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Request) {
 	deviceID := chi.URLParam(r, "deviceId")
 
@@ -242,17 +242,17 @@ func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	src, ok := m.getSource(deviceID)
+	dev, ok := m.getDevice(deviceID)
 	if !ok {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("source %q not found", deviceID))
+		writeError(w, http.StatusNotFound, fmt.Sprintf("device %q not found", deviceID))
 		return
 	}
-	src.TemplateNameOverrides = body.Overrides
-	if err := m.putSource(deviceID, src); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put source: %v", err))
+	dev.TemplateNameOverrides = body.Overrides
+	if err := m.putDevice(deviceID, dev); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put device: %v", err))
 		return
 	}
-	writeJSON(w, http.StatusOK, src)
+	writeJSON(w, http.StatusOK, dev)
 }
 
 // ─── 6. Set Gateway Variable ───────────────────────────────────────────────

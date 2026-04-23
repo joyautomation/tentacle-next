@@ -14,7 +14,7 @@ const (
 	KindNftables     = "Nftables"
 	KindNetwork      = "Network"
 	KindPlc          = "Plc"
-	KindSource       = "Source"
+	KindDevice       = "Device"
 )
 
 // AllKinds lists every known resource kind.
@@ -25,7 +25,7 @@ var AllKinds = []string{
 	KindNftables,
 	KindNetwork,
 	KindPlc,
-	KindSource,
+	KindDevice,
 }
 
 // ResourceHeader is the common envelope for all manifest resources.
@@ -49,7 +49,7 @@ type GatewayResource struct {
 }
 
 // GatewaySpec is the gateway config without runtime fields (gatewayId, updatedAt).
-// Device connection config is managed via KindSource resources, not here.
+// Device connection config is managed via KindDevice resources, not here.
 type GatewaySpec struct {
 	Variables    map[string]itypes.GatewayVariableConfig     `yaml:"variables" json:"variables"`
 	UdtTemplates map[string]itypes.GatewayUdtTemplateConfig `yaml:"udtTemplates,omitempty" json:"udtTemplates,omitempty"`
@@ -119,7 +119,7 @@ type PlcResource struct {
 }
 
 // PlcSpec is the PLC config for GitOps.
-// Device connection config is managed via KindSource resources, not here.
+// Device connection config is managed via KindDevice resources, not here.
 type PlcSpec struct {
 	Variables    map[string]itypes.PlcVariableConfigKV     `yaml:"variables" json:"variables"`
 	UdtTemplates map[string]itypes.PlcUdtTemplateConfigKV `yaml:"udtTemplates,omitempty" json:"udtTemplates,omitempty"`
@@ -134,13 +134,13 @@ type PlcProgramSpec struct {
 	StSource string `yaml:"stSource,omitempty" json:"stSource,omitempty"`
 }
 
-// ─── Source ─────────────────────────────────────────────────────────────────
+// ─── Device ─────────────────────────────────────────────────────────────────
 
-// SourceResource is the manifest representation of a shared source (device)
+// DeviceResource is the manifest representation of a shared device
 // connection config. The metadata.name is the deviceId.
-type SourceResource struct {
+type DeviceResource struct {
 	ResourceHeader `yaml:",inline"`
-	Spec           itypes.SourceConfig `yaml:"spec" json:"spec"`
+	Spec           itypes.DeviceConfig `yaml:"spec" json:"spec"`
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

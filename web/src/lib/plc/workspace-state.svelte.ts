@@ -1,13 +1,13 @@
 import { untrack } from 'svelte';
 
-export type SelectionKind = 'variable' | 'task' | 'program' | 'test' | 'type' | 'source';
+export type SelectionKind = 'variable' | 'task' | 'program' | 'test' | 'type' | 'device';
 
 export type Selection = {
 	kind: SelectionKind;
 	id: string;
 } | null;
 
-export type EditorTabKind = 'program' | 'variable' | 'task' | 'test' | 'type' | 'source';
+export type EditorTabKind = 'program' | 'variable' | 'task' | 'test' | 'type' | 'device';
 
 export type EditorTab = {
 	id: string; // composite `${kind}:${name}` so tabs of different kinds can share a name

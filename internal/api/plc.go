@@ -1122,8 +1122,8 @@ func (m *Module) handleBatchImportPlcVariables(w http.ResponseWriter, r *http.Re
 			imp.Direction = "input"
 		}
 
-		if _, ok := m.getSource(imp.DeviceID); !ok {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("source %q not found — create it via /api/v1/sources first", imp.DeviceID))
+		if _, ok := m.getDevice(imp.DeviceID); !ok {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("device %q not found — create it via /api/v1/devices first", imp.DeviceID))
 			return
 		}
 

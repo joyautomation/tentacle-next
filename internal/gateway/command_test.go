@@ -20,21 +20,21 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// seedSources creates the sources bucket on b and writes the provided
-// SourceConfigs, then starts a Registry and waits for it to populate.
+// seedDevices creates the devices bucket on b and writes the provided
+// DeviceConfigs, then starts a Registry and waits for it to populate.
 // Returns the registry so tests can hold it.
-func seedSources(t *testing.T, b bus.Bus, log *slog.Logger, sources map[string]itypes.SourceConfig) *scanner.Registry {
+func seedDevices(t *testing.T, b bus.Bus, log *slog.Logger, devices map[string]itypes.DeviceConfig) *scanner.Registry {
 	t.Helper()
-	if err := b.KVCreate(topics.BucketSources, bus.KVBucketConfig{History: 1}); err != nil {
-		t.Fatalf("create sources bucket: %v", err)
+	if err := b.KVCreate(topics.BucketDevices, bus.KVBucketConfig{History: 1}); err != nil {
+		t.Fatalf("create devices bucket: %v", err)
 	}
-	for id, cfg := range sources {
+	for id, cfg := range devices {
 		data, err := json.Marshal(cfg)
 		if err != nil {
-			t.Fatalf("marshal source %s: %v", id, err)
+			t.Fatalf("marshal device %s: %v", id, err)
 		}
-		if _, err := b.KVPut(topics.BucketSources, id, data); err != nil {
-			t.Fatalf("put source %s: %v", id, err)
+		if _, err := b.KVPut(topics.BucketDevices, id, data); err != nil {
+			t.Fatalf("put device %s: %v", id, err)
 		}
 	}
 	reg := scanner.NewRegistry(b, log)
@@ -44,7 +44,7 @@ func seedSources(t *testing.T, b bus.Bus, log *slog.Logger, sources map[string]i
 	// Let the watcher flush initial entries.
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if reg.Count() >= len(sources) {
+		if reg.Count() >= len(devices) {
 			return reg
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -59,10 +59,10 @@ func TestCommandRouting_UdtMemberWrite(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
-	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+	g.devices = seedDevices(t, b, g.log, map[string]itypes.DeviceConfig{
 		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
 	})
-	defer g.sources.Stop()
+	defer g.devices.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
 		GatewayID:    "gateway",
@@ -130,10 +130,10 @@ func TestCommandRouting_AtomicBidirectionalWrite(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
-	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+	g.devices = seedDevices(t, b, g.log, map[string]itypes.DeviceConfig{
 		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
 	})
-	defer g.sources.Stop()
+	defer g.devices.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
 		GatewayID: "gateway",
@@ -195,10 +195,10 @@ func TestCommandRouting_NonBidirectionalIgnored(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
-	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+	g.devices = seedDevices(t, b, g.log, map[string]itypes.DeviceConfig{
 		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
 	})
-	defer g.sources.Stop()
+	defer g.devices.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
 		GatewayID: "gateway",
@@ -238,10 +238,10 @@ func TestCommandRouting_UnknownUdtMember(t *testing.T) {
 	g := New("gateway")
 	g.b = b
 	g.log = testLogger()
-	g.sources = seedSources(t, b, g.log, map[string]itypes.SourceConfig{
+	g.devices = seedDevices(t, b, g.log, map[string]itypes.DeviceConfig{
 		"marq_plc1": {Protocol: "ethernetip", Host: "10.0.0.1"},
 	})
-	defer g.sources.Stop()
+	defer g.devices.Stop()
 
 	g.config = &itypes.GatewayConfigKV{
 		GatewayID:    "gateway",

@@ -97,10 +97,10 @@ func decodeResource(raw map[string]any) (any, error) {
 			return nil, fmt.Errorf("decode Plc: %w", err)
 		}
 		return &res, nil
-	case KindSource:
-		var res SourceResource
+	case KindDevice:
+		var res DeviceResource
 		if err := json.Unmarshal(jsonBytes, &res); err != nil {
-			return nil, fmt.Errorf("decode Source: %w", err)
+			return nil, fmt.Errorf("decode Device: %w", err)
 		}
 		return &res, nil
 	default:

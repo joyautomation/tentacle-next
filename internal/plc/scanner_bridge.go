@@ -20,7 +20,7 @@ type scannerBridge struct {
 	b       bus.Bus
 	plcID   string
 	vars    *VariableStore
-	sources *scanner.Registry
+	devices *scanner.Registry
 	log     *slog.Logger
 
 	// Maps scanner subject key "{protocol}.{deviceId}.{tag}" to variable IDs.
@@ -39,12 +39,12 @@ type activeSub struct {
 }
 
 // newScannerBridge creates a scanner bridge.
-func newScannerBridge(b bus.Bus, plcID string, vars *VariableStore, sources *scanner.Registry, log *slog.Logger) *scannerBridge {
+func newScannerBridge(b bus.Bus, plcID string, vars *VariableStore, devices *scanner.Registry, log *slog.Logger) *scannerBridge {
 	return &scannerBridge{
 		b:        b,
 		plcID:    plcID,
 		vars:     vars,
-		sources:  sources,
+		devices:  devices,
 		log:      log,
 		tagIndex: make(map[string][]string),
 	}
@@ -55,11 +55,11 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 	sb.unsubscribe()
 	sb.tagIndex = make(map[string][]string)
 
-	if config == nil || sb.sources == nil {
+	if config == nil || sb.devices == nil {
 		return
 	}
 
-	// Group input-variable tag specs by deviceID. The source's protocol is
+	// Group input-variable tag specs by deviceID. The device's protocol is
 	// the source of truth for the scanner; the variable's embedded
 	// src.Protocol is preserved only for legacy compatibility.
 	type deviceGroup struct {
@@ -73,9 +73,9 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 			continue
 		}
 		src := vcfg.Source
-		device, ok := sb.sources.Get(src.DeviceID)
+		device, ok := sb.devices.Get(src.DeviceID)
 		if !ok {
-			sb.log.Warn("scanner_bridge: source not found for variable",
+			sb.log.Warn("scanner_bridge: device not found for variable",
 				"variable", vcfg.ID, "deviceId", src.DeviceID)
 			continue
 		}
@@ -95,7 +95,7 @@ func (sb *scannerBridge) subscribe(config *itypes.PlcConfigKV) {
 	subscriberID := scanner.SubscriberID(serviceType, sb.plcID)
 	protocols := make(map[string]bool)
 	for _, grp := range groups {
-		device, ok := sb.sources.Get(grp.deviceID)
+		device, ok := sb.devices.Get(grp.deviceID)
 		if !ok {
 			continue
 		}

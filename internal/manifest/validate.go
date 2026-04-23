@@ -27,24 +27,24 @@ func (ve *ValidationError) hasErrors() bool {
 func Validate(resources []any) error {
 	ve := &ValidationError{}
 
-	// Collect SourceResource ids in the batch so we can cross-validate
-	// variable/udtVariable deviceId references when sources are provided
-	// alongside gateway/plc resources. If no SourceResources are in the
-	// batch, we skip the cross-check entirely (the source may already be
+	// Collect DeviceResource ids in the batch so we can cross-validate
+	// variable/udtVariable deviceId references when devices are provided
+	// alongside gateway/plc resources. If no DeviceResources are in the
+	// batch, we skip the cross-check entirely (the device may already be
 	// in the bucket from a prior apply).
-	sourceIDs := make(map[string]bool)
-	hasSources := false
+	deviceIDs := make(map[string]bool)
+	hasDevices := false
 	for _, res := range resources {
-		if r, ok := res.(*SourceResource); ok {
-			hasSources = true
-			sourceIDs[r.Metadata.Name] = true
+		if r, ok := res.(*DeviceResource); ok {
+			hasDevices = true
+			deviceIDs[r.Metadata.Name] = true
 		}
 	}
 
 	for i, res := range resources {
 		switch r := res.(type) {
 		case *GatewayResource:
-			validateGateway(r, i, ve, hasSources, sourceIDs)
+			validateGateway(r, i, ve, hasDevices, deviceIDs)
 		case *ServiceResource:
 			validateService(r, i, ve)
 		case *ModuleConfigResource:
@@ -54,9 +54,9 @@ func Validate(resources []any) error {
 		case *NetworkResource:
 			validateNetwork(r, i, ve)
 		case *PlcResource:
-			validatePlc(r, i, ve, hasSources, sourceIDs)
-		case *SourceResource:
-			validateSource(r, i, ve)
+			validatePlc(r, i, ve, hasDevices, deviceIDs)
+		case *DeviceResource:
+			validateDevice(r, i, ve)
 		default:
 			ve.add("resource %d: unknown type %T", i, res)
 		}
@@ -67,29 +67,29 @@ func Validate(resources []any) error {
 	return nil
 }
 
-func validateGateway(r *GatewayResource, idx int, ve *ValidationError, hasSources bool, sourceIDs map[string]bool) {
+func validateGateway(r *GatewayResource, idx int, ve *ValidationError, hasDevices bool, deviceIDs map[string]bool) {
 	prefix := fmt.Sprintf("Gateway %q (resource %d)", r.Metadata.Name, idx)
 
 	if r.Metadata.Name == "" {
 		ve.add("%s: metadata.name is required", prefix)
 	}
 
-	// Check that variable deviceIds are set (and resolve to a known source
-	// when sources are supplied in the same batch).
+	// Check that variable deviceIds are set (and resolve to a known device
+	// when devices are supplied in the same batch).
 	for varID, v := range r.Spec.Variables {
 		if v.DeviceID == "" {
 			ve.add("%s: variable %q has no deviceId", prefix, varID)
-		} else if hasSources && !sourceIDs[v.DeviceID] {
-			ve.add("%s: variable %q references unknown source %q", prefix, varID, v.DeviceID)
+		} else if hasDevices && !deviceIDs[v.DeviceID] {
+			ve.add("%s: variable %q references unknown device %q", prefix, varID, v.DeviceID)
 		}
 	}
 
-	// Check UDT variables reference defined templates and sources.
+	// Check UDT variables reference defined templates and devices.
 	for udtID, u := range r.Spec.UdtVariables {
 		if u.DeviceID == "" {
 			ve.add("%s: udtVariable %q has no deviceId", prefix, udtID)
-		} else if hasSources && !sourceIDs[u.DeviceID] {
-			ve.add("%s: udtVariable %q references unknown source %q", prefix, udtID, u.DeviceID)
+		} else if hasDevices && !deviceIDs[u.DeviceID] {
+			ve.add("%s: udtVariable %q references unknown device %q", prefix, udtID, u.DeviceID)
 		}
 		if u.TemplateName == "" {
 			ve.add("%s: udtVariable %q has no templateName", prefix, udtID)
@@ -135,19 +135,19 @@ func validateNftables(r *NftablesResource, idx int, ve *ValidationError) {
 	}
 }
 
-func validatePlc(r *PlcResource, idx int, ve *ValidationError, hasSources bool, sourceIDs map[string]bool) {
+func validatePlc(r *PlcResource, idx int, ve *ValidationError, hasDevices bool, deviceIDs map[string]bool) {
 	prefix := fmt.Sprintf("Plc %q (resource %d)", r.Metadata.Name, idx)
 
 	if r.Metadata.Name == "" {
 		ve.add("%s: metadata.name is required", prefix)
 	}
 
-	// Check that input variables with sources reference a known source
-	// when sources are supplied in the same batch.
+	// Check that input variables with sources reference a known device
+	// when devices are supplied in the same batch.
 	for varID, v := range r.Spec.Variables {
-		if v.Source != nil && v.Source.DeviceID != "" && hasSources {
-			if !sourceIDs[v.Source.DeviceID] {
-				ve.add("%s: variable %q source references unknown source %q", prefix, varID, v.Source.DeviceID)
+		if v.Source != nil && v.Source.DeviceID != "" && hasDevices {
+			if !deviceIDs[v.Source.DeviceID] {
+				ve.add("%s: variable %q source references unknown device %q", prefix, varID, v.Source.DeviceID)
 			}
 		}
 	}
@@ -167,8 +167,8 @@ func validatePlc(r *PlcResource, idx int, ve *ValidationError, hasSources bool, 
 	}
 }
 
-func validateSource(r *SourceResource, idx int, ve *ValidationError) {
-	prefix := fmt.Sprintf("Source %q (resource %d)", r.Metadata.Name, idx)
+func validateDevice(r *DeviceResource, idx int, ve *ValidationError) {
+	prefix := fmt.Sprintf("Device %q (resource %d)", r.Metadata.Name, idx)
 
 	if r.Metadata.Name == "" {
 		ve.add("%s: metadata.name is required", prefix)

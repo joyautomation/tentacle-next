@@ -38,18 +38,18 @@ func (m *Module) syncModuleStatus(cfg *itypes.GatewayConfigKV, gatewayID, module
 
 	changed := false
 
-	// Ensure auto-managed source exists in the shared sources bucket.
-	// AutoManaged sources are self-publishing — the scanner never writes
+	// Ensure auto-managed device exists in the shared devices bucket.
+	// AutoManaged devices are self-publishing — the scanner never writes
 	// a subscribe config for them.
-	src, srcOK := m.getSource(moduleType)
-	if !srcOK {
-		_ = m.putSource(moduleType, itypes.SourceConfig{
+	dev, devOK := m.getDevice(moduleType)
+	if !devOK {
+		_ = m.putDevice(moduleType, itypes.DeviceConfig{
 			Protocol:    moduleType,
 			AutoManaged: true,
 		})
-	} else if !src.AutoManaged {
-		src.AutoManaged = true
-		_ = m.putSource(moduleType, src)
+	} else if !dev.AutoManaged {
+		dev.AutoManaged = true
+		_ = m.putDevice(moduleType, dev)
 	}
 
 	// Populate browse cache so variables appear in the Variables page for

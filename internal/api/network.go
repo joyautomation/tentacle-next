@@ -51,23 +51,23 @@ func (m *Module) syncNetworkInterfaces(cfg *itypes.GatewayConfigKV) bool {
 
 	changed := false
 
-	// Ensure single "network" source exists in the shared sources bucket.
-	src, srcOK := m.getSource("network")
-	if !srcOK {
-		_ = m.putSource("network", itypes.SourceConfig{
+	// Ensure single "network" device exists in the shared devices bucket.
+	dev, devOK := m.getDevice("network")
+	if !devOK {
+		_ = m.putDevice("network", itypes.DeviceConfig{
 			Protocol:    "network",
 			AutoManaged: true,
 		})
-	} else if !src.AutoManaged {
-		src.AutoManaged = true
-		_ = m.putSource("network", src)
+	} else if !dev.AutoManaged {
+		dev.AutoManaged = true
+		_ = m.putDevice("network", dev)
 	}
 
-	// Clean up old per-interface sources from previous config format.
-	if sources, err := m.listSources(); err == nil {
-		for id, cfg := range sources {
+	// Clean up old per-interface devices from previous config format.
+	if devices, err := m.listDevices(); err == nil {
+		for id, cfg := range devices {
 			if cfg.Protocol == "network" && id != "network" {
-				_ = m.deleteSource(id)
+				_ = m.deleteDevice(id)
 			}
 		}
 	}

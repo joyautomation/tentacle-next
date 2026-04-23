@@ -52,7 +52,7 @@ type Gateway struct {
 
 	mu        sync.RWMutex
 	config    *itypes.GatewayConfigKV
-	sources   *scanner.Registry
+	devices   *scanner.Registry
 	variables map[string]*TrackedVariable
 
 	// Maps scanner subject tokens to gateway variable IDs.
@@ -88,21 +88,21 @@ func New(gatewayID string) *Gateway {
 	}
 }
 
-// device looks up a source by deviceID from the shared sources registry.
+// device looks up a device by deviceID from the shared devices registry.
 // Caller must hold g.mu at least for read.
-func (g *Gateway) device(deviceID string) (itypes.SourceConfig, bool) {
-	if g.sources == nil {
-		return itypes.SourceConfig{}, false
+func (g *Gateway) device(deviceID string) (itypes.DeviceConfig, bool) {
+	if g.devices == nil {
+		return itypes.DeviceConfig{}, false
 	}
-	return g.sources.Get(deviceID)
+	return g.devices.Get(deviceID)
 }
 
-// sourceCount returns the current number of known sources.
-func (g *Gateway) sourceCount() int {
-	if g.sources == nil {
+// deviceCount returns the current number of known devices.
+func (g *Gateway) deviceCount() int {
+	if g.devices == nil {
 		return 0
 	}
-	return g.sources.Count()
+	return g.devices.Count()
 }
 
 func (g *Gateway) ModuleID() string    { return g.gatewayID }
@@ -116,7 +116,7 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 	// Ensure required KV buckets exist
 	for _, bucket := range []string{
 		topics.BucketGatewayConfig, topics.BucketServiceEnabled,
-		topics.BucketSources,
+		topics.BucketDevices,
 		topics.BucketScannerEthernetIP, topics.BucketScannerOpcUA,
 		topics.BucketScannerModbus, topics.BucketScannerSNMP,
 	} {
@@ -125,13 +125,15 @@ func (g *Gateway) Start(ctx context.Context, b bus.Bus) error {
 		}
 	}
 
-	// Migrate any legacy gateway_config.devices to the shared sources bucket.
+	// Migrate any legacy gateway_config.devices to the shared devices bucket.
 	scanner.MigrateLegacyDevices(b, g.log, topics.BucketGatewayConfig, g.gatewayID)
+	// Drain legacy `sources` bucket into `devices` (one-shot rename migration).
+	scanner.MigrateLegacySourcesBucket(b, g.log)
 
-	// Start the shared sources registry watcher.
-	g.sources = scanner.NewRegistry(b, g.log)
-	if err := g.sources.Start(g.onSourcesChanged); err != nil {
-		g.log.Error("gateway: failed to start sources registry", "error", err)
+	// Start the shared devices registry watcher.
+	g.devices = scanner.NewRegistry(b, g.log)
+	if err := g.devices.Start(g.onDevicesChanged); err != nil {
+		g.log.Error("gateway: failed to start devices registry", "error", err)
 	}
 
 	g.startedAt = time.Now()
@@ -278,7 +280,7 @@ func (g *Gateway) HasConfig() bool {
 // (Using module.PublishStatus would publish on gateway.data.gateway.{name} which
 // the gateway also subscribes to, causing a self-routing loop and duplicate metrics.)
 func (g *Gateway) publishStatus() {
-	deviceCount := g.sourceCount()
+	deviceCount := g.deviceCount()
 
 	g.mu.RLock()
 	varCount := len(g.variables)
@@ -419,7 +421,7 @@ func (g *Gateway) ApplyConfig(config *itypes.GatewayConfigKV) {
 		"atomicVars", len(g.variables),
 		"udtVars", udtVarCount,
 		"templates", len(config.UdtTemplates),
-		"sources", g.sourceCount())
+		"devices", g.deviceCount())
 
 	g.subscribeToScannersLocked()
 	g.setupVariablesHandlerLocked()
@@ -462,7 +464,7 @@ func (g *Gateway) subscribeToScannersLocked() {
 	}
 
 	type deviceGroup struct {
-		device    itypes.SourceConfig
+		device    itypes.DeviceConfig
 		deviceID  string
 		variables map[string]itypes.GatewayVariableConfig
 	}
@@ -544,7 +546,7 @@ func (g *Gateway) subscribeToScannersLocked() {
 	}
 }
 
-func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.SourceConfig, vars map[string]itypes.GatewayVariableConfig) {
+func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.DeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
 	sanitizedDevice := types.SanitizeForSubject(deviceID)
 	protocol := device.Protocol
 
@@ -577,7 +579,7 @@ func (g *Gateway) subscribeToDeviceLocked(deviceID string, device itypes.SourceC
 // Scanner subscribe/unsubscribe requests
 // ═══════════════════════════════════════════════════════════════════════════
 
-func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.SourceConfig, vars map[string]itypes.GatewayVariableConfig) {
+func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.DeviceConfig, vars map[string]itypes.GatewayVariableConfig) {
 	subscriberID := scanner.SubscriberID(serviceType, g.gatewayID)
 
 	var structTypes map[string]string
@@ -602,7 +604,7 @@ func (g *Gateway) writeSubscriptionConfig(deviceID string, device itypes.SourceC
 	}
 	if !handled {
 		if !device.AutoManaged {
-			g.log.Debug("gateway: no scanner bucket for protocol (self-publishing source)", "protocol", device.Protocol, "device", deviceID)
+			g.log.Debug("gateway: no scanner bucket for protocol (self-publishing device)", "protocol", device.Protocol, "device", deviceID)
 		}
 		return
 	}
@@ -642,11 +644,11 @@ func (g *Gateway) deleteSubscriptionConfigsLocked() {
 	}
 }
 
-// onSourcesChanged is invoked by the shared sources Registry whenever a source
+// onDevicesChanged is invoked by the shared devices Registry whenever a device
 // is added, updated, or deleted. It re-applies the current config so that
 // subscriptions, tag indexes, and UDT assemblers are rebuilt against the new
-// source set.
-func (g *Gateway) onSourcesChanged() {
+// device set.
+func (g *Gateway) onDevicesChanged() {
 	g.mu.RLock()
 	cfg := g.config
 	g.mu.RUnlock()

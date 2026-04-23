@@ -10,9 +10,9 @@ import (
 	itypes "github.com/joyautomation/tentacle/internal/types"
 )
 
-// Registry is an in-memory view of the shared `sources` KV bucket. It
-// maintains a local deviceId → SourceConfig map kept in sync with the bucket
-// via a watch, and notifies a callback whenever the set of sources changes.
+// Registry is an in-memory view of the shared `devices` KV bucket. It
+// maintains a local deviceId → DeviceConfig map kept in sync with the bucket
+// via a watch, and notifies a callback whenever the set of devices changes.
 //
 // Gateway and PLC each create their own Registry. Neither owns the bucket —
 // edits come from the HTTP API, gitops, or manifest imports.
@@ -21,7 +21,7 @@ type Registry struct {
 	log *slog.Logger
 
 	mu       sync.RWMutex
-	sources  map[string]itypes.SourceConfig
+	devices  map[string]itypes.DeviceConfig
 	onChange func()
 
 	sub bus.Subscription
@@ -32,12 +32,12 @@ func NewRegistry(b bus.Bus, log *slog.Logger) *Registry {
 	return &Registry{
 		b:       b,
 		log:     log,
-		sources: make(map[string]itypes.SourceConfig),
+		devices: make(map[string]itypes.DeviceConfig),
 	}
 }
 
-// Start subscribes to the sources KV bucket and populates the local map.
-// onChange is invoked (on the watcher goroutine) whenever a source is
+// Start subscribes to the devices KV bucket and populates the local map.
+// onChange is invoked (on the watcher goroutine) whenever a device is
 // added, updated, or deleted — callers typically use this to rebuild
 // scanner subscribe requests.
 func (r *Registry) Start(onChange func()) error {
@@ -45,7 +45,7 @@ func (r *Registry) Start(onChange func()) error {
 	r.onChange = onChange
 	r.mu.Unlock()
 
-	sub, err := r.b.KVWatchAll(topics.BucketSources, func(key string, value []byte, op bus.KVOperation) {
+	sub, err := r.b.KVWatchAll(topics.BucketDevices, func(key string, value []byte, op bus.KVOperation) {
 		r.handle(key, value, op)
 	})
 	if err != nil {
@@ -66,15 +66,15 @@ func (r *Registry) Stop() {
 func (r *Registry) handle(deviceID string, value []byte, op bus.KVOperation) {
 	r.mu.Lock()
 	if op == bus.KVOpDelete {
-		delete(r.sources, deviceID)
+		delete(r.devices, deviceID)
 	} else {
-		var cfg itypes.SourceConfig
+		var cfg itypes.DeviceConfig
 		if err := json.Unmarshal(value, &cfg); err != nil {
-			r.log.Error("scanner.Registry: failed to parse source", "deviceId", deviceID, "error", err)
+			r.log.Error("scanner.Registry: failed to parse device", "deviceId", deviceID, "error", err)
 			r.mu.Unlock()
 			return
 		}
-		r.sources[deviceID] = cfg
+		r.devices[deviceID] = cfg
 	}
 	cb := r.onChange
 	r.mu.Unlock()
@@ -84,63 +84,63 @@ func (r *Registry) handle(deviceID string, value []byte, op bus.KVOperation) {
 	}
 }
 
-// Get returns a copy of the SourceConfig for a deviceId.
-func (r *Registry) Get(deviceID string) (itypes.SourceConfig, bool) {
+// Get returns a copy of the DeviceConfig for a deviceId.
+func (r *Registry) Get(deviceID string) (itypes.DeviceConfig, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	cfg, ok := r.sources[deviceID]
+	cfg, ok := r.devices[deviceID]
 	return cfg, ok
 }
 
-// All returns a copy of the full deviceId → SourceConfig map.
-func (r *Registry) All() map[string]itypes.SourceConfig {
+// All returns a copy of the full deviceId → DeviceConfig map.
+func (r *Registry) All() map[string]itypes.DeviceConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make(map[string]itypes.SourceConfig, len(r.sources))
-	for k, v := range r.sources {
+	out := make(map[string]itypes.DeviceConfig, len(r.devices))
+	for k, v := range r.devices {
 		out[k] = v
 	}
 	return out
 }
 
-// Count returns the number of known sources.
+// Count returns the number of known devices.
 func (r *Registry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.sources)
+	return len(r.devices)
 }
 
-// Put writes a SourceConfig to the sources KV bucket. Used by API handlers
+// Put writes a DeviceConfig to the devices KV bucket. Used by API handlers
 // and migration logic.
-func Put(b bus.Bus, deviceID string, cfg itypes.SourceConfig) error {
+func Put(b bus.Bus, deviceID string, cfg itypes.DeviceConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	_, err = b.KVPut(topics.BucketSources, deviceID, data)
+	_, err = b.KVPut(topics.BucketDevices, deviceID, data)
 	return err
 }
 
-// Delete removes a SourceConfig from the sources KV bucket.
+// Delete removes a DeviceConfig from the devices KV bucket.
 func Delete(b bus.Bus, deviceID string) error {
-	return b.KVDelete(topics.BucketSources, deviceID)
+	return b.KVDelete(topics.BucketDevices, deviceID)
 }
 
-// List returns all sources currently in the bucket (synchronous read).
+// List returns all devices currently in the bucket (synchronous read).
 // Prefer Registry.All() for steady-state access; use List for one-shot
 // reads from API handlers where no registry is available.
-func List(b bus.Bus) (map[string]itypes.SourceConfig, error) {
-	keys, err := b.KVKeys(topics.BucketSources)
+func List(b bus.Bus) (map[string]itypes.DeviceConfig, error) {
+	keys, err := b.KVKeys(topics.BucketDevices)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]itypes.SourceConfig, len(keys))
+	out := make(map[string]itypes.DeviceConfig, len(keys))
 	for _, key := range keys {
-		data, _, err := b.KVGet(topics.BucketSources, key)
+		data, _, err := b.KVGet(topics.BucketDevices, key)
 		if err != nil {
 			continue
 		}
-		var cfg itypes.SourceConfig
+		var cfg itypes.DeviceConfig
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			continue
 		}

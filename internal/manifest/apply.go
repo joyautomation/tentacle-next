@@ -77,11 +77,11 @@ func Apply(b bus.Bus, resources []any, source string) (*ApplyResult, error) {
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindPlc, Name: r.Metadata.Name})
 
-		case *SourceResource:
-			if err := applySource(b, r, source); err != nil {
-				return result, fmt.Errorf("apply Source %q: %w", r.Metadata.Name, err)
+		case *DeviceResource:
+			if err := applyDevice(b, r, source); err != nil {
+				return result, fmt.Errorf("apply Device %q: %w", r.Metadata.Name, err)
 			}
-			result.Applied = append(result.Applied, AppliedResource{Kind: KindSource, Name: r.Metadata.Name})
+			result.Applied = append(result.Applied, AppliedResource{Kind: KindDevice, Name: r.Metadata.Name})
 		}
 	}
 
@@ -275,15 +275,15 @@ func applyPlc(b bus.Bus, r *PlcResource, source string) error {
 	return nil
 }
 
-func applySource(b bus.Bus, r *SourceResource, source string) error {
+func applyDevice(b bus.Bus, r *DeviceResource, source string) error {
 	data, err := json.Marshal(r.Spec)
 	if err != nil {
 		return err
 	}
-	if _, err := b.KVPut(topics.BucketSources, r.Metadata.Name, data); err != nil {
+	if _, err := b.KVPut(topics.BucketDevices, r.Metadata.Name, data); err != nil {
 		return err
 	}
-	writeSourceMetadata(b, topics.BucketSources, r.Metadata.Name, source)
+	writeSourceMetadata(b, topics.BucketDevices, r.Metadata.Name, source)
 	return nil
 }
 

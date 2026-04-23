@@ -4,8 +4,8 @@ import ttypes "github.com/joyautomation/tentacle/types"
 
 // GatewayConfigKV is the full gateway configuration stored in the gateway_config
 // NATS KV bucket, keyed by gatewayId. Device connection config lives in the
-// shared `sources` bucket (SourceConfig), not here — gateway variables
-// reference sources by deviceId.
+// shared `devices` bucket (DeviceConfig), not here — gateway variables
+// reference devices by deviceId.
 type GatewayConfigKV struct {
 	GatewayID    string                              `json:"gatewayId"`
 	Variables    map[string]GatewayVariableConfig     `json:"variables"`

@@ -4,8 +4,8 @@ import ttypes "github.com/joyautomation/tentacle/types"
 
 // PlcConfigKV is the full PLC configuration stored in the plc_config
 // NATS KV bucket, keyed by plcId. Device connection config lives in the
-// shared `sources` bucket (SourceConfig), not here — input variables
-// reference sources by deviceId through PlcVariableSourceKV.
+// shared `devices` bucket (DeviceConfig), not here — input variables
+// reference devices by deviceId through PlcVariableSourceKV.
 type PlcConfigKV struct {
 	PlcID        string                             `json:"plcId"`
 	Variables    map[string]PlcVariableConfigKV      `json:"variables"`

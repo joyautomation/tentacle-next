@@ -18,10 +18,15 @@ const (
 	BucketDeviceRegistry = "device_registry"
 	BucketBrowseCache    = "browse_cache"
 
-	// BucketSources holds shared source (device) connection configuration
+	// BucketDevices holds shared device connection configuration
 	// keyed by deviceId. Both gateway and PLC watch this bucket and
 	// reference devices by deviceId from their own config.
-	BucketSources = "sources"
+	BucketDevices = "devices"
+
+	// BucketDevicesLegacy is the pre-rename bucket name. Kept solely so
+	// the migration step can drain it into BucketDevices on startup. Do
+	// not use for new reads/writes.
+	BucketDevicesLegacy = "sources"
 
 	// Per-protocol scanner subscription config buckets.
 	// Controllers (gateway, plc) write desired subscriptions here;
@@ -83,7 +88,7 @@ func BucketConfigs() map[string]bus.KVBucketConfig {
 		BucketPlcVariables:    {History: 1},
 		BucketDeviceRegistry:  {History: 1},
 		BucketBrowseCache:     {History: 1},
-		BucketSources:         {History: 5},
+		BucketDevices:         {History: 5},
 		BucketScannerEthernetIP: {History: 1},
 		BucketScannerOpcUA:      {History: 1},
 		BucketScannerModbus:     {History: 1},

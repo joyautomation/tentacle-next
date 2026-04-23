@@ -36,7 +36,7 @@ type TagSpec struct {
 func WriteSubscription(
 	b bus.Bus,
 	subscriberID, deviceID string,
-	device itypes.SourceConfig,
+	device itypes.DeviceConfig,
 	tags []TagSpec,
 	structTypes map[string]string,
 ) (handled bool, err error) {

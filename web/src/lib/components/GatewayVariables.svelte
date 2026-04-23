@@ -299,7 +299,7 @@
   }
 
   function getDeviceDeadband(deviceId: string): DeadBandConfig | null {
-    const device = gatewayConfig?.sources?.find(d => d.deviceId === deviceId);
+    const device = gatewayConfig?.devices?.find(d => d.deviceId === deviceId);
     return device?.deadband ?? null;
   }
 
@@ -452,7 +452,7 @@
   }
 
   async function refreshDevice(deviceId: string) {
-    const device = gatewayConfig?.sources?.find(d => d.deviceId === deviceId);
+    const device = gatewayConfig?.devices?.find(d => d.deviceId === deviceId);
     if (!device) return;
     try {
       const input: Record<string, unknown> = { deviceId, protocol: device.protocol };

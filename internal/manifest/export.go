@@ -82,13 +82,13 @@ func Export(b bus.Bus, opts ExportOptions) ([]any, error) {
 		}
 	}
 
-	// Source (device) configs from the shared sources bucket.
-	if includeAll || kindSet[KindSource] {
-		sources, err := exportSources(b)
+	// Device configs from the shared devices bucket.
+	if includeAll || kindSet[KindDevice] {
+		devices, err := exportDevices(b)
 		if err != nil {
-			slog.Warn("export: skipping sources", "error", err)
+			slog.Warn("export: skipping devices", "error", err)
 		} else {
-			resources = append(resources, sources...)
+			resources = append(resources, devices...)
 		}
 	}
 
@@ -343,26 +343,26 @@ func exportPlcs(b bus.Bus) ([]any, error) {
 	return resources, nil
 }
 
-func exportSources(b bus.Bus) ([]any, error) {
-	keys, err := b.KVKeys(topics.BucketSources)
+func exportDevices(b bus.Bus) ([]any, error) {
+	keys, err := b.KVKeys(topics.BucketDevices)
 	if err != nil {
-		return nil, fmt.Errorf("list source keys: %w", err)
+		return nil, fmt.Errorf("list device keys: %w", err)
 	}
 
 	var resources []any
 	for _, key := range keys {
-		data, _, err := b.KVGet(topics.BucketSources, key)
+		data, _, err := b.KVGet(topics.BucketDevices, key)
 		if err != nil {
-			slog.Warn("export: skipping source", "key", key, "error", err)
+			slog.Warn("export: skipping device", "key", key, "error", err)
 			continue
 		}
-		var cfg itypes.SourceConfig
+		var cfg itypes.DeviceConfig
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			slog.Warn("export: skipping source", "key", key, "error", err)
+			slog.Warn("export: skipping device", "key", key, "error", err)
 			continue
 		}
-		resources = append(resources, &SourceResource{
-			ResourceHeader: NewHeader(KindSource, key),
+		resources = append(resources, &DeviceResource{
+			ResourceHeader: NewHeader(KindDevice, key),
 			Spec:           cfg,
 		})
 	}

@@ -64,9 +64,9 @@
 	});
 
 	$effect(() => {
-		if (selection?.kind !== 'source') return;
-		if (!data.gatewayConfig?.sources?.some((d) => d.deviceId === selection.id)) return;
-		workspaceTabs.open({ name: selection.id, kind: 'source' });
+		if (selection?.kind !== 'device') return;
+		if (!data.gatewayConfig?.devices?.some((d) => d.deviceId === selection.id)) return;
+		workspaceTabs.open({ name: selection.id, kind: 'device' });
 	});
 
 	// Ctrl/Cmd+S saves the active tab's draft. Each editor registers its

@@ -56,12 +56,12 @@
     workspaceTabs.openNew("type");
   }
 
-  function newSourceTab() {
-    workspaceTabs.openNew("source");
+  function newDeviceTab() {
+    workspaceTabs.openNew("device");
   }
 
   let sections = $state({
-    sources: true,
+    devices: true,
     variables: true,
     types: true,
     tasks: true,
@@ -100,17 +100,15 @@
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
 
-  // Sources are shared across Gateway and PLC — one source of truth in the
-  // `sources` KV bucket, exposed on the gateway config as `sources`.
-  const sourceEntries = $derived(
-    (gatewayConfig?.sources ?? [])
+  // Devices are shared across Gateway and PLC — one source of truth in the
+  // `devices` KV bucket, exposed on the gateway config as `devices`.
+  const deviceEntries = $derived(
+    (gatewayConfig?.devices ?? [])
       .filter((d) => matchesFilter(d.deviceId))
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
   );
 
-  // Count variables bound to each source so the user can see at a glance
-  // which sources are actually in use.
-  const sourceVarCounts = $derived.by(() => {
+  const deviceVarCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
     for (const v of Object.values(variables)) {
       const deviceId = v.source?.deviceId;
@@ -237,54 +235,54 @@
         <button
           type="button"
           class="section-header"
-          onclick={() => toggle("sources")}
-          aria-expanded={sections.sources}
+          onclick={() => toggle("devices")}
+          aria-expanded={sections.devices}
         >
-          <span class="chevron" class:open={sections.sources}
+          <span class="chevron" class:open={sections.devices}
             ><ChevronRight size="0.75rem" /></span
           >
-          <span class="label">Sources</span>
-          <span class="count">{sourceEntries.length}</span>
+          <span class="label">Devices</span>
+          <span class="count">{deviceEntries.length}</span>
         </button>
         <button
           type="button"
           class="add-btn"
-          onclick={newSourceTab}
-          title="New source"
-          aria-label="New source"
+          onclick={newDeviceTab}
+          title="New device"
+          aria-label="New device"
         >
           <Plus size="0.875rem" />
         </button>
       </div>
-      {#if sections.sources}
+      {#if sections.devices}
         <ul class="items" transition:slide={{ duration: 150 }}>
-          {#each sourceEntries as device (device.deviceId)}
+          {#each deviceEntries as device (device.deviceId)}
             <li>
               <button
                 type="button"
                 class="item"
                 class:selected={workspaceSelection.isSelected(
-                  "source",
+                  "device",
                   device.deviceId,
                 )}
                 onclick={() =>
-                  workspaceSelection.select("source", device.deviceId)}
+                  workspaceSelection.select("device", device.deviceId)}
                 title={device.autoManaged
                   ? `${device.protocol} · auto-managed by a module`
                   : `${device.protocol} · ${device.host ?? device.endpointUrl ?? ""}`}
               >
-                <span class="badge source">{protocolBadge(device.protocol)}</span>
+                <span class="badge device">{protocolBadge(device.protocol)}</span>
                 <span class="name">{device.deviceId}</span>
                 {#if device.autoManaged}
                   <span class="item-tag">auto</span>
                 {/if}
-                {#if sourceVarCounts[device.deviceId]}
-                  <span class="meta">{sourceVarCounts[device.deviceId]}</span>
+                {#if deviceVarCounts[device.deviceId]}
+                  <span class="meta">{deviceVarCounts[device.deviceId]}</span>
                 {/if}
               </button>
             </li>
           {:else}
-            <li class="empty">No sources</li>
+            <li class="empty">No devices</li>
           {/each}
         </ul>
       {/if}
@@ -833,7 +831,7 @@
     color: var(--theme-primary);
   }
 
-  .badge.source {
+  .badge.device {
     color: var(--theme-warning, #f59e0b);
   }
 

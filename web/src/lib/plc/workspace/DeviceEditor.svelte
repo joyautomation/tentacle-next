@@ -14,7 +14,7 @@
 
 	type Props = {
 		tabId: string;
-		name: string; // deviceId, or '' for a new source
+		name: string; // deviceId, or '' for a new device
 		gatewayConfig: GatewayConfig | null;
 		isNew?: boolean;
 	};
@@ -24,7 +24,7 @@
 	// The canonical device record from the loaded gateway config. When the
 	// user saves, invalidateAll refetches the config and this re-derives.
 	const existing = $derived<GatewayDevice | null>(
-		gatewayConfig?.sources?.find((d) => d.deviceId === name) ?? null
+		gatewayConfig?.devices?.find((d) => d.deviceId === name) ?? null
 	);
 
 	const allProtocols = [
@@ -202,7 +202,7 @@
 		if (isNew) {
 			const id = pendingDeviceId.trim();
 			if (!id) return false;
-			if (gatewayConfig?.sources?.some((d) => d.deviceId === id)) return false;
+			if (gatewayConfig?.devices?.some((d) => d.deviceId === id)) return false;
 			if (availableProtocols.length === 0) return false;
 		}
 		return isDirty || isNew;
@@ -220,15 +220,15 @@
 				saltState.addNotification({ message: 'deviceId required', type: 'error' });
 				return;
 			}
-			const res = await apiPut(`/sources/${encodeURIComponent(id)}`, body);
+			const res = await apiPut(`/devices/${encodeURIComponent(id)}`, body);
 			if (res.error) {
 				saltState.addNotification({ message: res.error.error, type: 'error' });
 				return;
 			}
-			saltState.addNotification({ message: `Saved source "${id}"`, type: 'success' });
+			saltState.addNotification({ message: `Saved device "${id}"`, type: 'success' });
 			if (isNew) {
 				workspaceTabs.renameTab(tabId, id);
-				workspaceSelection.select('source', id);
+				workspaceSelection.select('device', id);
 			}
 			workspaceTabs.clearDirty(tabId);
 			await invalidateAll();
@@ -248,27 +248,27 @@
 		if (!existing) return;
 		if (isAutoManaged) {
 			saltState.addNotification({
-				message: 'Auto-managed sources cannot be deleted from here.',
+				message: 'Auto-managed devices cannot be deleted from here.',
 				type: 'error'
 			});
 			return;
 		}
 		const msg =
 			variableCount > 0
-				? `Delete source "${existing.deviceId}"? This will also remove ${variableCount} variable(s) and browse cache for this device.`
-				: `Delete source "${existing.deviceId}"? This cannot be undone.`;
+				? `Delete device "${existing.deviceId}"? This will also remove ${variableCount} variable(s) and browse cache for this device.`
+				: `Delete device "${existing.deviceId}"? This cannot be undone.`;
 		if (!confirm(msg)) return;
 		deleting = true;
 		try {
 			const res = await apiDelete(
-				`/sources/${encodeURIComponent(existing.deviceId)}`
+				`/devices/${encodeURIComponent(existing.deviceId)}`
 			);
 			if (res.error) {
 				saltState.addNotification({ message: res.error.error, type: 'error' });
 				return;
 			}
 			saltState.addNotification({
-				message: `Deleted source "${existing.deviceId}"`,
+				message: `Deleted device "${existing.deviceId}"`,
 				type: 'success'
 			});
 			workspaceTabs.close(tabId);
@@ -279,11 +279,11 @@
 	}
 </script>
 
-<div class="source-editor">
+<div class="device-editor">
 	<header class="se-head">
 		<div class="left">
-			<span class="kind-badge">Source</span>
-			<span class="name">{pendingDeviceId || name || '(new source)'}</span>
+			<span class="kind-badge">Device</span>
+			<span class="name">{pendingDeviceId || name || '(new device)'}</span>
 			{#if existing}
 				<span class="proto-badge">{protocolLabels[existing.protocol] ?? existing.protocol}</span>
 			{/if}
@@ -306,7 +306,7 @@
 					disabled={deleting || saving}
 					title={variableCount > 0
 						? `Will also remove ${variableCount} variable(s)`
-						: 'Delete source'}
+						: 'Delete device'}
 				>
 					{deleting ? 'Deleting…' : 'Delete'}
 				</button>
@@ -316,7 +316,7 @@
 
 	{#if !isNew && !existing}
 		<div class="se-body">
-			<div class="status">Source "{name}" not found.</div>
+			<div class="status">Device "{name}" not found.</div>
 		</div>
 	{:else}
 		<div class="se-body">
@@ -338,7 +338,7 @@
 							{#if availableProtocols.length === 0}
 								<p class="hint error">
 									No protocol modules connected. Start a protocol service (EtherNet/IP,
-									OPC UA, SNMP, or Modbus) to add a source.
+									OPC UA, SNMP, or Modbus) to add a device.
 								</p>
 							{:else}
 								<select class="input" bind:value={protocol}>
@@ -354,7 +354,7 @@
 
 			{#if isAutoManaged}
 				<div class="info-note">
-					This source is auto-managed by a protocol module. Connection details are not
+					This device is auto-managed by a protocol module. Connection details are not
 					user-editable; you can still adjust RBE / deadband below.
 				</div>
 			{/if}
@@ -503,7 +503,7 @@
 
 			{#if !isNew && existing}
 				<div class="section meta-row">
-					<span>{variableCount} variable(s) bound to this source</span>
+					<span>{variableCount} variable(s) bound to this device</span>
 				</div>
 			{/if}
 		</div>
@@ -511,7 +511,7 @@
 </div>
 
 <style lang="scss">
-	.source-editor {
+	.device-editor {
 		display: flex;
 		flex-direction: column;
 		height: 100%;

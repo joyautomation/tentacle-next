@@ -38,11 +38,11 @@
   ] as const;
 
   const moduleDevices = $derived(
-    (gatewayConfig?.sources?.filter(d => d.autoManaged) ?? [])
+    (gatewayConfig?.devices?.filter(d => d.autoManaged) ?? [])
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId))
   );
   const externalDevices = $derived(
-    (gatewayConfig?.sources?.filter(d => !d.autoManaged) ?? [])
+    (gatewayConfig?.devices?.filter(d => !d.autoManaged) ?? [])
       .sort((a, b) => a.protocol.localeCompare(b.protocol) || a.deviceId.localeCompare(b.deviceId))
   );
 
@@ -140,7 +140,7 @@
         };
       }
 
-      const result = await apiPut(`/sources/${encodeURIComponent(device.deviceId)}`, input);
+      const result = await apiPut(`/devices/${encodeURIComponent(device.deviceId)}`, input);
 
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
@@ -168,7 +168,7 @@
         ...(newDevice.protocol === 'snmp' ? { version: newDevice.version, community: newDevice.community } : {}),
         ...(newDevice.protocol === 'modbus' && newDevice.unitId ? { unitId: parseInt(newDevice.unitId) } : {}),
       };
-      const result = await apiPut(`/sources/${encodeURIComponent(newDevice.deviceId)}`, deviceBody);
+      const result = await apiPut(`/devices/${encodeURIComponent(newDevice.deviceId)}`, deviceBody);
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
@@ -187,7 +187,7 @@
   async function removeDevice(deviceId: string) {
     saving = true;
     try {
-      const result = await apiDelete(`/sources/${encodeURIComponent(deviceId)}`);
+      const result = await apiDelete(`/devices/${encodeURIComponent(deviceId)}`);
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
@@ -219,7 +219,7 @@
   {/if}
 
   <div class="devices-header">
-    <h1>Sources</h1>
+    <h1>Devices</h1>
   </div>
 
   <!-- Modules Section -->
