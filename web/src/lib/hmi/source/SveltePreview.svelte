@@ -43,7 +43,7 @@
     const a = compileScopedCss(appClasses, '');
     if (a) parts.push(a);
     if (prefix) {
-      const c = compileScopedCss(componentClasses, prefix);
+      const c = compileScopedCss(componentClasses, prefix, 'descendant');
       if (c) parts.push(c);
     }
     return parts.join('\n\n');
@@ -122,7 +122,7 @@
 
 <div class="preview-shell">
   <div
-    class="surface"
+    class="surface {prefix}"
     bind:this={surfaceEl}
     ondragover={onDragOver}
     ondragleave={onDragLeave}

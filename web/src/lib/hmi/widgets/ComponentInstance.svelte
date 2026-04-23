@@ -36,8 +36,10 @@
     });
   });
 
-  const css = $derived(compileScopedCss(componentClasses, prefix));
   const isSourceMode = $derived(!!component?.source);
+  const css = $derived(
+    compileScopedCss(componentClasses, prefix, isSourceMode ? 'descendant' : 'compound'),
+  );
 
   // For source-mode components: feed the live UDT object (or undefined) to the
   // mounted Svelte component as the `udt` prop. The tagStore reactivity flows
@@ -57,7 +59,7 @@
     {@html `<style data-hmi-component=${component.componentId}>${css}</style>`}
   {/if}
   {#if isSourceMode}
-    <div class="root source">
+    <div class="root source {prefix}">
       <SvelteHost source={component.source ?? ''} componentProps={sourceProps} />
     </div>
   {:else}

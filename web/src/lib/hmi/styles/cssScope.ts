@@ -11,6 +11,7 @@
 export function compileScopedCss(
   classes: Record<string, string> | undefined,
   prefix: string,
+  mode: 'compound' | 'descendant' = 'compound',
 ): string {
   if (!classes) return '';
   const parts: string[] = [];
@@ -21,7 +22,11 @@ export function compileScopedCss(
     if (!body) continue;
     // Prevent breaking out of the inline <style> block via </style>.
     const safeBody = body.replace(/<\/(style)/gi, '<\\/$1');
-    const selector = prefix ? `.${prefix}__${safeName}` : `.${safeName}`;
+    const selector = !prefix
+      ? `.${safeName}`
+      : mode === 'descendant'
+        ? `.${prefix} .${safeName}`
+        : `.${prefix}__${safeName}`;
     parts.push(`${selector} {\n  ${safeBody.replace(/\n/g, '\n  ')}\n}`);
   }
   return parts.join('\n\n');
