@@ -465,7 +465,7 @@ func memberCompletion(source string, pos Position, provider SymbolProvider) (Com
 		return CompletionList{}, false
 	}
 	beforeDot := strings.TrimRight(prefix[:end-1], " \t")
-	templateName, ok := resolveExprTemplate(source, beforeDot, provider)
+	templateName, ok := resolveExprTemplate(source, pos, beforeDot, provider)
 	if !ok {
 		return CompletionList{}, false
 	}
@@ -503,23 +503,87 @@ func memberCompletion(source string, pos Position, provider SymbolProvider) (Com
 }
 
 // resolveExprTemplate maps a simple expression (the text just before a
-// member-access dot) to a template name. Two forms are recognized:
+// member-access dot) to a template name. Recognized forms:
 //
 //   - A direct `get_var("NAME")` call — look up NAME.
-//   - A bare identifier — search the source for an assignment of the
-//     form `IDENT = get_var("NAME")` and resolve that.
+//   - A bare identifier — first, check whether the identifier is a
+//     parameter of the containing def whose type annotation names a
+//     template (`def f(motor: Motor): motor.`). Failing that, search for
+//     an assignment `IDENT = get_var("NAME")` in the same source.
 //
 // Anything more complex (chained calls, attribute access, arithmetic)
 // returns false; supporting those would require real type inference and
 // is a follow-up.
-func resolveExprTemplate(source, expr string, provider SymbolProvider) (string, bool) {
+func resolveExprTemplate(source string, pos Position, expr string, provider SymbolProvider) (string, bool) {
 	expr = strings.TrimSpace(expr)
 	if m := getVarCallRe.FindStringSubmatch(expr); m != nil {
 		return variableTemplate(provider, m[1])
 	}
 	if identRe.MatchString(expr) {
+		if tmpl, ok := findParamTemplate(source, pos, expr, provider); ok {
+			return tmpl, true
+		}
 		if name, ok := findGetVarAssignment(source, expr); ok {
 			return variableTemplate(provider, name)
+		}
+	}
+	return "", false
+}
+
+// findParamTemplate resolves a bare identifier to a template name by
+// looking at the param-type annotation on the enclosing def header.
+// Returns the template name only when it refers to a template known to
+// the provider — unknown annotation types (`int`, `str`, or a typo)
+// return false so the caller can keep searching.
+func findParamTemplate(source string, pos Position, ident string, provider SymbolProvider) (string, bool) {
+	cursorLine := pos.Line + 1
+	stripped, sigs := plc.StripAnnotations(source)
+	if len(sigs) == 0 {
+		return "", false
+	}
+	f, err := syntax.Parse("program.star", stripped, 0)
+	if f == nil && err != nil {
+		return "", false
+	}
+	// Walk to find the innermost def whose body contains the cursor and
+	// whose parameter list includes ident. Nested defs are rare in PLC
+	// code but handled correctly — each matching def overwrites the
+	// previous hit as Walk descends.
+	var hit string
+	syntax.Walk(f, func(n syntax.Node) bool {
+		if n == nil {
+			return false
+		}
+		d, ok := n.(*syntax.DefStmt)
+		if !ok {
+			return true
+		}
+		if !containsLine(d, cursorLine) {
+			return true
+		}
+		for _, p := range d.Params {
+			if paramName(p) == ident {
+				hit = d.Name.Name
+				break
+			}
+		}
+		return true
+	})
+	if hit == "" {
+		return "", false
+	}
+	for _, sig := range sigs {
+		if sig.Name != hit {
+			continue
+		}
+		for _, p := range sig.Params {
+			if p.Name != ident || !p.HasType {
+				continue
+			}
+			if provider.Template(p.Type) == nil {
+				return "", false
+			}
+			return p.Type, true
 		}
 	}
 	return "", false
