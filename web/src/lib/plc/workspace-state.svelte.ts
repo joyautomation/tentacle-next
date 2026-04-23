@@ -1,3 +1,5 @@
+import { untrack } from 'svelte';
+
 export type SelectionKind = 'variable' | 'task' | 'program' | 'test';
 
 export type Selection = {
@@ -154,7 +156,12 @@ export const workspaceTabs = {
 	},
 	open(input: Omit<EditorTab, 'id'>) {
 		const id = tabId(input.kind, input.name);
-		if (!state.tabs.some((t) => t.id === id)) {
+		// untrack the state.tabs read so callers in $effect don't re-run on
+		// unrelated tab-array mutations (e.g. setTabLabel while typing in a
+		// sibling "new" tab) — which would re-activate this tab and steal
+		// focus from whatever the user is editing.
+		const exists = untrack(() => state.tabs.some((t) => t.id === id));
+		if (!exists) {
 			state.tabs = [...state.tabs, { id, ...input }];
 		}
 		state.activeTab = id;
