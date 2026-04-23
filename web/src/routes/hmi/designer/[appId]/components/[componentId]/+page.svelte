@@ -200,7 +200,16 @@
   }
 
   onMount(refresh);
+
+  function onKeydown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      if (dirty && !saving) save();
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <svelte:head>
   <title>{componentName || componentId} · {app?.name ?? appId} · Component</title>
