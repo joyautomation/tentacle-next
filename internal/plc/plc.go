@@ -37,15 +37,16 @@ type Module struct {
 	plcID string
 	log   *slog.Logger
 
-	mu        sync.RWMutex
-	config    *itypes.PlcConfigKV
-	devices   *scanner.Registry
-	variables *VariableStore
-	engine    *Engine
-	tasks     map[string]*taskRunner
-	pub       *publisher
-	bridge    *scannerBridge
-	tryMgr    *TrySessionManager
+	mu         sync.RWMutex
+	config     *itypes.PlcConfigKV
+	devices    *scanner.Registry
+	variables  *VariableStore
+	engine     *Engine
+	tasks      map[string]*taskRunner
+	pub        *publisher
+	bridge     *scannerBridge
+	deviceTags *DeviceTagCache
+	tryMgr     *TrySessionManager
 
 	persist *persister
 
@@ -113,6 +114,12 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.devices = scanner.NewRegistry(b, m.log)
 	if err := m.devices.Start(m.onDevicesChanged); err != nil {
 		m.log.Error("plc: failed to start devices registry", "error", err)
+	}
+
+	// Start the cross-device live-tag cache. Feeds read_tag() lookups.
+	m.deviceTags = NewDeviceTagCache(b, m.log)
+	if err := m.deviceTags.Start(); err != nil {
+		m.log.Warn("plc: failed to start device tag cache", "error", err)
 	}
 
 	// Self-register in the shared devices bucket so the Gateway sees the
@@ -340,6 +347,12 @@ func (m *Module) Stop() error {
 		m.bridge = nil
 	}
 
+	// Stop device tag cache.
+	if m.deviceTags != nil {
+		m.deviceTags.Stop()
+		m.deviceTags = nil
+	}
+
 	// Unsubscribe bus subscriptions.
 	for _, sub := range m.subs {
 		if sub != nil {
@@ -438,6 +451,7 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 	// Create engine and load templates before variables so template-typed
 	// variables can be instantiated as StructValues at register time.
 	m.engine = NewEngine(m.variables, m.log)
+	m.engine.SetDeviceTagCache(m.deviceTags)
 	templates := m.loadTemplates()
 	m.engine.SetTemplates(templates)
 

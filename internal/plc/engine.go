@@ -16,17 +16,28 @@ import (
 
 // Engine manages Starlark program compilation and execution.
 type Engine struct {
-	mu        sync.RWMutex
-	programs  map[string]*compiledProgram
-	sources   map[string]string
-	builtins  starlark.StringDict
-	vars      *VariableStore
-	templates map[string]*itypes.PlcTemplate
-	log       *slog.Logger
+	mu         sync.RWMutex
+	programs   map[string]*compiledProgram
+	sources    map[string]string
+	builtins   starlark.StringDict
+	vars       *VariableStore
+	templates  map[string]*itypes.PlcTemplate
+	deviceTags *DeviceTagCache
+	log        *slog.Logger
 
 	errMu     sync.Mutex
 	errObs    map[int]ErrorObserver
 	errObsSeq int
+}
+
+// SetDeviceTagCache injects the live device-tag cache used by the
+// read_tag builtin. Calling it re-initialises the builtin set so
+// programs compiled afterward see the updated predeclared names.
+func (e *Engine) SetDeviceTagCache(c *DeviceTagCache) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.deviceTags = c
+	e.builtins = e.makeBuiltins()
 }
 
 // ErrorObserver is invoked when a running task reports a program-level error.

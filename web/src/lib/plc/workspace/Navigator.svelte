@@ -7,10 +7,10 @@
     ProgramListItem,
     TestListItem,
   } from "$lib/types/plc";
-  import type { GatewayConfig } from "$lib/types/gateway";
+  import type { BrowseCache, GatewayConfig, GatewayDevice } from "$lib/types/gateway";
   import { workspaceSelection, workspaceTabs } from "../workspace-state.svelte";
   import { ChevronRight, Plus } from "@joyautomation/salt/icons";
-  import { apiPut } from "$lib/api/client";
+  import { api, apiPost, apiPut } from "$lib/api/client";
   import { invalidateAll } from "$app/navigation";
   import { state as saltState } from "@joyautomation/salt";
 
@@ -174,6 +174,144 @@
   }
 
   const VARIABLE_MIME = "application/x-plc-variable";
+  const BROWSE_TAG_MIME = "application/x-plc-browse-tag";
+
+  const gatewayId = $derived(gatewayConfig?.gatewayId ?? "gateway");
+
+  type BrowseEntry =
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "empty" }
+    | { status: "error"; message: string }
+    | { status: "ready"; cache: BrowseCache };
+
+  let expandedDevices = $state<Record<string, boolean>>({});
+  let browseCaches = $state<Record<string, BrowseEntry>>({});
+  let browsingDevices = $state<Record<string, boolean>>({});
+
+  async function loadBrowseCache(deviceId: string) {
+    browseCaches[deviceId] = { status: "loading" };
+    const res = await api<BrowseCache>(
+      `/gateways/${encodeURIComponent(gatewayId)}/browse-cache/${encodeURIComponent(deviceId)}`,
+    );
+    if (res.error) {
+      // A 404 just means we haven't browsed yet — show empty, not error.
+      const msg = res.error.error ?? "";
+      if (res.error.status === 404 || /not found/i.test(msg)) {
+        browseCaches[deviceId] = { status: "empty" };
+      } else {
+        browseCaches[deviceId] = { status: "error", message: msg || "Failed to load browse cache" };
+      }
+      return;
+    }
+    if (!res.data || !res.data.items || res.data.items.length === 0) {
+      browseCaches[deviceId] = { status: "empty" };
+      return;
+    }
+    browseCaches[deviceId] = { status: "ready", cache: res.data };
+  }
+
+  async function toggleDeviceExpand(device: GatewayDevice, e: MouseEvent) {
+    e.stopPropagation();
+    const deviceId = device.deviceId;
+    const open = !expandedDevices[deviceId];
+    expandedDevices[deviceId] = open;
+    if (open && !browseCaches[deviceId]) {
+      await loadBrowseCache(deviceId);
+    }
+  }
+
+  async function rebrowseDevice(device: GatewayDevice, e: MouseEvent) {
+    e.stopPropagation();
+    if (device.autoManaged) {
+      saltState.addNotification({
+        message: "Auto-managed devices can't be rebrowsed from here.",
+        type: "info",
+      });
+      return;
+    }
+    if (browsingDevices[device.deviceId]) return;
+    browsingDevices[device.deviceId] = true;
+    try {
+      const res = await apiPost(
+        `/gateways/${encodeURIComponent(gatewayId)}/browse`,
+        { deviceId: device.deviceId, protocol: device.protocol },
+      );
+      if (res.error) {
+        saltState.addNotification({
+          message: res.error.error ?? "Browse failed",
+          type: "error",
+        });
+        return;
+      }
+      saltState.addNotification({
+        message: `Browse started for "${device.deviceId}"`,
+        type: "info",
+      });
+      // Poll the cache until it updates. 500ms × 20 = 10s window — covers
+      // typical EIP browses. User can expand again later if slower.
+      const started = Date.now();
+      const prevCache =
+        browseCaches[device.deviceId]?.status === "ready"
+          ? (browseCaches[device.deviceId] as { cache: BrowseCache }).cache
+          : null;
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const poll = await api<BrowseCache>(
+          `/gateways/${encodeURIComponent(gatewayId)}/browse-cache/${encodeURIComponent(device.deviceId)}`,
+        );
+        if (poll.data && poll.data.cachedAt) {
+          if (!prevCache || poll.data.cachedAt !== prevCache.cachedAt) {
+            browseCaches[device.deviceId] = { status: "ready", cache: poll.data };
+            if (!expandedDevices[device.deviceId]) {
+              expandedDevices[device.deviceId] = true;
+            }
+            saltState.addNotification({
+              message: `Browse complete: ${poll.data.items.length} tag(s)`,
+              type: "success",
+            });
+            return;
+          }
+        }
+        if (Date.now() - started > 15_000) break;
+      }
+    } finally {
+      browsingDevices[device.deviceId] = false;
+    }
+  }
+
+  function filteredBrowseItems(cache: BrowseCache) {
+    if (!filter) return cache.items;
+    const f = filter.toLowerCase();
+    return cache.items.filter(
+      (it) =>
+        (it.tag ?? "").toLowerCase().includes(f) ||
+        (it.name ?? "").toLowerCase().includes(f),
+    );
+  }
+
+  function onBrowseTagDragStart(
+    e: DragEvent,
+    device: GatewayDevice,
+    tag: string,
+    datatype: string,
+  ) {
+    if (!e.dataTransfer) return;
+    const payload = JSON.stringify({
+      deviceId: device.deviceId,
+      protocol: device.protocol,
+      tag,
+      datatype,
+    });
+    e.dataTransfer.setData(BROWSE_TAG_MIME, payload);
+    e.dataTransfer.setData("text/plain", tag);
+    e.dataTransfer.effectAllowed = "copy";
+  }
+
+  function typeBadge(datatype: string): string {
+    if (!datatype) return "?";
+    return datatype.slice(0, 4).toUpperCase();
+  }
 
   let togglingTask = $state<string | null>(null);
 
@@ -259,29 +397,115 @@
       {#if sections.devices}
         <ul class="items" transition:slide={{ duration: 150 }}>
           {#each deviceEntries as device (device.deviceId)}
-            <li>
-              <button
-                type="button"
-                class="item"
-                class:selected={workspaceSelection.isSelected(
-                  "device",
-                  device.deviceId,
-                )}
-                onclick={() =>
-                  workspaceSelection.select("device", device.deviceId)}
-                title={device.autoManaged
-                  ? `${device.protocol} · auto-managed by a module`
-                  : `${device.protocol} · ${device.host ?? device.endpointUrl ?? ""}`}
-              >
-                <span class="badge device">{protocolBadge(device.protocol)}</span>
-                <span class="name">{device.deviceId}</span>
-                {#if device.autoManaged}
-                  <span class="item-tag">auto</span>
+            <li class="device-row">
+              <div class="item-row">
+                <button
+                  type="button"
+                  class="expand-btn"
+                  onclick={(e) => toggleDeviceExpand(device, e)}
+                  aria-label={expandedDevices[device.deviceId]
+                    ? `Collapse ${device.deviceId}`
+                    : `Expand ${device.deviceId}`}
+                  aria-expanded={expandedDevices[device.deviceId] ?? false}
+                  title="Show tags"
+                >
+                  <span
+                    class="chevron small"
+                    class:open={expandedDevices[device.deviceId]}
+                  >
+                    <ChevronRight size="0.625rem" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  class="item"
+                  class:selected={workspaceSelection.isSelected(
+                    "device",
+                    device.deviceId,
+                  )}
+                  onclick={() =>
+                    workspaceSelection.select("device", device.deviceId)}
+                  title={device.autoManaged
+                    ? `${device.protocol} · auto-managed by a module`
+                    : `${device.protocol} · ${device.host ?? device.endpointUrl ?? ""}`}
+                >
+                  <span class="badge device"
+                    >{protocolBadge(device.protocol)}</span
+                  >
+                  <span class="name">{device.deviceId}</span>
+                  {#if device.autoManaged}
+                    <span class="item-tag">auto</span>
+                  {/if}
+                  {#if deviceVarCounts[device.deviceId]}
+                    <span class="meta">{deviceVarCounts[device.deviceId]}</span>
+                  {/if}
+                </button>
+                {#if !device.autoManaged}
+                  <button
+                    type="button"
+                    class="row-action"
+                    onclick={(e) => rebrowseDevice(device, e)}
+                    disabled={browsingDevices[device.deviceId]}
+                    title={browsingDevices[device.deviceId]
+                      ? "Browsing…"
+                      : "Rebrowse tags"}
+                    aria-label="Rebrowse tags"
+                  >
+                    <span
+                      class="refresh-icon"
+                      class:spinning={browsingDevices[device.deviceId]}
+                    >↻</span>
+                  </button>
                 {/if}
-                {#if deviceVarCounts[device.deviceId]}
-                  <span class="meta">{deviceVarCounts[device.deviceId]}</span>
-                {/if}
-              </button>
+              </div>
+              {#if expandedDevices[device.deviceId]}
+                <div class="tag-tree" transition:slide={{ duration: 120 }}>
+                  {#if browseCaches[device.deviceId]?.status === "loading"}
+                    <div class="tag-status">Loading…</div>
+                  {:else if browseCaches[device.deviceId]?.status === "error"}
+                    <div class="tag-status err">
+                      {(browseCaches[device.deviceId] as { status: "error"; message: string }).message}
+                    </div>
+                  {:else if browseCaches[device.deviceId]?.status === "empty"}
+                    <div class="tag-status muted">
+                      No tags cached. Click ↻ to browse.
+                    </div>
+                  {:else if browseCaches[device.deviceId]?.status === "ready"}
+                    {@const items = filteredBrowseItems(
+                      (browseCaches[device.deviceId] as { status: "ready"; cache: BrowseCache }).cache,
+                    )}
+                    {#if items.length === 0}
+                      <div class="tag-status muted">No tags match filter.</div>
+                    {:else}
+                      <ul class="tag-list">
+                        {#each items as item (item.tag)}
+                          <li>
+                            <button
+                              type="button"
+                              class="tag-item draggable"
+                              draggable="true"
+                              ondragstart={(e) =>
+                                onBrowseTagDragStart(
+                                  e,
+                                  device,
+                                  item.tag,
+                                  item.datatype,
+                                )}
+                              title={`${item.datatype} · drag into editor to insert read_tag()`}
+                            >
+                              <span class="grip" aria-hidden="true">⋮⋮</span>
+                              <span class="badge type">
+                                {typeBadge(item.datatype)}
+                              </span>
+                              <span class="name">{item.name || item.tag}</span>
+                            </button>
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+                  {/if}
+                </div>
+              {/if}
             </li>
           {:else}
             <li class="empty">No devices</li>
@@ -937,5 +1161,143 @@
   .play-icon {
     font-size: 0.625rem;
     line-height: 1;
+  }
+
+  .device-row {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .item-row {
+    display: flex;
+    align-items: center;
+
+    .item {
+      flex: 1;
+      min-width: 0;
+      padding-left: 0.125rem;
+    }
+  }
+
+  .expand-btn {
+    flex-shrink: 0;
+    width: 1.125rem;
+    height: 1.5rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--theme-text-muted);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--theme-text);
+    }
+  }
+
+  .chevron.small {
+    font-size: 0.625rem;
+  }
+
+  .row-action {
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-right: 0.25rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--theme-text-muted);
+    font-size: 0.875rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.12s ease, color 0.12s ease;
+
+    &:hover:not(:disabled) {
+      opacity: 1;
+      color: var(--theme-text);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: wait;
+    }
+  }
+
+  .refresh-icon {
+    display: inline-block;
+
+    &.spinning {
+      animation: spin 0.9s linear infinite;
+    }
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .tag-tree {
+    padding: 0 0 0.25rem 1.625rem;
+    border-left: 1px dashed var(--theme-border);
+    margin-left: 0.75rem;
+  }
+
+  .tag-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .tag-status {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.6875rem;
+    color: var(--theme-text-muted);
+    font-style: italic;
+
+    &.err {
+      color: var(--theme-error, #e5484d);
+      font-style: normal;
+    }
+  }
+
+  .tag-item {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    width: 100%;
+    padding: 0.1875rem 0.375rem;
+    background: transparent;
+    border: none;
+    color: var(--theme-text);
+    font-size: 0.75rem;
+    text-align: left;
+    cursor: grab;
+
+    &:hover {
+      background: var(--theme-surface);
+
+      .grip {
+        opacity: 0.5;
+      }
+    }
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    .name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--font-mono, monospace);
+    }
   }
 </style>

@@ -23,6 +23,10 @@ func (e *Engine) makeBuiltins() starlark.StringDict {
 		"get_str":  starlark.NewBuiltin("get_str", e.builtinGetStr),
 		"set_var":  starlark.NewBuiltin("set_var", e.builtinSetVar),
 
+		// Direct device tag read by (deviceId, tagPath). Returns None if
+		// the PLC hasn't yet observed a value for that tag on the bus.
+		"read_tag": starlark.NewBuiltin("read_tag", e.builtinReadTag),
+
 		// Logging — all output flows to slog, visible on the Logs tab
 		"log":       starlark.NewBuiltin("log", e.makeLogBuiltin(slog.LevelInfo)),
 		"log_debug": starlark.NewBuiltin("log_debug", e.makeLogBuiltin(slog.LevelDebug)),
@@ -86,6 +90,21 @@ func (e *Engine) builtinGetStr(thread *starlark.Thread, fn *starlark.Builtin, ar
 		return nil, err
 	}
 	return starlark.String(e.vars.GetString(name)), nil
+}
+
+func (e *Engine) builtinReadTag(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var deviceID, tagPath string
+	if err := starlark.UnpackPositionalArgs(fn.Name(), args, kwargs, 2, &deviceID, &tagPath); err != nil {
+		return nil, err
+	}
+	if e.deviceTags == nil {
+		return starlark.None, nil
+	}
+	v, ok := e.deviceTags.Get(deviceID, tagPath)
+	if !ok {
+		return starlark.None, nil
+	}
+	return goToStarlark(v), nil
 }
 
 func (e *Engine) builtinSetVar(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {

@@ -90,6 +90,7 @@
   }
 
   const VARIABLE_MIME = 'application/x-plc-variable';
+  const BROWSE_TAG_MIME = 'application/x-plc-browse-tag';
 
   function formatVariableInsert(name: string, datatype: string | undefined): string {
     if (language === 'st') return name;
@@ -103,33 +104,57 @@
     return `get_var("${name}")`;
   }
 
+  function formatBrowseTagInsert(deviceId: string, tag: string): string {
+    // Structured Text transpiles known function calls through to Starlark,
+    // so the same read_tag(deviceId, tagPath) form works in both dialects.
+    return `read_tag("${deviceId}", "${tag}")`;
+  }
+
+  function insertAtDropPoint(view: EditorView, event: DragEvent, insert: string) {
+    const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head;
+    view.dispatch({
+      changes: { from: pos, to: pos, insert },
+      selection: { anchor: pos + insert.length }
+    });
+    view.focus();
+  }
+
   function getDropExtension() {
     return EditorView.domEventHandlers({
       dragover(event) {
-        if (event.dataTransfer?.types.includes(VARIABLE_MIME)) {
+        const types = event.dataTransfer?.types;
+        if (types && (types.includes(VARIABLE_MIME) || types.includes(BROWSE_TAG_MIME))) {
           event.preventDefault();
           if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
         }
         return false;
       },
       drop(event, view) {
-        const raw = event.dataTransfer?.getData(VARIABLE_MIME);
-        if (!raw) return false;
-        event.preventDefault();
-        try {
-          const payload = JSON.parse(raw) as { name: string; datatype?: string };
-          if (!payload.name) return false;
-          const insert = formatVariableInsert(payload.name, payload.datatype);
-          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY }) ?? view.state.selection.main.head;
-          view.dispatch({
-            changes: { from: pos, to: pos, insert },
-            selection: { anchor: pos + insert.length }
-          });
-          view.focus();
-        } catch {
-          /* ignore malformed payload */
+        const varPayload = event.dataTransfer?.getData(VARIABLE_MIME);
+        if (varPayload) {
+          event.preventDefault();
+          try {
+            const payload = JSON.parse(varPayload) as { name: string; datatype?: string };
+            if (!payload.name) return false;
+            insertAtDropPoint(view, event, formatVariableInsert(payload.name, payload.datatype));
+          } catch {
+            /* ignore malformed payload */
+          }
+          return true;
         }
-        return true;
+        const tagPayload = event.dataTransfer?.getData(BROWSE_TAG_MIME);
+        if (tagPayload) {
+          event.preventDefault();
+          try {
+            const payload = JSON.parse(tagPayload) as { deviceId: string; tag: string };
+            if (!payload.deviceId || !payload.tag) return false;
+            insertAtDropPoint(view, event, formatBrowseTagInsert(payload.deviceId, payload.tag));
+          } catch {
+            /* ignore malformed payload */
+          }
+          return true;
+        }
+        return false;
       }
     });
   }
