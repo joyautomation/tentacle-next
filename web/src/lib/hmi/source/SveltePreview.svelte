@@ -26,8 +26,13 @@
     /** Called when a class chip is dropped on the preview surface. The host
      * is expected to splice the class onto the source's Nth element. */
     onClassDrop?: (idx: number, className: string) => void;
-    /** Called when an element is dragged to a new position in absolute mode. */
-    onElementMove?: (idx: number, left: number, top: number) => void;
+    /** Called when an element is dragged to a new position in absolute mode.
+     * `offsets` carries only the anchors that were in use (left vs right,
+     * top vs bottom) — detected from the element's existing inline style. */
+    onElementMove?: (
+      idx: number,
+      offsets: { left?: number; right?: number; top?: number; bottom?: number },
+    ) => void;
   }
 
   let {
@@ -156,14 +161,42 @@
     pointerId: number;
     startClientX: number;
     startClientY: number;
-    startLeft: number;
-    startTop: number;
+    anchorX: 'left' | 'right';
+    anchorY: 'top' | 'bottom';
+    startOffsetX: number;
+    startOffsetY: number;
     committed: boolean;
   } | null = null;
 
   function snap(v: number): number {
     if (!snapGrid || snapGrid <= 0) return Math.round(v);
     return Math.round(v / snapGrid) * snapGrid;
+  }
+
+  // Pick the anchor the user has already chosen by virtue of which inline
+  // offset they set. Default to left/top so fresh elements still drag.
+  function pickAnchorX(el: HTMLElement): 'left' | 'right' {
+    if (el.style.left) return 'left';
+    if (el.style.right) return 'right';
+    return 'left';
+  }
+  function pickAnchorY(el: HTMLElement): 'top' | 'bottom' {
+    if (el.style.top) return 'top';
+    if (el.style.bottom) return 'bottom';
+    return 'top';
+  }
+
+  function currentOffset(
+    elRect: DOMRect,
+    surfaceRect: DOMRect,
+    anchor: 'left' | 'right' | 'top' | 'bottom',
+  ): number {
+    switch (anchor) {
+      case 'left': return elRect.left - surfaceRect.left;
+      case 'right': return surfaceRect.right - elRect.right;
+      case 'top': return elRect.top - surfaceRect.top;
+      case 'bottom': return surfaceRect.bottom - elRect.bottom;
+    }
   }
 
   function onPointerDown(e: PointerEvent) {
@@ -173,24 +206,40 @@
     if (!hit) return;
     const surfaceRect = surfaceEl.getBoundingClientRect();
     const elRect = hit.el.getBoundingClientRect();
+    const anchorX = pickAnchorX(hit.el);
+    const anchorY = pickAnchorY(hit.el);
     drag = {
       idx: hit.idx,
       el: hit.el,
       pointerId: e.pointerId,
       startClientX: e.clientX,
       startClientY: e.clientY,
-      startLeft: elRect.left - surfaceRect.left,
-      startTop: elRect.top - surfaceRect.top,
+      anchorX,
+      anchorY,
+      startOffsetX: currentOffset(elRect, surfaceRect, anchorX),
+      startOffsetY: currentOffset(elRect, surfaceRect, anchorY),
       committed: false,
+    };
+  }
+
+  function liveOffsets(d: NonNullable<typeof drag>, e: PointerEvent): { x: number; y: number } {
+    const dx = e.clientX - d.startClientX;
+    const dy = e.clientY - d.startClientY;
+    return {
+      x: snap(d.startOffsetX + (d.anchorX === 'left' ? dx : -dx)),
+      y: snap(d.startOffsetY + (d.anchorY === 'top' ? dy : -dy)),
     };
   }
 
   function commitDrag() {
     if (!drag || !surfaceEl) return;
     drag.committed = true;
+    // Force position:absolute on the *live* element so the chosen anchors
+    // visually move during drag. NOT persisted — onElementMove only writes
+    // the offsets, so the next recompile drops this transient style.
     drag.el.style.position = 'absolute';
-    drag.el.style.left = `${drag.startLeft}px`;
-    drag.el.style.top = `${drag.startTop}px`;
+    drag.el.style[drag.anchorX] = `${drag.startOffsetX}px`;
+    drag.el.style[drag.anchorY] = `${drag.startOffsetY}px`;
     drag.el.classList.add('hmi-dragging');
     surfaceEl.setPointerCapture(drag.pointerId);
   }
@@ -203,10 +252,9 @@
       if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
       commitDrag();
     }
-    const left = snap(drag.startLeft + dx);
-    const top = snap(drag.startTop + dy);
-    drag.el.style.left = `${left}px`;
-    drag.el.style.top = `${top}px`;
+    const { x, y } = liveOffsets(drag, e);
+    drag.el.style[drag.anchorX] = `${x}px`;
+    drag.el.style[drag.anchorY] = `${y}px`;
     e.preventDefault();
   }
 
@@ -214,13 +262,15 @@
     if (!drag || e.pointerId !== drag.pointerId) return;
     const wasCommitted = drag.committed;
     if (wasCommitted) {
-      const left = snap(drag.startLeft + (e.clientX - drag.startClientX));
-      const top = snap(drag.startTop + (e.clientY - drag.startClientY));
+      const { x, y } = liveOffsets(drag, e);
       drag.el.classList.remove('hmi-dragging');
       surfaceEl?.releasePointerCapture(e.pointerId);
+      const offsets: { left?: number; right?: number; top?: number; bottom?: number } = {};
+      offsets[drag.anchorX] = x;
+      offsets[drag.anchorY] = y;
       const idx = drag.idx;
       drag = null;
-      onElementMove?.(idx, left, top);
+      onElementMove?.(idx, offsets);
     } else {
       drag = null;
     }

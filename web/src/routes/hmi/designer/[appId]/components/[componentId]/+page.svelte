@@ -115,12 +115,15 @@
     dirty = true;
   }
 
-  function onElementMove(idx: number, left: number, top: number) {
-    const next = setInlineStyleProps(source, idx, {
-      position: 'absolute',
-      left: `${left}px`,
-      top: `${top}px`,
-    });
+  function onElementMove(
+    idx: number,
+    offsets: { left?: number; right?: number; top?: number; bottom?: number },
+  ) {
+    const props: Record<string, string> = {};
+    for (const [k, v] of Object.entries(offsets)) {
+      if (v !== undefined) props[k] = `${v}px`;
+    }
+    const next = setInlineStyleProps(source, idx, props);
     if (next === null || next === source) return;
     source = next;
     dirty = true;
