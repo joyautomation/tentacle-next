@@ -21,6 +21,11 @@ import (
 const (
 	browseConnectTimeout = 5 * time.Second  // timeout for initial PLC connection (tag creation)
 	browseReadTimeout    = 30 * time.Second // timeout for reading tag data (large PLCs need time)
+	// browseOverallTimeout caps the total duration of a single browse run.
+	// If exceeded the scanner emits a "failed" terminal phase instead of
+	// leaving the client polling forever. Large Logix PLCs with thousands of
+	// UDT members may legitimately take a minute+, so keep this generous.
+	browseOverallTimeout = 4 * time.Minute
 )
 
 // readWithCancel starts an async read and polls for completion, checking
@@ -648,13 +653,28 @@ func filterReadable(ctx context.Context, candidates []candidateVar, gateway stri
 	for w := 0; w < readableWorkerCount; w++ {
 		wg.Add(1)
 		go func() {
+			// wg.Done + panic recovery must happen even if testTagReadable
+			// panics inside cgo (libplctag bugs, bad pointer). Without this
+			// the main loop deadlocks on close(results) that never fires.
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					// Best-effort log via publishProgress channel — workers
+					// don't have a logger here, so swallow and let the main
+					// flow observe the missing result slot.
+					_ = r
+				}
+			}()
 			for idx := range work {
 				if ctx.Err() != nil {
 					return
 				}
 				readable := testTagReadable(ctx, gateway, port, slot, candidates[idx].path)
-				results <- result{idx, readable}
+				select {
+				case results <- result{idx, readable}:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}()
 	}

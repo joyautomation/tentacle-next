@@ -267,14 +267,24 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 		browseID = uuid.New().String()
 	}
 
+	// Track terminal events so a defer can guarantee one is emitted even if
+	// browseDevice panics or exits without publishing (a hung cgo call the
+	// context can't interrupt, a worker goroutine panic, etc.). Without this
+	// the client polls progress indefinitely with no resolution.
+	var terminalEmitted atomic.Bool
 	publishProgress := func(progress types.BrowseProgressMessage) {
+		switch progress.Phase {
+		case "completed", "failed", "cancelled":
+			terminalEmitted.Store(true)
+		}
 		subj := fmt.Sprintf("ethernetip.browse.progress.%s", browseID)
 		d, _ := json.Marshal(progress)
 		_ = s.b.Publish(subj, d)
 	}
 
-	// Create a cancellable context for this browse operation.
-	ctx, cancel := context.WithCancel(context.Background())
+	// Overall browse ceiling — even if an upstream cgo call wedges a worker
+	// goroutine, this guarantees browseDevice returns.
+	ctx, cancel := context.WithTimeout(context.Background(), browseOverallTimeout)
 
 	// Listen for cancel messages from the API layer.
 	cancelSubject := topics.BrowseCancel("ethernetip", browseID)
@@ -290,10 +300,39 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 		if cancelSub != nil {
 			defer cancelSub.Unsubscribe()
 		}
+		// Last-resort terminal emitter: covers panics and any path that
+		// somehow returns without a terminal phase.
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.Error("eip: browse goroutine panic", "device", req.DeviceID, "panic", r)
+				if !terminalEmitted.Load() {
+					publishProgress(types.BrowseProgressMessage{
+						BrowseID:  browseID,
+						ModuleID:  s.moduleID,
+						DeviceID:  req.DeviceID,
+						Phase:     "failed",
+						Message:   fmt.Sprintf("Browse panic: %v", r),
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
+					})
+				}
+				return
+			}
+			if !terminalEmitted.Load() {
+				s.log.Warn("eip: browse ended without terminal phase", "device", req.DeviceID)
+				publishProgress(types.BrowseProgressMessage{
+					BrowseID:  browseID,
+					ModuleID:  s.moduleID,
+					DeviceID:  req.DeviceID,
+					Phase:     "failed",
+					Message:   "Browse ended without completion",
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				})
+			}
+		}()
 
 		result, err := browseDevice(ctx, req.Host, req.Port, req.Slot, req.DeviceID, s.moduleID, browseID, publishProgress)
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() == context.Canceled {
 				s.log.Info("eip: browse cancelled", "device", req.DeviceID)
 				publishProgress(types.BrowseProgressMessage{
 					BrowseID:  browseID,
@@ -301,6 +340,18 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 					DeviceID:  req.DeviceID,
 					Phase:     "cancelled",
 					Message:   "Browse cancelled by user",
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+				})
+				return
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				s.log.Error("eip: browse timed out", "device", req.DeviceID, "timeout", browseOverallTimeout)
+				publishProgress(types.BrowseProgressMessage{
+					BrowseID:  browseID,
+					ModuleID:  s.moduleID,
+					DeviceID:  req.DeviceID,
+					Phase:     "failed",
+					Message:   fmt.Sprintf("Browse timed out after %s", browseOverallTimeout),
 					Timestamp: time.Now().UTC().Format(time.RFC3339),
 				})
 				return
