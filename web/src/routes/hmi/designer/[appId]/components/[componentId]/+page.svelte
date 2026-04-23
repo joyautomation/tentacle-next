@@ -431,10 +431,10 @@
     background: transparent;
     z-index: 5;
     &:hover { background: color-mix(in srgb, var(--theme-text) 20%, transparent); }
-    &.x { top: 0; right: -3px; bottom: 0; width: 6px; cursor: ew-resize; }
-    &.y { left: 0; right: 0; bottom: -3px; height: 6px; cursor: ns-resize; }
+    &.x { top: 0; right: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+    &.y { left: 0; right: 0; bottom: 0; height: 6px; cursor: ns-resize; }
     &.both {
-      right: -3px; bottom: -3px; width: 12px; height: 12px;
+      right: 0; bottom: 0; width: 12px; height: 12px;
       cursor: nwse-resize;
       background: var(--theme-text);
       opacity: 0.4;
