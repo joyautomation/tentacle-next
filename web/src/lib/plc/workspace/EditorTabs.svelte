@@ -27,9 +27,19 @@
 		programs: ProgramListItem[];
 		tests: TestListItem[];
 		gatewayConfig: GatewayConfig | null;
+		hideDeviceRBE?: boolean;
 	};
 
-	let { variableNames, plcConfig, templates, tasks, programs, tests, gatewayConfig }: Props = $props();
+	let {
+		variableNames,
+		plcConfig,
+		templates,
+		tasks,
+		programs,
+		tests,
+		gatewayConfig,
+		hideDeviceRBE = false
+	}: Props = $props();
 
 	type EditorTab = TabItem & { kind: EditorTabKind; language?: string };
 
@@ -146,6 +156,7 @@
 						name={tab.name}
 						{gatewayConfig}
 						isNew={tab.isNew ?? false}
+						hideRBE={hideDeviceRBE}
 					/>
 				{:else}
 					<ProgramEditor

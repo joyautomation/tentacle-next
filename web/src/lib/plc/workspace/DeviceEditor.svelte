@@ -17,9 +17,10 @@
 		name: string; // deviceId, or '' for a new device
 		gatewayConfig: GatewayConfig | null;
 		isNew?: boolean;
+		hideRBE?: boolean;
 	};
 
-	let { tabId, name, gatewayConfig, isNew = false }: Props = $props();
+	let { tabId, name, gatewayConfig, isNew = false, hideRBE = false }: Props = $props();
 
 	// The canonical device record from the loaded gateway config. When the
 	// user saves, invalidateAll refetches the config and this re-derives.
@@ -136,7 +137,11 @@
 		}
 		if (protocol === 'modbus' && unitId) body.unitId = parseInt(unitId, 10);
 		if (scanRate) body.scanRate = parseInt(scanRate, 10);
-		if (disableRBE) {
+		if (hideRBE) {
+			// Preserve Gateway-set RBE values when the PLC workspace writes.
+			if (existing?.disableRBE) body.disableRBE = true;
+			if (existing?.deadband) body.deadband = existing.deadband;
+		} else if (disableRBE) {
 			body.disableRBE = true;
 		} else if (deadbandValue) {
 			const db: Record<string, unknown> = { value: parseFloat(deadbandValue) };
@@ -156,12 +161,12 @@
 				slot !== '' ||
 				endpointUrl !== '' ||
 				scanRate !== '' ||
-				deadbandValue !== '' ||
-				disableRBE
+				(!hideRBE && deadbandValue !== '') ||
+				(!hideRBE && disableRBE)
 			);
 		}
 		if (!existing) return false;
-		const cur = JSON.stringify({
+		const curBase: Record<string, unknown> = {
 			host: existing.host ?? '',
 			port: existing.port ?? null,
 			slot: existing.slot ?? null,
@@ -169,13 +174,9 @@
 			snmpVersion: existing.version ?? '2c',
 			community: existing.community ?? 'public',
 			unitId: existing.unitId ?? 1,
-			scanRate: existing.scanRate ?? null,
-			deadbandValue: existing.deadband?.value ?? null,
-			deadbandMinTime: existing.deadband?.minTime ?? null,
-			deadbandMaxTime: existing.deadband?.maxTime ?? null,
-			disableRBE: existing.disableRBE ?? false
-		});
-		const next = JSON.stringify({
+			scanRate: existing.scanRate ?? null
+		};
+		const nextBase: Record<string, unknown> = {
 			host,
 			port: port ? parseInt(port, 10) : null,
 			slot: slot ? parseInt(slot, 10) : null,
@@ -183,13 +184,19 @@
 			snmpVersion,
 			community,
 			unitId: unitId ? parseInt(unitId, 10) : 1,
-			scanRate: scanRate ? parseInt(scanRate, 10) : null,
-			deadbandValue: deadbandValue ? parseFloat(deadbandValue) : null,
-			deadbandMinTime: deadbandMinTime ? parseInt(deadbandMinTime, 10) : null,
-			deadbandMaxTime: deadbandMaxTime ? parseInt(deadbandMaxTime, 10) : null,
-			disableRBE
-		});
-		return cur !== next;
+			scanRate: scanRate ? parseInt(scanRate, 10) : null
+		};
+		if (!hideRBE) {
+			curBase.deadbandValue = existing.deadband?.value ?? null;
+			curBase.deadbandMinTime = existing.deadband?.minTime ?? null;
+			curBase.deadbandMaxTime = existing.deadband?.maxTime ?? null;
+			curBase.disableRBE = existing.disableRBE ?? false;
+			nextBase.deadbandValue = deadbandValue ? parseFloat(deadbandValue) : null;
+			nextBase.deadbandMinTime = deadbandMinTime ? parseInt(deadbandMinTime, 10) : null;
+			nextBase.deadbandMaxTime = deadbandMaxTime ? parseInt(deadbandMaxTime, 10) : null;
+			nextBase.disableRBE = disableRBE;
+		}
+		return JSON.stringify(curBase) !== JSON.stringify(nextBase);
 	});
 
 	$effect(() => {
@@ -354,7 +361,7 @@
 			{#if isAutoManaged}
 				<div class="info-note">
 					This device is auto-managed by a protocol module. Connection details are not
-					user-editable; you can still adjust RBE / deadband below.
+					user-editable{hideRBE ? '.' : '; you can still adjust RBE / deadband below.'}
 				</div>
 			{/if}
 
@@ -450,50 +457,52 @@
 				</div>
 			</div>
 
-			<div class="section">
-				<div class="section-label">RBE / Deadband</div>
-				<label class="checkbox-label">
-					<input type="checkbox" bind:checked={disableRBE} />
-					<span>Disable RBE (publish every scan)</span>
-				</label>
-				{#if !disableRBE}
-					<div class="grid" transition:slide={{ duration: 150 }}>
-						<label class="field">
-							<span>Deadband</span>
-							<input
-								type="number"
-								class="input"
-								bind:value={deadbandValue}
-								placeholder="0"
-								min="0"
-								step="0.1"
-							/>
-						</label>
-						<label class="field">
-							<span>Min time (ms)</span>
-							<input
-								type="number"
-								class="input"
-								bind:value={deadbandMinTime}
-								placeholder="none"
-								min="0"
-								step="100"
-							/>
-						</label>
-						<label class="field">
-							<span>Max time (ms)</span>
-							<input
-								type="number"
-								class="input"
-								bind:value={deadbandMaxTime}
-								placeholder="none"
-								min="0"
-								step="1000"
-							/>
-						</label>
-					</div>
-				{/if}
-			</div>
+			{#if !hideRBE}
+				<div class="section">
+					<div class="section-label">RBE / Deadband</div>
+					<label class="checkbox-label">
+						<input type="checkbox" bind:checked={disableRBE} />
+						<span>Disable RBE (publish every scan)</span>
+					</label>
+					{#if !disableRBE}
+						<div class="grid" transition:slide={{ duration: 150 }}>
+							<label class="field">
+								<span>Deadband</span>
+								<input
+									type="number"
+									class="input"
+									bind:value={deadbandValue}
+									placeholder="0"
+									min="0"
+									step="0.1"
+								/>
+							</label>
+							<label class="field">
+								<span>Min time (ms)</span>
+								<input
+									type="number"
+									class="input"
+									bind:value={deadbandMinTime}
+									placeholder="none"
+									min="0"
+									step="100"
+								/>
+							</label>
+							<label class="field">
+								<span>Max time (ms)</span>
+								<input
+									type="number"
+									class="input"
+									bind:value={deadbandMaxTime}
+									placeholder="none"
+									min="0"
+									step="1000"
+								/>
+							</label>
+						</div>
+					{/if}
+				</div>
+			{/if}
 
 			{#if !isNew && existing}
 				<div class="section meta-row">

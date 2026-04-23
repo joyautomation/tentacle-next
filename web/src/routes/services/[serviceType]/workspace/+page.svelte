@@ -204,6 +204,7 @@
 											programs={data.programs}
 											tests={data.tests}
 											gatewayConfig={data.gatewayConfig}
+											hideDeviceRBE={data.serviceType === 'plc'}
 										/>
 									{:else}
 										<div class="placeholder-card muted">
