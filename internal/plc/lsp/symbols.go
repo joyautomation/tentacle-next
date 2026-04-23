@@ -84,6 +84,10 @@ type FunctionInfo struct {
 type SymbolProvider interface {
 	Variable(name string) *VariableInfo
 	Template(name string) *TemplateInfo
+	// TemplateNames returns every known template (UDT) name. Used by
+	// type-annotation completion on def headers so the user sees their
+	// custom types alongside primitives.
+	TemplateNames() []string
 	// VariableNames returns all configured PLC variable names for the
 	// current PLC. Order is unspecified; callers that need stable ordering
 	// should sort.

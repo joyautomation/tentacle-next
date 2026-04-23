@@ -94,6 +94,13 @@ type fakeProvider struct {
 
 func (f *fakeProvider) Variable(name string) *VariableInfo { return f.vars[name] }
 func (f *fakeProvider) Template(name string) *TemplateInfo { return f.templates[name] }
+func (f *fakeProvider) TemplateNames() []string {
+	names := make([]string, 0, len(f.templates))
+	for name := range f.templates {
+		names = append(names, name)
+	}
+	return names
+}
 func (f *fakeProvider) VariableNames() []string {
 	names := make([]string, 0, len(f.vars))
 	for name := range f.vars {
@@ -158,6 +165,80 @@ func TestCompletionGetVarDotPartialIdentifier(t *testing.T) {
 	}
 	if !seen["speed"] {
 		t.Errorf("expected speed in completions after partial `sp`, got %v", completionLabels(list))
+	}
+}
+
+func TestCompletionParamAnnotationOffersTemplatesAndPrimitives(t *testing.T) {
+	// Cursor sits right after the colon in `def f(x: |`.
+	src := `def f(x: `
+	list := completeStarlark(src, Position{Line: 0, Character: 9}, newMotorProvider(), "", "")
+	labels := completionLabels(list)
+	seen := map[string]bool{}
+	for _, l := range labels {
+		seen[l] = true
+	}
+	for _, want := range []string{"Motor", "number", "bool", "string"} {
+		if !seen[want] {
+			t.Errorf("expected %q in annotation completion, got %v", want, labels)
+		}
+	}
+	if seen["get_var"] || seen["if"] {
+		t.Errorf("annotation completion should not include builtins/keywords, got %v", labels)
+	}
+}
+
+func TestCompletionReturnAnnotationOffersTemplatesAndPrimitives(t *testing.T) {
+	src := `def f() -> `
+	list := completeStarlark(src, Position{Line: 0, Character: 11}, newMotorProvider(), "", "")
+	labels := completionLabels(list)
+	seen := map[string]bool{}
+	for _, l := range labels {
+		seen[l] = true
+	}
+	for _, want := range []string{"Motor", "number"} {
+		if !seen[want] {
+			t.Errorf("expected %q in return-annotation completion, got %v", want, labels)
+		}
+	}
+	if seen["get_var"] {
+		t.Errorf("return annotation should not include builtins, got %v", labels)
+	}
+}
+
+func TestCompletionParamAnnotationWithPartialIdent(t *testing.T) {
+	// `def f(x: Mo` — partial prefix, still offers full list (client
+	// filters by prefix).
+	src := `def f(x: Mo`
+	list := completeStarlark(src, Position{Line: 0, Character: 11}, newMotorProvider(), "", "")
+	seen := map[string]bool{}
+	for _, it := range list.Items {
+		seen[it.Label] = true
+	}
+	if !seen["Motor"] {
+		t.Errorf("expected Motor in partial annotation completion, got %v", completionLabels(list))
+	}
+}
+
+func TestCompletionParamTypeAnnotationResolvesTemplate(t *testing.T) {
+	// `def modeHandler(motor: Motor):` and then `motor.` inside the body
+	// should surface the Motor template's fields and methods — not the
+	// default builtin list.
+	src := `def modeHandler(motor: Motor):
+    motor.`
+	// Cursor sits right after the dot on line 1.
+	list := completeStarlark(src, Position{Line: 1, Character: 10}, newMotorProvider(), "", "")
+	labels := completionLabels(list)
+	seen := map[string]bool{}
+	for _, l := range labels {
+		seen[l] = true
+	}
+	for _, want := range []string{"speed", "running", "start"} {
+		if !seen[want] {
+			t.Errorf("expected %q in member completion, got %v", want, labels)
+		}
+	}
+	if seen["get_var"] {
+		t.Errorf("member completion should not include builtins, got %v", labels)
 	}
 }
 

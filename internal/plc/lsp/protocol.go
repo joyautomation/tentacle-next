@@ -136,6 +136,7 @@ const (
 	CompletionKindKeyword  = 14
 	CompletionKindSnippet  = 15
 	CompletionKindEvent    = 23 // ladder elements → map to Event for a distinct icon
+	CompletionKindStruct   = 22 // UDT templates in type-annotation completion
 )
 
 // InsertTextFormat: 1 = PlainText, 2 = Snippet. Snippets let us emit

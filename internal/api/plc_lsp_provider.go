@@ -78,6 +78,17 @@ func (p *plcLspProvider) Template(name string) *lsp.TemplateInfo {
 	return &lsp.TemplateInfo{Name: tmpl.Name, Fields: fields, Methods: methods}
 }
 
+// TemplateNames returns the names of every template in the KV bucket,
+// feeding type-annotation completion on def headers so users see their
+// UDT templates next to primitives.
+func (p *plcLspProvider) TemplateNames() []string {
+	keys, err := p.mod.bus.KVKeys(topics.BucketPlcTemplates)
+	if err != nil {
+		return nil
+	}
+	return keys
+}
+
 // Function returns the signature of a top-level function exported by any
 // saved program. Programs without a declared signature still resolve —
 // completion and hover fall back to a bare `name()` form so every saved

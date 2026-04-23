@@ -37,6 +37,11 @@ func completeStarlark(source string, pos Position, provider SymbolProvider, curr
 	if list, ok := memberCompletion(source, pos, provider); ok {
 		return list
 	}
+	// Type-annotation positions (`def f(x: |` or `def f() -> |`) should
+	// show templates + primitives, not the full builtin soup.
+	if list, ok := typeAnnotationCompletion(source, pos, provider); ok {
+		return list
+	}
 
 	items := make([]CompletionItem, 0, 64)
 
@@ -425,6 +430,93 @@ func stringContextAt(line string, col int) (inside bool, quote byte, openCol int
 	return true, q, open
 }
 
+// ─── Type-annotation completion ─────────────────────────────────────────
+
+// annotationPrimitives are the atomic types we offer in def-header
+// annotation positions alongside user-defined templates. Matches
+// `primitiveTypes` in internal/api/plc_templates.go.
+var annotationPrimitives = []string{"bool", "boolean", "number", "string", "bytes"}
+
+// typeAnnotationCompletion detects whether the cursor is sitting in a
+// type-annotation slot on a def header — e.g. `def f(x: |` or
+// `def f() -> |` — and returns templates + primitives tailored to that
+// slot. Returns (_, false) when the context isn't an annotation; the
+// caller then falls through to the general completion list.
+//
+// Text-based detection: def headers are single-line in practice and the
+// AST is frequently broken while the user types.
+func typeAnnotationCompletion(source string, pos Position, provider SymbolProvider) (CompletionList, bool) {
+	line := lineAtIndex(source, pos.Line)
+	if pos.Character < 0 || pos.Character > len(line) {
+		return CompletionList{}, false
+	}
+	prefix := line[:pos.Character]
+	// A def header must appear on the line for either annotation form —
+	// we deliberately don't try to follow continuations across lines.
+	if !strings.Contains(prefix, "def ") {
+		return CompletionList{}, false
+	}
+	// Trim a partial identifier the user has already typed; the client
+	// filters by it.
+	end := len(prefix)
+	for end > 0 && isIdentByte(prefix[end-1]) {
+		end--
+	}
+	head := strings.TrimRight(prefix[:end], " \t")
+	if head == "" {
+		return CompletionList{}, false
+	}
+	// Return-type slot: trailing `->`.
+	retType := strings.HasSuffix(head, "->")
+	// Param-type slot: trailing `:`, inside an unclosed paren that
+	// follows `def NAME`.
+	paramType := false
+	if !retType && strings.HasSuffix(head, ":") {
+		depth := 0
+		for i := 0; i < end; i++ {
+			c := prefix[i]
+			switch c {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+		}
+		if depth > 0 {
+			paramType = true
+		}
+	}
+	if !retType && !paramType {
+		return CompletionList{}, false
+	}
+	items := make([]CompletionItem, 0, 16)
+	for _, p := range annotationPrimitives {
+		items = append(items, CompletionItem{
+			Label:            p,
+			Kind:             CompletionKindKeyword,
+			Detail:           "primitive",
+			InsertText:       p,
+			InsertTextFormat: InsertTextFormatPlainText,
+			SortText:         "0" + p,
+		})
+	}
+	if provider != nil {
+		names := provider.TemplateNames()
+		sort.Strings(names)
+		for _, n := range names {
+			items = append(items, CompletionItem{
+				Label:            n,
+				Kind:             CompletionKindStruct,
+				Detail:           "template",
+				InsertText:       n,
+				InsertTextFormat: InsertTextFormatPlainText,
+				SortText:         "1" + n,
+			})
+		}
+	}
+	return CompletionList{IsIncomplete: false, Items: items}, true
+}
+
 // ─── Member access completion ───────────────────────────────────────────
 
 // getVarCallRe matches a single complete `get_var("NAME")` call with no
@@ -535,56 +627,103 @@ func resolveExprTemplate(source string, pos Position, expr string, provider Symb
 // Returns the template name only when it refers to a template known to
 // the provider — unknown annotation types (`int`, `str`, or a typo)
 // return false so the caller can keep searching.
+//
+// Implemented with a text-based scan rather than an AST walk because
+// the typical calling context (cursor right after `ident.`) produces a
+// parse error in starlark-go that returns a nil AST — we can't rely on
+// the tree being there.
 func findParamTemplate(source string, pos Position, ident string, provider SymbolProvider) (string, bool) {
-	cursorLine := pos.Line + 1
+	cursorLine := pos.Line // 0-based
 	stripped, sigs := plc.StripAnnotations(source)
 	if len(sigs) == 0 {
 		return "", false
 	}
-	f, err := syntax.Parse("program.star", stripped, 0)
-	if f == nil && err != nil {
-		return "", false
+	// Build a map from def name → signature for quick lookup.
+	sigByName := make(map[string]plc.DefSignature, len(sigs))
+	for _, s := range sigs {
+		sigByName[s.Name] = s
 	}
-	// Walk to find the innermost def whose body contains the cursor and
-	// whose parameter list includes ident. Nested defs are rare in PLC
-	// code but handled correctly — each matching def overwrites the
-	// previous hit as Walk descends.
-	var hit string
-	syntax.Walk(f, func(n syntax.Node) bool {
-		if n == nil {
-			return false
+	// Scan the stripped source (annotations replaced with spaces so byte
+	// offsets are preserved) for def headers and their indent, recording
+	// the 0-based line number of each. A def's body spans from the line
+	// after its header until a non-blank line at lesser-or-equal indent
+	// appears — that's where we stop considering the def enclosing.
+	type defSite struct {
+		name   string
+		line   int
+		indent int
+	}
+	var sites []defSite
+	lineStart := 0
+	lineIdx := 0
+	flush := func(end int) {
+		line := stripped[lineStart:end]
+		trim := strings.TrimLeft(line, " \t")
+		indent := len(line) - len(trim)
+		if strings.HasPrefix(trim, "def ") || strings.HasPrefix(trim, "def\t") {
+			rest := trim[4:]
+			n := 0
+			for n < len(rest) && isIdentByte(rest[n]) {
+				n++
+			}
+			if n > 0 {
+				name := rest[:n]
+				if _, ok := sigByName[name]; ok {
+					sites = append(sites, defSite{name: name, line: lineIdx, indent: indent})
+				}
+			}
 		}
-		d, ok := n.(*syntax.DefStmt)
-		if !ok {
-			return true
+		lineIdx++
+	}
+	for i := 0; i < len(stripped); i++ {
+		if stripped[i] == '\n' {
+			flush(i)
+			lineStart = i + 1
 		}
-		if !containsLine(d, cursorLine) {
-			return true
+	}
+	if lineStart < len(stripped) {
+		flush(len(stripped))
+	}
+	// Pick the enclosing def: the last def header at-or-before cursorLine
+	// whose body wasn't closed off by a sibling at the same-or-lower
+	// indent before cursorLine. Walking sites in order keeps the most
+	// recent (innermost) enclosing def.
+	hit := ""
+	for i, s := range sites {
+		if s.line > cursorLine {
+			break
 		}
-		for _, p := range d.Params {
-			if paramName(p) == ident {
-				hit = d.Name.Name
+		// Check whether any later sibling at indent <= s.indent appears
+		// before cursorLine — if so, s's body has ended.
+		closed := false
+		for _, other := range sites[i+1:] {
+			if other.line > cursorLine {
+				break
+			}
+			if other.indent <= s.indent {
+				closed = true
 				break
 			}
 		}
-		return true
-	})
+		if !closed {
+			hit = s.name
+		}
+	}
 	if hit == "" {
 		return "", false
 	}
-	for _, sig := range sigs {
-		if sig.Name != hit {
+	sig, ok := sigByName[hit]
+	if !ok {
+		return "", false
+	}
+	for _, p := range sig.Params {
+		if p.Name != ident || !p.HasType {
 			continue
 		}
-		for _, p := range sig.Params {
-			if p.Name != ident || !p.HasType {
-				continue
-			}
-			if provider.Template(p.Type) == nil {
-				return "", false
-			}
-			return p.Type, true
+		if provider.Template(p.Type) == nil {
+			return "", false
 		}
+		return p.Type, true
 	}
 	return "", false
 }
