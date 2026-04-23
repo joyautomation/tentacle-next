@@ -3,6 +3,7 @@
   import { schemaByType } from '../widgetSchema';
   import WidgetView from '../WidgetView.svelte';
   import Self from './DesignerWidget.svelte';
+  import { widgetClassString } from '../styles/styleContext';
 
   interface Props {
     widget: HmiWidget;
@@ -84,7 +85,7 @@
 
 {#if topLevel}
   <div
-    class="slot top"
+    class="slot top {widgetClassString(widget.props?.$classes)}"
     class:selected={isSelected}
     class:drop-target={isDropTarget}
     style:left="{widget.x}px"
@@ -130,7 +131,7 @@
   </div>
 {:else}
   <div
-    class="slot child"
+    class="slot child {widgetClassString(widget.props?.$classes)}"
     class:selected={isSelected}
     class:drop-target={isDropTarget}
     data-widget-id={widget.id}

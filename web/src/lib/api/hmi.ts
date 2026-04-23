@@ -28,6 +28,14 @@ export function deleteHmiApp(appId: string): Promise<ApiResult<unknown>> {
   return apiDelete(`/hmi/apps/${encodeURIComponent(appId)}`);
 }
 
+/** Replace the entire app config (used for app-wide settings like classes). */
+export function putHmiApp(
+  appId: string,
+  app: HmiAppConfig,
+): Promise<ApiResult<HmiAppConfig>> {
+  return apiPut<HmiAppConfig>(`/hmi/apps/${encodeURIComponent(appId)}`, app);
+}
+
 export function createHmiScreen(
   appId: string,
   input: { screenId?: string; name: string }

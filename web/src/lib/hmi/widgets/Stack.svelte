@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { HmiWidget, HmiComponentConfig } from '$lib/types/hmi';
   import WidgetView from '../WidgetView.svelte';
+  import { widgetClassString } from '../styles/styleContext';
 
   interface Props {
     widget: HmiWidget;
@@ -57,7 +58,7 @@
   style:flex-wrap={wrap}
 >
   {#each widget.children ?? [] as child (child.id)}
-    <div class="child" style={childStyle(child)}>
+    <div class="child {widgetClassString(child.props?.$classes)}" style={childStyle(child)}>
       <WidgetView widget={child} {udtContext} {components} />
     </div>
   {/each}

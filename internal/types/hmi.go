@@ -4,12 +4,16 @@ package types
 // NATS KV bucket, keyed by appId. An app contains screens and reusable
 // UDT-bound components.
 type HmiAppConfig struct {
-	AppID       string                       `json:"appId"`
-	Name        string                       `json:"name"`
-	Description string                       `json:"description,omitempty"`
-	Screens     map[string]HmiScreenConfig   `json:"screens"`
+	AppID       string                        `json:"appId"`
+	Name        string                        `json:"name"`
+	Description string                        `json:"description,omitempty"`
+	Screens     map[string]HmiScreenConfig    `json:"screens"`
 	Components  map[string]HmiComponentConfig `json:"components,omitempty"`
-	UpdatedAt   int64                        `json:"updatedAt"`
+	// Classes is the app-wide CSS class library: className → raw CSS body
+	// (the contents that go inside the `{...}` block). These are emitted
+	// once at the runtime root and available to every screen/component.
+	Classes   map[string]string `json:"classes,omitempty"`
+	UpdatedAt int64             `json:"updatedAt"`
 }
 
 // HmiScreenConfig is a free-form canvas of widgets.
@@ -31,6 +35,10 @@ type HmiComponentConfig struct {
 	Width       int         `json:"width,omitempty"`
 	Height      int         `json:"height,omitempty"`
 	Widgets     []HmiWidget `json:"widgets"`
+	// Classes is a component-private CSS class library: className → raw CSS
+	// body. Emitted as a scoped <style> block per component instance so
+	// classes from different components don't collide.
+	Classes map[string]string `json:"classes,omitempty"`
 }
 
 // HmiWidget is a single widget instance placed on a screen or inside a

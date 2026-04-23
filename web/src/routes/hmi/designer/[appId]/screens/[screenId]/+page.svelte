@@ -5,6 +5,7 @@
   import Palette from '$lib/hmi/designer/Palette.svelte';
   import DesignerCanvas from '$lib/hmi/designer/DesignerCanvas.svelte';
   import Inspector from '$lib/hmi/designer/Inspector.svelte';
+  import ClassRail from '$lib/hmi/styles/ClassRail.svelte';
   import { findWidget, findParent, removeWidget, replaceWidget, schemaByType } from '$lib/hmi/widgetSchema';
   import type { HmiAppConfig, HmiScreenConfig, HmiWidget, HmiComponentConfig } from '$lib/types/hmi';
 
@@ -138,14 +139,23 @@
         onChange={onWidgetsChange}
         onSelect={(id) => (selectedId = id)}
         components={componentMap}
+        appClasses={app?.classes}
       />
-      <Inspector
-        widget={selectedWidget}
-        onChange={onWidgetChange}
-        onDelete={onWidgetDelete}
-        components={componentList}
-        {parentIsContainer}
-      />
+      <div class="right-rail">
+        <ClassRail
+          title="App classes"
+          classes={app?.classes}
+          accent="app"
+          editHref="/hmi/designer/{encodeURIComponent(appId)}/styles"
+        />
+        <Inspector
+          widget={selectedWidget}
+          onChange={onWidgetChange}
+          onDelete={onWidgetDelete}
+          components={componentList}
+          {parentIsContainer}
+        />
+      </div>
     </div>
   {/if}
 </section>
@@ -195,6 +205,24 @@
     display: flex;
     min-height: 0;
     overflow: hidden;
+  }
+  .right-rail {
+    width: 18rem;
+    flex-shrink: 0;
+    border-left: 1px solid var(--theme-border);
+    background: var(--theme-surface);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+  .right-rail :global(.inspector) {
+    width: 100%;
+    border-left: none;
+    padding: 0;
+    background: transparent;
+    overflow: visible;
   }
   .banner.error {
     margin: 0.75rem 1rem;

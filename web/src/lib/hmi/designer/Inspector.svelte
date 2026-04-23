@@ -79,6 +79,44 @@
     }
     return 'Not bound';
   }
+
+  // Class chip management on widget.props.$classes.
+  const widgetClasses = $derived<string[]>(
+    Array.isArray(widget?.props?.$classes) ? (widget!.props!.$classes as string[]) : [],
+  );
+
+  function removeClass(name: string) {
+    if (!widget) return;
+    const next = widgetClasses.filter((n) => n !== name);
+    const props = { ...(widget.props ?? {}) };
+    if (next.length === 0) delete props.$classes;
+    else props.$classes = next;
+    onChange({ ...widget, props });
+  }
+
+  function onClassDragOver(e: DragEvent) {
+    if (!e.dataTransfer) return;
+    if (!Array.from(e.dataTransfer.types).includes('application/x-hmi-class')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onClassDrop(e: DragEvent) {
+    if (!widget || !e.dataTransfer) return;
+    const raw = e.dataTransfer.getData('application/x-hmi-class');
+    if (!raw) return;
+    e.preventDefault();
+    try {
+      const { name } = JSON.parse(raw) as { name: string };
+      if (!name || widgetClasses.includes(name)) return;
+      onChange({
+        ...widget,
+        props: { ...(widget.props ?? {}), $classes: [...widgetClasses, name] },
+      });
+    } catch {
+      // ignore
+    }
+  }
 </script>
 
 <aside class="inspector">
@@ -145,6 +183,28 @@
         </div>
       </section>
     {/if}
+
+    <section
+      class="section classes-section"
+      ondragover={onClassDragOver}
+      ondrop={onClassDrop}
+      role="region"
+      aria-label="Classes"
+    >
+      <h4>Classes</h4>
+      {#if widgetClasses.length === 0}
+        <p class="empty">Drag a class chip here to apply.</p>
+      {:else}
+        <ul class="class-chips">
+          {#each widgetClasses as name (name)}
+            <li class="chip">
+              <span>.{name}</span>
+              <button class="x" onclick={() => removeClass(name)} title="Remove">×</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
 
     {#if schema.propFields.length > 0}
       <section class="section">
@@ -226,6 +286,44 @@
     color: var(--theme-text-muted);
     margin: 0.5rem 0;
     line-height: 1.4;
+  }
+  .classes-section {
+    border: 1px dashed var(--theme-border);
+    border-radius: var(--rounded-sm, 4px);
+    padding: 0.5rem;
+    transition: border-color 0.1s, background 0.1s;
+    &:hover { border-color: var(--theme-text); }
+    .empty { margin: 0; font-size: 0.6875rem; color: var(--theme-text-muted); }
+  }
+  .class-chips {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+  .class-chips .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.375rem;
+    border: 1px solid var(--theme-border);
+    border-radius: 999px;
+    background: var(--theme-background);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.6875rem;
+    color: var(--theme-text);
+    .x {
+      background: transparent;
+      border: none;
+      color: var(--theme-text-muted);
+      font-size: 0.875rem;
+      line-height: 1;
+      padding: 0;
+      cursor: pointer;
+      &:hover { color: #ef4444; }
+    }
   }
   .header {
     display: flex;

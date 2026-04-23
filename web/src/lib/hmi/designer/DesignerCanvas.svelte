@@ -12,6 +12,8 @@
     schemaByType,
   } from '../widgetSchema';
   import DesignerWidget from './DesignerWidget.svelte';
+  import { setHmiStyleContext } from '../styles/styleContext';
+  import { compileScopedCss } from '../styles/cssScope';
 
   interface Props {
     widgets: HmiWidget[];
@@ -21,9 +23,45 @@
     onChange: (widgets: HmiWidget[]) => void;
     onSelect: (id: string | null) => void;
     components?: Record<string, HmiComponentConfig>;
+    /** App-wide CSS classes — emitted at the canvas root for live preview. */
+    appClasses?: Record<string, string>;
+    /** When editing a component, its classes are emitted scoped under
+     * `cmp-<componentId>` so widgets inside use those rules. */
+    componentClasses?: Record<string, string>;
+    componentId?: string;
   }
 
-  let { widgets, selectedId, width = 0, height = 600, onChange, onSelect, components }: Props = $props();
+  let {
+    widgets,
+    selectedId,
+    width = 0,
+    height = 600,
+    onChange,
+    onSelect,
+    components,
+    appClasses,
+    componentClasses,
+    componentId,
+  }: Props = $props();
+
+  $effect(() => {
+    const ctx: any = { appClasses };
+    if (componentClasses && componentId) {
+      ctx.component = { prefix: `cmp-${componentId}`, classes: componentClasses };
+    }
+    setHmiStyleContext(ctx);
+  });
+
+  const designCss = $derived.by(() => {
+    const parts: string[] = [];
+    const app = compileScopedCss(appClasses, '');
+    if (app) parts.push(app);
+    if (componentClasses && componentId) {
+      const cmp = compileScopedCss(componentClasses, `cmp-${componentId}`);
+      if (cmp) parts.push(cmp);
+    }
+    return parts.join('\n\n');
+  });
 
   useLiveTags();
 
@@ -50,12 +88,26 @@
     return null;
   }
 
+  /** Find the widget id under the pointer (for class chip drops). */
+  function widgetAtEvent(e: DragEvent): string | null {
+    const path = e.composedPath() as HTMLElement[];
+    for (const el of path) {
+      if (el === canvasEl) break;
+      const id = (el as HTMLElement).dataset?.widgetId;
+      if (id) return id;
+    }
+    return null;
+  }
+
   function onDragOver(e: DragEvent) {
     if (!e.dataTransfer) return;
-    if (!Array.from(e.dataTransfer.types).includes('application/x-hmi-widget')) return;
+    const types = Array.from(e.dataTransfer.types);
+    const isWidget = types.includes('application/x-hmi-widget');
+    const isClass = types.includes('application/x-hmi-class');
+    if (!isWidget && !isClass) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    dropTargetId = containerAtEvent(e);
+    dropTargetId = isWidget ? containerAtEvent(e) : null;
   }
 
   function onDragLeave(e: DragEvent) {
@@ -65,9 +117,34 @@
 
   function onDrop(e: DragEvent) {
     if (!e.dataTransfer || !canvasEl) return;
+    e.preventDefault();
+
+    // Class chip drop: add the class to the widget under the pointer.
+    const classRaw = e.dataTransfer.getData('application/x-hmi-class');
+    if (classRaw) {
+      const targetId = widgetAtEvent(e);
+      if (!targetId) return;
+      try {
+        const { name } = JSON.parse(classRaw) as { name: string };
+        const w = findWidget(widgets, targetId);
+        if (!w || !name) return;
+        const existing = (w.props?.$classes as string[] | undefined) ?? [];
+        if (existing.includes(name)) return;
+        const next: HmiWidget = {
+          ...w,
+          props: { ...(w.props ?? {}), $classes: [...existing, name] },
+        };
+        onChange(replaceWidget(widgets, next));
+        onSelect(targetId);
+      } catch {
+        // ignore malformed payloads
+      }
+      return;
+    }
+
+    // Palette drop: create a new widget.
     const type = e.dataTransfer.getData('application/x-hmi-widget');
     if (!type) return;
-    e.preventDefault();
     const parentId = containerAtEvent(e);
     const ids = collectIds(widgets);
     const rect = canvasEl.getBoundingClientRect();
@@ -152,6 +229,10 @@
 </script>
 
 <svelte:window onpointermove={onPointerMove} onpointerup={onPointerUp} onkeydown={onKeyDown} />
+
+{#if designCss}
+  {@html `<style data-hmi-design-classes>${designCss}</style>`}
+{/if}
 
 <div class="canvas-wrap">
   <div

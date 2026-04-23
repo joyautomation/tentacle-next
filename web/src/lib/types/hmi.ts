@@ -43,6 +43,9 @@ export interface HmiComponentConfig {
   width?: number;
   height?: number;
   widgets: HmiWidget[];
+  /** Component-private CSS classes: className → raw CSS body. Scoped per
+   * component instance at runtime. */
+  classes?: Record<string, string>;
 }
 
 export interface HmiAppConfig {
@@ -51,6 +54,9 @@ export interface HmiAppConfig {
   description?: string;
   screens: Record<string, HmiScreenConfig>;
   components?: Record<string, HmiComponentConfig>;
+  /** App-wide CSS classes: className → raw CSS body. Available to every
+   * screen and component. */
+  classes?: Record<string, string>;
   updatedAt: number;
 }
 

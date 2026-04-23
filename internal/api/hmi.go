@@ -47,6 +47,9 @@ func ensureHmiMaps(cfg *itypes.HmiAppConfig) {
 	if cfg.Components == nil {
 		cfg.Components = make(map[string]itypes.HmiComponentConfig)
 	}
+	if cfg.Classes == nil {
+		cfg.Classes = make(map[string]string)
+	}
 }
 
 // slugify produces a URL-safe id from a free-form name.

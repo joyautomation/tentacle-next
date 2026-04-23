@@ -186,6 +186,7 @@
     </div>
     <div class="header-actions">
       <a href="/hmi/{encodeURIComponent(appId)}" class="link-btn">▶ Run app</a>
+      <a href="/hmi/designer/{encodeURIComponent(appId)}/styles" class="link-btn">App styles</a>
       <a href="/services/hmi/udts" class="link-btn">UDT Browser &rarr;</a>
       <button class="primary" onclick={seedDemo} disabled={seeding}>
         {seeding ? 'Seeding…' : 'Seed demo screen'}

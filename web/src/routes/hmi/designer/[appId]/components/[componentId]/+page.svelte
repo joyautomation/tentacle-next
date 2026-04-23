@@ -5,6 +5,8 @@
   import Palette from '$lib/hmi/designer/Palette.svelte';
   import DesignerCanvas from '$lib/hmi/designer/DesignerCanvas.svelte';
   import Inspector from '$lib/hmi/designer/Inspector.svelte';
+  import ClassRail from '$lib/hmi/styles/ClassRail.svelte';
+  import ClassEditor from '$lib/hmi/styles/ClassEditor.svelte';
   import { findWidget, findParent, removeWidget, replaceWidget, schemaByType } from '$lib/hmi/widgetSchema';
   import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember, HmiWidget } from '$lib/types/hmi';
 
@@ -21,6 +23,7 @@
   let udtTemplateName = $state('');
   let width = $state(0);
   let height = $state(400);
+  let classes = $state<Record<string, string>>({});
   let selectedId = $state<string | null>(null);
   let dirty = $state(false);
   let saving = $state(false);
@@ -61,6 +64,7 @@
       udtTemplateName = c.udtTemplate ?? '';
       width = c.width ?? 0;
       height = c.height ?? 400;
+      classes = { ...(c.classes ?? {}) };
       if (udtTemplateName) {
         const tr = await listHmiUdts();
         if (!tr.error) {
@@ -77,6 +81,7 @@
   }
 
   function onWidgetsChange(next: HmiWidget[]) { widgets = next; dirty = true; }
+  function onClassesChange(next: Record<string, string>) { classes = next; dirty = true; }
   function onWidgetChange(updated: HmiWidget) {
     widgets = replaceWidget(widgets, updated);
     dirty = true;
@@ -98,6 +103,7 @@
       width: width || undefined,
       height: height || undefined,
       widgets,
+      classes,
     };
     const r = await putHmiComponent(appId, componentId, payload);
     if (r.error) saveError = r.error.error;
@@ -147,14 +153,31 @@
         {height}
         onChange={onWidgetsChange}
         onSelect={(id) => (selectedId = id)}
+        appClasses={app?.classes}
+        componentClasses={classes}
+        {componentId}
       />
-      <Inspector
-        widget={selectedWidget}
-        onChange={onWidgetChange}
-        onDelete={onWidgetDelete}
-        udtMembers={inUdtMode ? members : undefined}
-        {parentIsContainer}
-      />
+      <div class="right-rail">
+        <ClassRail
+          title="App classes"
+          classes={app?.classes}
+          accent="app"
+          editHref="/hmi/designer/{encodeURIComponent(appId)}/styles"
+        />
+        <ClassEditor
+          {classes}
+          onChange={onClassesChange}
+          title="Component classes"
+          accent="component"
+        />
+        <Inspector
+          widget={selectedWidget}
+          onChange={onWidgetChange}
+          onDelete={onWidgetDelete}
+          udtMembers={inUdtMode ? members : undefined}
+          {parentIsContainer}
+        />
+      </div>
     </div>
   {/if}
 </section>
@@ -183,6 +206,24 @@
     &:disabled { opacity: 0.5; cursor: default; }
   }
   .workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+  .right-rail {
+    width: 20rem;
+    flex-shrink: 0;
+    border-left: 1px solid var(--theme-border);
+    background: var(--theme-surface);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+  .right-rail :global(.inspector) {
+    width: 100%;
+    border-left: none;
+    padding: 0;
+    background: transparent;
+    overflow: visible;
+  }
   .banner.error {
     margin: 0.75rem 1rem;
     padding: 0.75rem 1rem;

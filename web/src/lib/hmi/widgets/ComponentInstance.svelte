@@ -1,6 +1,12 @@
 <script lang="ts">
   import type { HmiComponentConfig } from '$lib/types/hmi';
   import WidgetView from '../WidgetView.svelte';
+  import {
+    getHmiStyleContext,
+    setHmiStyleContext,
+    widgetClassString,
+  } from '../styles/styleContext';
+  import { compileScopedCss } from '../styles/cssScope';
 
   interface Props {
     /** Resolved component config (looked up by `componentId` in WidgetView). */
@@ -13,15 +19,34 @@
   }
 
   let { component, udtContext, components }: Props = $props();
+
+  // Inherit the parent style context (app classes), then push a new one with
+  // this component's scope so nested widgets resolve `$classes` against both.
+  const parentCtx = getHmiStyleContext();
+  const prefix = $derived(component ? `cmp-${component.componentId}` : '');
+  const componentClasses = $derived(component?.classes ?? {});
+
+  $effect(() => {
+    if (!component) return;
+    setHmiStyleContext({
+      appClasses: parentCtx.appClasses,
+      component: { prefix, classes: componentClasses },
+    });
+  });
+
+  const css = $derived(compileScopedCss(componentClasses, prefix));
 </script>
 
 {#if !component}
   <div class="missing">Component not found</div>
 {:else}
+  {#if css}
+    {@html `<style data-hmi-component=${component.componentId}>${css}</style>`}
+  {/if}
   <div class="root">
     {#each component.widgets ?? [] as w (w.id)}
       <div
-        class="slot"
+        class="slot {widgetClassString(w.props?.$classes, { appClasses: parentCtx.appClasses, component: { prefix, classes: componentClasses } })}"
         style:left="{w.x}px"
         style:top="{w.y}px"
         style:width="{w.w}px"
