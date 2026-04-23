@@ -136,6 +136,57 @@ export function addClassToElement(
   return source.slice(0, t.openStart) + nextTag + source.slice(t.openEnd + 1);
 }
 
+/** Merge inline `style="…"` declarations on the Nth element. New keys are
+ * added; existing keys are overwritten; keys with `undefined` or empty
+ * values are removed. If the tag has no `style` attribute, one is created.
+ * Returns null when `idx` is out of range. */
+export function setInlineStyleProps(
+  source: string,
+  idx: number,
+  props: Record<string, string | undefined>,
+): string | null {
+  const tags = findElementOpenTags(source);
+  const t = tags[idx];
+  if (!t) return null;
+  const tagText = source.slice(t.openStart, t.openEnd + 1);
+  const styleRe = /(\bstyle\s*=\s*")([^"]*)(")/;
+  const m = styleRe.exec(tagText);
+  const map = new Map<string, string>();
+  if (m) {
+    for (const decl of m[2].split(';')) {
+      const i = decl.indexOf(':');
+      if (i < 0) continue;
+      const k = decl.slice(0, i).trim();
+      const v = decl.slice(i + 1).trim();
+      if (k && v) map.set(k, v);
+    }
+  }
+  for (const [k, v] of Object.entries(props)) {
+    if (v === undefined || v === '') map.delete(k);
+    else map.set(k, v);
+  }
+  const next = [...map.entries()].map(([k, v]) => `${k}: ${v}`).join('; ');
+  let nextTag: string;
+  if (m) {
+    if (next === '') {
+      // Drop the style="" attribute and a leading space.
+      const before = tagText.slice(0, m.index).replace(/\s+$/, '');
+      const after = tagText.slice(m.index + m[0].length);
+      nextTag = before + (after.startsWith('>') || after.startsWith('/') ? '' : ' ') + after;
+    } else {
+      nextTag =
+        tagText.slice(0, m.index) +
+        m[1] + next + m[3] +
+        tagText.slice(m.index + m[0].length);
+    }
+  } else {
+    if (next === '') return source;
+    const insertAt = t.selfClosing ? tagText.length - 2 : tagText.length - 1;
+    nextTag = tagText.slice(0, insertAt) + ` style="${next}"` + tagText.slice(insertAt);
+  }
+  return source.slice(0, t.openStart) + nextTag + source.slice(t.openEnd + 1);
+}
+
 /** Pull a leading `<script>…</script>` block out of source. Returns the
  * inner script text (trimmed) and the markup with the block removed. */
 export function stripScriptBlock(source: string): { script: string; markup: string } {

@@ -43,6 +43,13 @@ type HmiComponentConfig struct {
 	// body. Emitted as a scoped <style> block per component instance so
 	// classes from different components don't collide.
 	Classes map[string]string `json:"classes,omitempty"`
+	// ContainerProps holds well-known CSS declarations applied inline to the
+	// outer wrapper div (e.g. "position": "absolute"). Emitted before
+	// ContainerCss so freeform declarations win on conflicts.
+	ContainerProps map[string]string `json:"containerProps,omitempty"`
+	// ContainerCss is freeform CSS applied to the outer wrapper div as inline
+	// style, after ContainerProps.
+	ContainerCss string `json:"containerCss,omitempty"`
 }
 
 // HmiWidget is a single widget instance placed on a screen or inside a

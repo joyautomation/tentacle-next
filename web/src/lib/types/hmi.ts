@@ -49,6 +49,10 @@ export interface HmiComponentConfig {
   /** Component-private CSS classes: className → raw CSS body. Scoped per
    * component instance at runtime. */
   classes?: Record<string, string>;
+  /** Well-known CSS declarations on the outer wrapper (e.g. position). */
+  containerProps?: Record<string, string>;
+  /** Freeform CSS on the outer wrapper, applied after containerProps. */
+  containerCss?: string;
 }
 
 export interface HmiAppConfig {

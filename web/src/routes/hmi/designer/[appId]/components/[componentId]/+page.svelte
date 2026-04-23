@@ -7,7 +7,8 @@
   import HtmlPalette from '$lib/hmi/source/HtmlPalette.svelte';
   import CodeEditor from '$lib/hmi/source/CodeEditor.svelte';
   import SveltePreview from '$lib/hmi/source/SveltePreview.svelte';
-  import { stripScriptBlock, addClassToElement } from '$lib/hmi/source/markupTools';
+  import ContainerEditor from '$lib/hmi/source/ContainerEditor.svelte';
+  import { stripScriptBlock, addClassToElement, setInlineStyleProps } from '$lib/hmi/source/markupTools';
   import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember } from '$lib/types/hmi';
 
   const appId = $derived($page.params.appId as string);
@@ -22,25 +23,27 @@
   let componentName = $state('');
   let udtTemplateName = $state('');
   let classes = $state<Record<string, string>>({});
+  let containerProps = $state<Record<string, string>>({});
+  let containerCss = $state<string>('');
   let dirty = $state(false);
   let saving = $state(false);
   let saveError = $state<string | null>(null);
 
-  // Bound component instance — typed loosely because Svelte 5 component
-  // bind:this returns the exported context, not the constructor.
+  // Preview-pane size (visual only — not persisted with the component).
+  let previewWidth = $state<number | null>(null);
+  let previewHeight = $state<number | null>(null);
+  let snapEnabled = $state(false);
+  const SNAP = 16;
+
   let editorRef: any = $state();
 
   const members = $derived<HmiUdtMember[]>(template?.members ?? []);
   const inUdtMode = $derived(!!udtTemplateName);
   const prefix = $derived(`cmp-${componentId}`);
 
-  // Mock UDT object for preview — keeps the user's code from blowing up on
-  // null reads while editing. Real values come from tag bindings at runtime.
   const mockUdt = $derived.by(() => {
     const obj: Record<string, unknown> = {};
-    for (const m of members) {
-      obj[m.name] = mockValueFor(m.datatype);
-    }
+    for (const m of members) obj[m.name] = mockValueFor(m.datatype);
     return obj;
   });
 
@@ -76,6 +79,8 @@
       componentName = c.name;
       udtTemplateName = c.udtTemplate ?? '';
       classes = { ...(c.classes ?? {}) };
+      containerProps = { ...(c.containerProps ?? {}) };
+      containerCss = c.containerCss ?? '';
       if (udtTemplateName) {
         const tr = await listHmiUdts();
         if (!tr.error) {
@@ -97,8 +102,18 @@
 
   function onClassDrop(idx: number, name: string) {
     const next = addClassToElement(source, idx, name);
-    if (next === null) return;
-    if (next === source) return;
+    if (next === null || next === source) return;
+    source = next;
+    dirty = true;
+  }
+
+  function onElementMove(idx: number, left: number, top: number) {
+    const next = setInlineStyleProps(source, idx, {
+      position: 'absolute',
+      left: `${left}px`,
+      top: `${top}px`,
+    });
+    if (next === null || next === source) return;
     source = next;
     dirty = true;
   }
@@ -110,6 +125,12 @@
 
   function onClassesChange(next: Record<string, string>) {
     classes = next;
+    dirty = true;
+  }
+
+  function onContainerChange(next: { props: Record<string, string>; css: string }) {
+    containerProps = next.props;
+    containerCss = next.css;
     dirty = true;
   }
 
@@ -129,11 +150,45 @@
       udtTemplate: udtTemplateName || undefined,
       source: fullSource,
       classes,
+      containerProps: Object.keys(containerProps).length ? containerProps : undefined,
+      containerCss: containerCss.trim() ? containerCss : undefined,
     };
     const r = await putHmiComponent(appId, componentId, payload);
     if (r.error) saveError = r.error.error;
     else dirty = false;
     saving = false;
+  }
+
+  // --- Preview pane resize handles ---
+  let previewFrameEl: HTMLDivElement | undefined = $state();
+
+  function startResize(axis: 'x' | 'y' | 'both') {
+    return (e: PointerEvent) => {
+      if (!previewFrameEl) return;
+      const target = e.currentTarget as HTMLElement;
+      target.setPointerCapture(e.pointerId);
+      const rect = previewFrameEl.getBoundingClientRect();
+      const startW = rect.width;
+      const startH = rect.height;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const onMove = (ev: PointerEvent) => {
+        if (axis !== 'y') previewWidth = Math.max(120, startW + (ev.clientX - startX));
+        if (axis !== 'x') previewHeight = Math.max(80, startH + (ev.clientY - startY));
+      };
+      const onUp = (ev: PointerEvent) => {
+        target.releasePointerCapture(ev.pointerId);
+        target.removeEventListener('pointermove', onMove);
+        target.removeEventListener('pointerup', onUp);
+      };
+      target.addEventListener('pointermove', onMove);
+      target.addEventListener('pointerup', onUp);
+    };
+  }
+
+  function resetSize() {
+    previewWidth = null;
+    previewHeight = null;
   }
 
   onMount(refresh);
@@ -172,15 +227,59 @@
       <HtmlPalette {onInsert} />
       <div class="center">
         <div class="preview-pane">
-          <SveltePreview
-            {source}
-            {scriptHeader}
-            props={previewProps}
-            appClasses={app?.classes}
-            componentClasses={classes}
-            {prefix}
-            {onClassDrop}
-          />
+          <div class="preview-toolbar">
+            <label class="snap">
+              <input type="checkbox" bind:checked={snapEnabled} />
+              snap to grid ({SNAP}px)
+            </label>
+            <span class="size-readout">
+              {previewWidth ? `${Math.round(previewWidth)}px` : 'fluid'}
+              ×
+              {previewHeight ? `${Math.round(previewHeight)}px` : 'fluid'}
+            </span>
+            <button class="reset" onclick={resetSize} disabled={previewWidth === null && previewHeight === null}>
+              reset
+            </button>
+          </div>
+          <div class="preview-frame-wrap">
+            <div
+              class="preview-frame"
+              bind:this={previewFrameEl}
+              style:width={previewWidth ? `${previewWidth}px` : '100%'}
+              style:height={previewHeight ? `${previewHeight}px` : '100%'}
+            >
+              <SveltePreview
+                {source}
+                {scriptHeader}
+                props={previewProps}
+                appClasses={app?.classes}
+                componentClasses={classes}
+                {prefix}
+                {containerProps}
+                {containerCss}
+                snapGrid={snapEnabled ? SNAP : 0}
+                {onClassDrop}
+                {onElementMove}
+              />
+              <div
+                class="resize-handle x"
+                onpointerdown={startResize('x')}
+                role="separator"
+                aria-orientation="vertical"
+              ></div>
+              <div
+                class="resize-handle y"
+                onpointerdown={startResize('y')}
+                role="separator"
+                aria-orientation="horizontal"
+              ></div>
+              <div
+                class="resize-handle both"
+                onpointerdown={startResize('both')}
+                role="separator"
+              ></div>
+            </div>
+          </div>
         </div>
         <div class="editor-pane">
           <CodeEditor
@@ -205,6 +304,11 @@
             </ul>
           </details>
         {/if}
+        <ContainerEditor
+          props={containerProps}
+          css={containerCss}
+          onChange={onContainerChange}
+        />
         <ClassRail
           title="App classes"
           classes={app?.classes}
@@ -257,6 +361,69 @@
   .preview-pane {
     flex: 1 1 50%;
     min-height: 8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    min-height: 0;
+  }
+  .preview-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0 0.125rem;
+    .snap {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      font-size: 0.75rem;
+      color: var(--theme-text-muted);
+      cursor: pointer;
+      input { accent-color: var(--theme-text); }
+    }
+    .size-readout {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.6875rem;
+      color: var(--theme-text-muted);
+    }
+    .reset {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--theme-border);
+      color: var(--theme-text-muted);
+      padding: 0.125rem 0.5rem;
+      border-radius: var(--rounded-sm, 4px);
+      font-size: 0.6875rem;
+      cursor: pointer;
+      &:disabled { opacity: 0.4; cursor: default; }
+      &:not(:disabled):hover { color: var(--theme-text); border-color: var(--theme-text); }
+    }
+  }
+  .preview-frame-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    position: relative;
+  }
+  .preview-frame {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .resize-handle {
+    position: absolute;
+    background: transparent;
+    z-index: 5;
+    &:hover { background: color-mix(in srgb, var(--theme-text) 20%, transparent); }
+    &.x { top: 0; right: -3px; bottom: 0; width: 6px; cursor: ew-resize; }
+    &.y { left: 0; right: 0; bottom: -3px; height: 6px; cursor: ns-resize; }
+    &.both {
+      right: -3px; bottom: -3px; width: 12px; height: 12px;
+      cursor: nwse-resize;
+      background: var(--theme-text);
+      opacity: 0.4;
+      border-radius: 2px;
+      &:hover { opacity: 1; }
+    }
   }
   .editor-pane {
     flex: 1 1 50%;

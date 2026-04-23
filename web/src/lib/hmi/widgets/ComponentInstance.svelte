@@ -50,6 +50,20 @@
     const key = `${udtContext.moduleId}/${udtContext.udtVariable}`;
     return { udt: tagStore.values[key] };
   });
+
+  const containerStyle = $derived.by(() => {
+    if (!isSourceMode || !component) return '';
+    const decls: string[] = [];
+    const props = component.containerProps;
+    if (props) {
+      for (const [k, v] of Object.entries(props)) {
+        if (v) decls.push(`${k}: ${v}`);
+      }
+    }
+    const extra = component.containerCss?.trim();
+    if (extra) decls.push(extra.replace(/;$/, ''));
+    return decls.join('; ');
+  });
 </script>
 
 {#if !component}
@@ -59,7 +73,7 @@
     {@html `<style data-hmi-component=${component.componentId}>${css}</style>`}
   {/if}
   {#if isSourceMode}
-    <div class="root source {prefix}">
+    <div class="root source {prefix}" style={containerStyle}>
       <SvelteHost source={component.source ?? ''} componentProps={sourceProps} />
     </div>
   {:else}

@@ -15,11 +15,19 @@
     componentClasses?: Record<string, string>;
     /** Selector prefix for component-scoped classes, e.g. `cmp-pump`. */
     prefix?: string;
+    /** Well-known container declarations (position, display, …). */
+    containerProps?: Record<string, string>;
+    /** Freeform CSS appended to the wrapper inline style. */
+    containerCss?: string;
+    /** Snap dragged-element coordinates to this grid, in pixels. 0 = no snap. */
+    snapGrid?: number;
     /** Debounce ms for recompiling on source changes. */
     debounceMs?: number;
     /** Called when a class chip is dropped on the preview surface. The host
      * is expected to splice the class onto the source's Nth element. */
     onClassDrop?: (idx: number, className: string) => void;
+    /** Called when an element is dragged to a new position in absolute mode. */
+    onElementMove?: (idx: number, left: number, top: number) => void;
   }
 
   let {
@@ -29,8 +37,12 @@
     appClasses,
     componentClasses,
     prefix = '',
+    containerProps,
+    containerCss,
+    snapGrid = 0,
     debounceMs = 300,
     onClassDrop,
+    onElementMove,
   }: Props = $props();
 
   let compiling = $state(false);
@@ -49,6 +61,21 @@
     return parts.join('\n\n');
   });
 
+  const surfaceStyle = $derived.by(() => {
+    const decls: string[] = [];
+    if (containerProps) {
+      for (const [k, v] of Object.entries(containerProps)) {
+        if (v) decls.push(`${k}: ${v}`);
+      }
+    }
+    if (containerCss?.trim()) decls.push(containerCss.trim().replace(/;$/, ''));
+    return decls.join('; ');
+  });
+
+  const dragMode = $derived(
+    !!onElementMove && (containerProps?.position === 'relative' || containerProps?.position === 'absolute'),
+  );
+
   // Make widget classes (if the user's source uses HMI widgets) resolve.
   $effect(() => {
     const ctx: any = { appClasses };
@@ -59,14 +86,14 @@
   });
 
   /** Walk up from a target node to find the nearest element carrying a
-   * `data-hmi-el` marker. Returns the index, or null if none. */
-  function elementIdxAt(target: EventTarget | null): number | null {
+   * `data-hmi-el` marker. Returns the element + index, or null if none. */
+  function elementAt(target: EventTarget | null): { el: HTMLElement; idx: number } | null {
     let el: HTMLElement | null = target instanceof HTMLElement ? target : null;
     while (el && el !== surfaceEl) {
       const v = el.dataset?.hmiEl;
       if (v !== undefined && v !== '') {
         const n = Number(v);
-        if (Number.isFinite(n)) return n;
+        if (Number.isFinite(n)) return { el, idx: n };
       }
       el = el.parentElement;
     }
@@ -78,7 +105,7 @@
     if (!Array.from(e.dataTransfer.types).includes('application/x-hmi-class')) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-    dropTargetIdx = elementIdxAt(e.target);
+    dropTargetIdx = elementAt(e.target)?.idx ?? null;
   }
 
   function onDragLeave(e: DragEvent) {
@@ -90,7 +117,7 @@
     const raw = e.dataTransfer.getData('application/x-hmi-class');
     if (!raw) return;
     e.preventDefault();
-    const idx = elementIdxAt(e.target);
+    const idx = elementAt(e.target)?.idx ?? null;
     dropTargetIdx = null;
     if (idx === null) return;
     try {
@@ -114,19 +141,87 @@
       el?.classList.add('hmi-drop-target');
     }
   });
+
+  // --- Element drag-to-position (only when container is positioned) ---
+
+  let drag: {
+    idx: number;
+    el: HTMLElement;
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startLeft: number;
+    startTop: number;
+  } | null = null;
+
+  function snap(v: number): number {
+    if (!snapGrid || snapGrid <= 0) return Math.round(v);
+    return Math.round(v / snapGrid) * snapGrid;
+  }
+
+  function onPointerDown(e: PointerEvent) {
+    if (!dragMode || !surfaceEl) return;
+    if (e.button !== 0) return;
+    const hit = elementAt(e.target);
+    if (!hit) return;
+    // Don't hijack inputs/buttons/links etc — only divs/spans-style containers.
+    const tag = hit.el.tagName.toLowerCase();
+    if (['input', 'select', 'textarea', 'button', 'a', 'label'].includes(tag)) return;
+    const surfaceRect = surfaceEl.getBoundingClientRect();
+    const elRect = hit.el.getBoundingClientRect();
+    drag = {
+      idx: hit.idx,
+      el: hit.el,
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startLeft: elRect.left - surfaceRect.left,
+      startTop: elRect.top - surfaceRect.top,
+    };
+    hit.el.style.position = 'absolute';
+    hit.el.style.left = `${drag.startLeft}px`;
+    hit.el.style.top = `${drag.startTop}px`;
+    hit.el.classList.add('hmi-dragging');
+    surfaceEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+
+  function onPointerMove(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const left = snap(drag.startLeft + (e.clientX - drag.startClientX));
+    const top = snap(drag.startTop + (e.clientY - drag.startClientY));
+    drag.el.style.left = `${left}px`;
+    drag.el.style.top = `${top}px`;
+  }
+
+  function onPointerUp(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const left = snap(drag.startLeft + (e.clientX - drag.startClientX));
+    const top = snap(drag.startTop + (e.clientY - drag.startClientY));
+    drag.el.classList.remove('hmi-dragging');
+    surfaceEl?.releasePointerCapture(e.pointerId);
+    const idx = drag.idx;
+    drag = null;
+    onElementMove?.(idx, left, top);
+  }
 </script>
 
 {#if css}
   {@html `<style data-hmi-preview-classes>${css}</style>`}
 {/if}
 
-<div class="preview-shell">
+<div class="preview-shell" class:dragmode={dragMode}>
   <div
     class="surface {prefix}"
+    style={surfaceStyle}
     bind:this={surfaceEl}
     ondragover={onDragOver}
     ondragleave={onDragLeave}
     ondrop={onDrop}
+    onpointerdown={onPointerDown}
+    onpointermove={onPointerMove}
+    onpointerup={onPointerUp}
+    oncontextmenu={(e) => { if (drag) e.preventDefault(); }}
     role="region"
   >
     <SvelteHost
@@ -173,6 +268,14 @@
       outline: 2px dashed var(--theme-text);
       outline-offset: 2px;
     }
+    :global(.hmi-dragging) {
+      outline: 2px solid var(--theme-text);
+      outline-offset: 2px;
+      cursor: grabbing !important;
+    }
+  }
+  .preview-shell.dragmode .surface {
+    :global([data-hmi-el]) { cursor: grab; }
   }
   .badge {
     position: absolute;
