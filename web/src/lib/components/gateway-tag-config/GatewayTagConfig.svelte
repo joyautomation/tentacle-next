@@ -1076,8 +1076,16 @@
   function toggleUdtPublish(deviceId: string, tag: string) {
     const key = `${deviceId}::${tag}`;
     const next = new Set(checkedUdtInstances);
-    if (next.has(key)) next.delete(key); else next.add(key);
+    const nextHistory = new Set(checkedHistoryUdtInstances);
+    if (next.has(key)) {
+      next.delete(key);
+      nextHistory.delete(key);
+    } else {
+      next.add(key);
+      nextHistory.add(key);
+    }
     checkedUdtInstances = next;
+    checkedHistoryUdtInstances = nextHistory;
   }
 
   function batchMqttEnableInstances(keys: string[]) {
@@ -1120,8 +1128,16 @@
   function toggleAtomicTag(deviceId: string, tag: string) {
     const key = `${deviceId}::${tag}`;
     const next = new Set(checkedAtomicTags);
-    if (next.has(key)) next.delete(key); else next.add(key);
+    const nextHistory = new Set(checkedHistoryAtomicTags);
+    if (next.has(key)) {
+      next.delete(key);
+      nextHistory.delete(key);
+    } else {
+      next.add(key);
+      nextHistory.add(key);
+    }
     checkedAtomicTags = next;
+    checkedHistoryAtomicTags = nextHistory;
   }
 
   function batchMqttEnable(keys: string[]) {
