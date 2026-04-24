@@ -14,6 +14,7 @@
     addClassToElement,
     setInlineStyleProps,
     getInlineStyleProps,
+    deleteElementAtIndex,
   } from '$lib/hmi/source/markupTools';
   import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember } from '$lib/types/hmi';
 
@@ -261,10 +262,39 @@
 
   onMount(refresh);
 
+  function deleteSelected() {
+    if (selectedIdx === null) return;
+    const next = deleteElementAtIndex(source, selectedIdx);
+    if (next === null || next === source) return;
+    source = next;
+    selectedIdx = null;
+    dirty = true;
+  }
+
+  function isEditableTarget(t: EventTarget | null): boolean {
+    if (!(t instanceof HTMLElement)) return false;
+    const tag = t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (t.isContentEditable) return true;
+    // CodeMirror's editable surface is a contenteditable; the wrapper isn't,
+    // so also bail if we're anywhere inside the code editor.
+    if (t.closest('.cm-editor')) return true;
+    return false;
+  }
+
   function onKeydown(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
       e.preventDefault();
       if (dirty && !saving) save();
+      return;
+    }
+    if (
+      (e.key === 'Delete' || e.key === 'Backspace') &&
+      selectedIdx !== null &&
+      !isEditableTarget(e.target)
+    ) {
+      e.preventDefault();
+      deleteSelected();
     }
   }
 </script>

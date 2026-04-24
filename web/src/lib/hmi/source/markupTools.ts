@@ -211,6 +211,84 @@ export function getInlineStyleProps(
   return out;
 }
 
+/** Remove the Nth element (open tag, content, and matching close tag) from
+ * source. Self-closing tags drop just the open tag. Tracks nesting of
+ * same-named tags so `<div><div/></div>` deletes the outer pair correctly.
+ * If the element sat alone on its line, the surrounding indentation and
+ * trailing newline are removed too. Returns null when `idx` is out of range. */
+export function deleteElementAtIndex(source: string, idx: number): string | null {
+  const tags = findElementOpenTags(source);
+  const t = tags[idx];
+  if (!t) return null;
+  let endPos: number;
+  if (t.selfClosing) {
+    endPos = t.openEnd + 1;
+  } else {
+    let depth = 1;
+    let i = t.openEnd + 1;
+    while (i < source.length && depth > 0) {
+      const c = source[i];
+      if (c !== '<') {
+        i++;
+        continue;
+      }
+      if (source.startsWith('<!--', i)) {
+        const end = source.indexOf('-->', i + 4);
+        i = end < 0 ? source.length : end + 3;
+        continue;
+      }
+      if (source[i + 1] === '/') {
+        const closeMatch = source.slice(i + 2).match(/^([a-zA-Z][a-zA-Z0-9-]*)\s*>/);
+        if (closeMatch && closeMatch[1] === t.tagName) {
+          depth--;
+          i += 2 + closeMatch[0].length;
+          if (depth === 0) {
+            endPos = i;
+            break;
+          }
+          continue;
+        }
+        i++;
+        continue;
+      }
+      const openMatch = source.slice(i + 1).match(/^([a-zA-Z][a-zA-Z0-9-]*)/);
+      if (openMatch && openMatch[1] === t.tagName) {
+        let j = i + 1 + openMatch[1].length;
+        let inQuote: '"' | "'" | null = null;
+        let braceDepth = 0;
+        while (j < source.length) {
+          const cj = source[j];
+          if (inQuote) {
+            if (cj === inQuote) inQuote = null;
+          } else if (braceDepth > 0) {
+            if (cj === '{') braceDepth++;
+            else if (cj === '}') braceDepth--;
+          } else {
+            if (cj === '"' || cj === "'") inQuote = cj;
+            else if (cj === '{') braceDepth++;
+            else if (cj === '>') break;
+          }
+          j++;
+        }
+        if (j >= source.length) return null;
+        if (source[j - 1] !== '/') depth++;
+        i = j + 1;
+        continue;
+      }
+      i++;
+    }
+    if (endPos === undefined || depth !== 0) return null;
+  }
+  let start = t.openStart;
+  const lineStart = source.lastIndexOf('\n', start - 1) + 1;
+  const before = source.slice(lineStart, start);
+  if (/^\s*$/.test(before)) {
+    if (source[endPos] === '\n') endPos++;
+    start = lineStart;
+  }
+  return source.slice(0, start) + source.slice(endPos);
+}
+
 /** Pull a leading `<script>…</script>` block out of source. Returns the
  * inner script text (trimmed) and the markup with the block removed. */
 export function stripScriptBlock(source: string): { script: string; markup: string } {
