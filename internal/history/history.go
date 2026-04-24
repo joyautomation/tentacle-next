@@ -1,4 +1,4 @@
-//go:build history || all
+//go:build history || all || mantle
 
 // Package history stores PLC/gateway data into PostgreSQL (optionally with
 // TimescaleDB hypertable, compression, and retention policies).

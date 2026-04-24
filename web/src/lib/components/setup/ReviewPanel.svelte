@@ -12,6 +12,8 @@
     network: 'Network',
     gitops: 'GitOps',
     history: 'History',
+    'mqtt-broker': 'MQTT Broker',
+    'sparkplug-host': 'Sparkplug Host',
   };
 
   interface Props {
@@ -28,6 +30,7 @@
   const ARCHETYPE_NAMES: Record<string, string> = {
     'sparkplug-gateway': 'Sparkplug Gateway',
     'nat-gateway': 'NAT',
+    'mantle-host': 'Mantle Aggregator',
   };
 
   type StepStatus = 'pending' | 'running' | 'done' | 'error';
@@ -204,6 +207,19 @@
     return await waitForModules(new Set(['network', 'nftables', ...selectedAddOns]));
   }
 
+  async function applyMantleHost() {
+    if (!await enableModule('sparkplug-host', 'Enabling Sparkplug Host')) return false;
+
+    if (!await saveGitOpsConfig()) return false;
+    if (!await saveHistoryConfig()) return false;
+
+    for (const addon of selectedAddOns) {
+      if (!await enableModule(addon, `Enabling ${ADDON_NAMES[addon] ?? addon}`)) return false;
+    }
+
+    return await waitForModules(new Set(['sparkplug-host', ...selectedAddOns]));
+  }
+
   async function applyConfiguration() {
     applying = true;
     done = false;
@@ -217,6 +233,9 @@
         break;
       case 'nat-gateway':
         success = await applyNatGateway();
+        break;
+      case 'mantle-host':
+        success = await applyMantleHost();
         break;
     }
 
@@ -277,6 +296,13 @@
           <span class="summary-value">
             <span class="badge">Network Manager</span>
             <span class="badge">Firewall (nftables)</span>
+          </span>
+        </div>
+      {:else if archetype === 'mantle-host'}
+        <div class="summary-row">
+          <span class="summary-label">Modules</span>
+          <span class="summary-value">
+            <span class="badge">Sparkplug Host</span>
           </span>
         </div>
       {/if}

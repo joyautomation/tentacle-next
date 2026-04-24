@@ -46,13 +46,33 @@
   const ARCHETYPE_STEPS: Record<string, StepId[]> = {
     'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'add-ons', 'review'],
     'nat-gateway': ['architecture', 'add-ons', 'review'],
+    'mantle-host': ['architecture', 'add-ons', 'review'],
   };
 
   // Add-on modules that are NOT already core to each archetype
   const ARCHETYPE_ADDONS: Record<string, Set<string>> = {
     'sparkplug-gateway': new Set(['caddy', 'network', 'gitops', 'history']),
     'nat-gateway': new Set(['caddy', 'gitops']),
+    'mantle-host': new Set(['caddy', 'gitops', 'history', 'mqtt-broker']),
   };
+
+  // Modules an archetype's wizard depends on. If any are missing from the
+  // build (not in /api/v1/orchestrator/modules), the archetype is hidden
+  // entirely. This makes build presets (stable / mantle / all) the source of
+  // truth for which setup paths a binary offers.
+  const ARCHETYPE_REQUIRED_MODULES: Record<string, string[]> = {
+    'sparkplug-gateway': ['gateway', 'mqtt'],
+    'nat-gateway': ['network', 'nftables'],
+    'mantle-host': ['sparkplug-host'],
+  };
+
+  const visibleArchetypes = $derived.by(() => {
+    const visible = new Set<string>();
+    for (const [arch, required] of Object.entries(ARCHETYPE_REQUIRED_MODULES)) {
+      if (required.every(m => allModuleIds.has(m))) visible.add(arch);
+    }
+    return visible;
+  });
 
   // Pre-populate from existing config
   const SCANNER_MODULE_IDS = new Set(['ethernetip', 'opcua', 'modbus', 'snmp', 'profinetcontroller']);
@@ -245,28 +265,45 @@
         <p>Select how you'd like to set up your tentacle.</p>
       </div>
       <div class="card-grid">
-        <ArchitectureCard
-          title="Sparkplug Gateway"
-          description="Connect industrial device scanners to an MQTT Sparkplug B infrastructure. Supports EtherNet/IP, OPC UA, Modbus, and SNMP."
-          selected={selectedArchetype === 'sparkplug-gateway'}
-          onclick={() => selectArchetype('sparkplug-gateway')}
-          badge="Recommended"
-        >
-          {#snippet diagram()}
-            <SparkplugDiagram compact={true} />
-          {/snippet}
-        </ArchitectureCard>
+        {#if visibleArchetypes.has('sparkplug-gateway')}
+          <ArchitectureCard
+            title="Sparkplug Gateway"
+            description="Connect industrial device scanners to an MQTT Sparkplug B infrastructure. Supports EtherNet/IP, OPC UA, Modbus, and SNMP."
+            selected={selectedArchetype === 'sparkplug-gateway'}
+            onclick={() => selectArchetype('sparkplug-gateway')}
+            badge="Recommended"
+          >
+            {#snippet diagram()}
+              <SparkplugDiagram compact={true} />
+            {/snippet}
+          </ArchitectureCard>
+        {/if}
 
-        <ArchitectureCard
-          title="NAT"
-          description="Network address translation between networks. Manage one to one communications between subnets."
-          selected={selectedArchetype === 'nat-gateway'}
-          onclick={() => selectArchetype('nat-gateway')}
-        >
-          {#snippet diagram()}
-            <NatDiagram compact={true} />
-          {/snippet}
-        </ArchitectureCard>
+        {#if visibleArchetypes.has('nat-gateway')}
+          <ArchitectureCard
+            title="NAT"
+            description="Network address translation between networks. Manage one to one communications between subnets."
+            selected={selectedArchetype === 'nat-gateway'}
+            onclick={() => selectArchetype('nat-gateway')}
+          >
+            {#snippet diagram()}
+              <NatDiagram compact={true} />
+            {/snippet}
+          </ArchitectureCard>
+        {/if}
+
+        {#if visibleArchetypes.has('mantle-host')}
+          <ArchitectureCard
+            title="Mantle Aggregator"
+            description="Centralized Sparkplug B Host Application. Aggregates data from remote tentacles into a fleet-wide historian. Optionally embeds an MQTT broker for single-binary deployments."
+            selected={selectedArchetype === 'mantle-host'}
+            onclick={() => selectArchetype('mantle-host')}
+          >
+            {#snippet diagram()}
+              <div class="archetype-icon-fallback">↧↧↧</div>
+            {/snippet}
+          </ArchitectureCard>
+        {/if}
       </div>
 
     {:else if currentStepId === 'protocols'}

@@ -28,10 +28,12 @@ require (
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/mdlayher/socket v0.4.1 // indirect
 	github.com/minio/highwayhash v1.0.4-0.20251030100505-070ab1a87a76 // indirect
+	github.com/mochi-mqtt/server/v2 v2.7.9 // indirect
 	github.com/nats-io/jwt/v2 v2.8.1 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/npat-efault/crc16 v0.0.0-20161013170008-4128ccbe47c3 // indirect
+	github.com/rs/xid v1.4.0 // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect

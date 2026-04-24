@@ -1,8 +1,13 @@
-.PHONY: build build-release build-cli test vet fmt clean web-build web-install
+.PHONY: build build-release build-mantle build-cli test vet fmt clean web-build web-install
 
 # Stable module tags for release builds (excludes experimental modules).
 # Dev builds use "all" which includes everything.
 STABLE_TAGS = stable,api,orchestrator,gateway,ethernetip,snmp,mqtt,network,gitops
+
+# Mantle build: stable infrastructure plus mantle-only modules
+# (mqtt-broker, sparkplug-host, history). Excludes edge protocol scanners
+# that aren't useful on a central server.
+MANTLE_TAGS = stable,mantle,api,orchestrator,mqtt,network,gitops,caddy,telemetry
 
 # Version injection via ldflags.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -22,6 +27,10 @@ build: web-build
 # Release: build monolith with stable modules only
 build-release: web-build
 	go build -tags $(STABLE_TAGS),web -ldflags "$(LDFLAGS)" -o bin/tentacle ./cmd/tentacle
+
+# Mantle: build monolith with mantle preset (stable + mqtt-broker + sparkplug-host + history)
+build-mantle: web-build
+	go build -tags $(MANTLE_TAGS),web -ldflags "$(LDFLAGS)" -o bin/mantle ./cmd/tentacle
 
 # Build tentactl CLI (no build tags, lightweight)
 build-cli:
@@ -46,6 +55,8 @@ build-all: build build-cli
 	go build -tags profinet -o bin/tentacle-profinet ./cmd/tentacle-profinet
 	go build -tags profinetcontroller -o bin/tentacle-profinet-controller ./cmd/tentacle-profinet-controller
 	go build -tags telemetry -o bin/tentacle-telemetry ./cmd/tentacle-telemetry
+	go build -tags mqttbroker -o bin/tentacle-mqtt-broker ./cmd/tentacle-mqtt-broker
+	go build -tags sparkplughost -o bin/tentacle-sparkplug-host ./cmd/tentacle-sparkplug-host
 
 test:
 	go test ./...

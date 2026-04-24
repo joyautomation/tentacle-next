@@ -1,4 +1,4 @@
-//go:build all
+//go:build mantle && !all
 
 package orchestrator
 
@@ -10,56 +10,8 @@ func init() {
 	moduleRegistry = append(moduleRegistry,
 		otypes.ModuleRegistryEntry{
 			Repo:         "tentacle-next",
-			ModuleID:     "opcua",
-			Description:  "OPC UA client",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
-			ModuleID:     "modbus",
-			Description:  "Modbus TCP scanner",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
-			ModuleID:     "profinet",
-			Description:  "PROFINET IO Device",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
-			ModuleID:     "profinetcontroller",
-			Description:  "PROFINET IO Controller",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
-			ModuleID:     "ethernetip-server",
-			Description:  "EtherNet/IP server",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
-			ModuleID:     "modbus-server",
-			Description:  "Modbus TCP server",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
 			ModuleID:     "history",
-			Description:  "Edge historian (TimescaleDB)",
+			Description:  "Centralized historian (TimescaleDB) — fleet aggregation",
 			Category:     "optional",
 			Runtime:      "embedded",
 			Experimental: true,
@@ -70,22 +22,6 @@ func init() {
 				{EnvVar: "HISTORY_DB_PASSWORD", Description: "PostgreSQL password", Default: "postgres"},
 				{EnvVar: "HISTORY_DB_NAME", Description: "Database name", Default: "tentacle"},
 			},
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
-			ModuleID:     "nftables",
-			Description:  "Firewall manager",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
-		},
-		otypes.ModuleRegistryEntry{
-			Repo:         "tentacle-next",
-			ModuleID:     "plc",
-			Description:  "Soft PLC engine",
-			Category:     "optional",
-			Runtime:      "embedded",
-			Experimental: true,
 		},
 		otypes.ModuleRegistryEntry{
 			Repo:         "tentacle-next",

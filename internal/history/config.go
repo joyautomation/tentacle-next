@@ -1,4 +1,4 @@
-//go:build history || all
+//go:build history || all || mantle
 
 package history
 

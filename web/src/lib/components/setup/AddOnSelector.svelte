@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GlobeAlt, ArrowPath, ShieldCheck, CircleStack } from '@joyautomation/salt/icons';
+  import { GlobeAlt, ArrowPath, ShieldCheck, CircleStack, Server, ChartBar } from '@joyautomation/salt/icons';
   import type { Component } from 'svelte';
 
   interface AddOn {
@@ -21,7 +21,9 @@
     { id: 'caddy', name: 'Caddy', desc: 'HTTPS reverse proxy with automatic TLS', icon: ShieldCheck },
     { id: 'network', name: 'Network', desc: 'Manage network interfaces and IP addressing', icon: GlobeAlt },
     { id: 'gitops', name: 'GitOps', desc: 'Git-based configuration management and sync', icon: ArrowPath },
-    { id: 'history', name: 'History', desc: 'Edge historian with PostgreSQL + TimescaleDB', icon: CircleStack },
+    { id: 'history', name: 'History', desc: 'Historian with PostgreSQL + TimescaleDB', icon: CircleStack },
+    { id: 'mqtt-broker', name: 'MQTT Broker', desc: 'Embedded MQTT broker for single-binary deployments', icon: Server },
+    { id: 'sparkplug-host', name: 'Sparkplug Host', desc: 'Sparkplug B Host Application — fleet ingestion', icon: ChartBar },
   ];
 
   const addons = $derived(ALL_ADDONS.filter(a => available.has(a.id)));

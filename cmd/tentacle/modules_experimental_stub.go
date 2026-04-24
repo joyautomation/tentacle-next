@@ -1,4 +1,4 @@
-//go:build stable && !all
+//go:build stable && !all && !mantle
 
 package main
 
