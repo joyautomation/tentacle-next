@@ -152,3 +152,36 @@ type UnOp struct {
 
 func (u *UnOp) ExprType() *Type { return u.T }
 func (u *UnOp) exprNode()       {}
+
+// IndexRef reads or writes an element of an array value.
+// Index is 0-based after lowering has subtracted the array's lower bound.
+type IndexRef struct {
+	Array Expr
+	Index Expr
+	T     *Type // element type
+}
+
+func (i *IndexRef) ExprType() *Type { return i.T }
+func (i *IndexRef) exprNode()       {}
+func (i *IndexRef) lvalueNode()     {}
+
+// MemberRef reads or writes a UDT field. FieldIdx is the pre-resolved slot
+// into the struct's Fld slice, matching StructDef.Fields order.
+type MemberRef struct {
+	Object   Expr
+	FieldIdx int
+	T        *Type
+}
+
+func (m *MemberRef) ExprType() *Type { return m.T }
+func (m *MemberRef) exprNode()       {}
+func (m *MemberRef) lvalueNode()     {}
+
+// Exit and Continue — loop control.
+type Exit struct{}
+
+func (*Exit) stmtNode() {}
+
+type Continue struct{}
+
+func (*Continue) stmtNode() {}

@@ -565,7 +565,7 @@ func (p *Parser) parseCaseStmt() (Statement, error) {
 			}
 		}
 		p.expect(TokenColon)
-		body, err := p.parseStatementBlock(TokenEndCase, TokenElse)
+		body, err := p.parseCaseBody()
 		if err != nil {
 			return nil, err
 		}
@@ -587,6 +587,61 @@ func (p *Parser) parseCaseStmt() (Statement, error) {
 	p.match(TokenEndCase)
 	p.match(TokenSemicolon)
 	return stmt, nil
+}
+
+// parseCaseBody collects statements until it sees END_CASE, ELSE, EOF, or a
+// token sequence that looks like a new case label (constant value[s] followed
+// by `:`). Case labels aren't introduced by a keyword, so the body parse
+// needs to peek ahead and stop before consuming them as statements.
+func (p *Parser) parseCaseBody() ([]Statement, error) {
+	var stmts []Statement
+	for {
+		tt := p.peek().Type
+		if tt == TokenEOF || tt == TokenEndCase || tt == TokenElse {
+			return stmts, nil
+		}
+		if p.looksLikeCaseLabel() {
+			return stmts, nil
+		}
+		stmt, err := p.parseStatement()
+		if err != nil {
+			return nil, err
+		}
+		if stmt != nil {
+			stmts = append(stmts, stmt)
+		}
+	}
+}
+
+// looksLikeCaseLabel returns true if the upcoming tokens form `<const>[, <const>]* :`.
+// Case labels in ST are constant values, so an integer/typed literal or negative
+// number followed by `,` or `:` unambiguously starts a new clause.
+func (p *Parser) looksLikeCaseLabel() bool {
+	i := 0
+	// Optional leading '-' for negative numeric labels.
+	if p.peekAt(i).Type == TokenMinus {
+		i++
+	}
+	switch p.peekAt(i).Type {
+	case TokenNumber, TokenBasedNumber, TokenTypedLiteral, TokenTrue, TokenFalse, TokenString, TokenTimeLiteral:
+	default:
+		return false
+	}
+	i++
+	// Walk additional comma-separated values.
+	for p.peekAt(i).Type == TokenComma {
+		i++
+		if p.peekAt(i).Type == TokenMinus {
+			i++
+		}
+		switch p.peekAt(i).Type {
+		case TokenNumber, TokenBasedNumber, TokenTypedLiteral, TokenTrue, TokenFalse, TokenString, TokenTimeLiteral:
+		default:
+			return false
+		}
+		i++
+	}
+	return p.peekAt(i).Type == TokenColon
 }
 
 func (p *Parser) parseStatementBlock(terminators ...TokenType) ([]Statement, error) {

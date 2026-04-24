@@ -20,7 +20,9 @@ type EvalCtx struct {
 	Host    Host
 
 	// control-flow sentinels
-	returning bool
+	returning    bool
+	exitLoop     bool // EXIT — break out of the innermost loop
+	continueLoop bool // CONTINUE — skip to the next iteration
 }
 
 // Run executes one scan of the program body against the frame.
@@ -34,7 +36,7 @@ func execBlock(ctx *EvalCtx, stmts []Stmt) error {
 		if err := execStmt(ctx, s); err != nil {
 			return err
 		}
-		if ctx.returning {
+		if ctx.returning || ctx.exitLoop || ctx.continueLoop {
 			return nil
 		}
 	}
@@ -88,6 +90,13 @@ func execStmt(ctx *EvalCtx, s Stmt) error {
 			if ctx.returning {
 				return nil
 			}
+			if ctx.exitLoop {
+				ctx.exitLoop = false
+				return nil
+			}
+			if ctx.continueLoop {
+				ctx.continueLoop = false
+			}
 		}
 		return nil
 
@@ -107,6 +116,13 @@ func execStmt(ctx *EvalCtx, s Stmt) error {
 			if ctx.returning {
 				return nil
 			}
+			if ctx.exitLoop {
+				ctx.exitLoop = false
+				return nil
+			}
+			if ctx.continueLoop {
+				ctx.continueLoop = false
+			}
 		}
 		return fmt.Errorf("WHILE exceeded iteration guard")
 
@@ -118,6 +134,13 @@ func execStmt(ctx *EvalCtx, s Stmt) error {
 			}
 			if ctx.returning {
 				return nil
+			}
+			if ctx.exitLoop {
+				ctx.exitLoop = false
+				return nil
+			}
+			if ctx.continueLoop {
+				ctx.continueLoop = false
 			}
 			cv, err := evalExpr(ctx, n.Cond)
 			if err != nil {
@@ -150,19 +173,84 @@ func execStmt(ctx *EvalCtx, s Stmt) error {
 	case *Return:
 		ctx.returning = true
 		return nil
+
+	case *Exit:
+		ctx.exitLoop = true
+		return nil
+
+	case *Continue:
+		ctx.continueLoop = true
+		return nil
 	}
 	return fmt.Errorf("unknown stmt %T", s)
 }
 
+// accessor is one step along a nested lvalue path: either an array subscript
+// (arrIdx set) or a struct field (fieldIdx set, isField=true).
+type accessor struct {
+	arrIdx   int
+	fieldIdx int
+	isField  bool
+}
+
 func writeLValue(ctx *EvalCtx, lv LValue, v Value) error {
-	switch n := lv.(type) {
-	case *SlotRef:
-		ctx.Frame.Slots[n.Slot] = v
-		return nil
-	case *GlobalRef:
-		return ctx.Host.WriteGlobal(n.Name, v)
+	// Collect accessors while descending to the root slot / global.
+	// The chain is built leaf-first and applied root-first below.
+	var chain []accessor
+	cur := lv
+	for {
+		switch n := cur.(type) {
+		case *SlotRef:
+			return storeAtRoot(&ctx.Frame.Slots[n.Slot], chain, v)
+		case *GlobalRef:
+			if len(chain) != 0 {
+				return fmt.Errorf("cannot assign to a field/element of global %q without a declared composite type", n.Name)
+			}
+			return ctx.Host.WriteGlobal(n.Name, v)
+		case *IndexRef:
+			iv, err := evalExpr(ctx, n.Index)
+			if err != nil {
+				return err
+			}
+			chain = append(chain, accessor{arrIdx: int(iv.I)})
+			inner, ok := n.Array.(LValue)
+			if !ok {
+				return fmt.Errorf("cannot assign through non-lvalue array base %T", n.Array)
+			}
+			cur = inner
+		case *MemberRef:
+			chain = append(chain, accessor{fieldIdx: n.FieldIdx, isField: true})
+			inner, ok := n.Object.(LValue)
+			if !ok {
+				return fmt.Errorf("cannot assign through non-lvalue object base %T", n.Object)
+			}
+			cur = inner
+		default:
+			return fmt.Errorf("unknown lvalue %T", lv)
+		}
 	}
-	return fmt.Errorf("unknown lvalue %T", lv)
+}
+
+// storeAtRoot walks the chain (built leaf-first) in reverse so we traverse
+// the aggregate from root outward, then writes v at the leaf position.
+func storeAtRoot(root *Value, chain []accessor, v Value) error {
+	target := root
+	for i := len(chain) - 1; i >= 0; i-- {
+		a := chain[i]
+		if a.isField {
+			if a.fieldIdx < 0 || a.fieldIdx >= len(target.Fld) {
+				return fmt.Errorf("field index %d out of bounds", a.fieldIdx)
+			}
+			target = &target.Fld[a.fieldIdx]
+		} else {
+			if a.arrIdx < 0 || a.arrIdx >= len(target.Arr) {
+				return fmt.Errorf("index %d out of bounds [0..%d]", a.arrIdx, len(target.Arr)-1)
+			}
+			target = &target.Arr[a.arrIdx]
+		}
+	}
+	*target = v
+	return nil
 }
 
 func evalExpr(ctx *EvalCtx, e Expr) (Value, error) {
@@ -189,6 +277,28 @@ func evalExpr(ctx *EvalCtx, e Expr) (Value, error) {
 			return Value{}, err
 		}
 		return evalUn(n.Op, x, n.T), nil
+	case *IndexRef:
+		arr, err := evalExpr(ctx, n.Array)
+		if err != nil {
+			return Value{}, err
+		}
+		iv, err := evalExpr(ctx, n.Index)
+		if err != nil {
+			return Value{}, err
+		}
+		if iv.I < 0 || int(iv.I) >= len(arr.Arr) {
+			return Value{}, fmt.Errorf("index %d out of bounds [0..%d]", iv.I, len(arr.Arr)-1)
+		}
+		return arr.Arr[iv.I], nil
+	case *MemberRef:
+		obj, err := evalExpr(ctx, n.Object)
+		if err != nil {
+			return Value{}, err
+		}
+		if n.FieldIdx < 0 || n.FieldIdx >= len(obj.Fld) {
+			return Value{}, fmt.Errorf("field index %d out of bounds", n.FieldIdx)
+		}
+		return obj.Fld[n.FieldIdx], nil
 	}
 	return Value{}, fmt.Errorf("unknown expr %T", e)
 }
@@ -197,25 +307,26 @@ func evalBin(op BinKind, l, r Value, t *Type) Value {
 	switch op {
 	case OpAdd:
 		if t.Kind == TypeReal {
-			return RealVal(l.F + r.F)
+			return RealVal(asFloat(l) + asFloat(r))
 		}
 		return Value{Kind: t.Kind, I: l.I + r.I}
 	case OpSub:
 		if t.Kind == TypeReal {
-			return RealVal(l.F - r.F)
+			return RealVal(asFloat(l) - asFloat(r))
 		}
 		return Value{Kind: t.Kind, I: l.I - r.I}
 	case OpMul:
 		if t.Kind == TypeReal {
-			return RealVal(l.F * r.F)
+			return RealVal(asFloat(l) * asFloat(r))
 		}
 		return Value{Kind: t.Kind, I: l.I * r.I}
 	case OpDiv:
 		if t.Kind == TypeReal {
-			if r.F == 0 {
+			rf := asFloat(r)
+			if rf == 0 {
 				return RealVal(0)
 			}
-			return RealVal(l.F / r.F)
+			return RealVal(asFloat(l) / rf)
 		}
 		if r.I == 0 {
 			return Value{Kind: t.Kind}

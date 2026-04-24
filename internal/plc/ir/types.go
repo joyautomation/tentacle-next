@@ -43,11 +43,12 @@ func (k TypeKind) String() string {
 
 // Type is the resolved type of an IR value. Compound types carry extra data.
 type Type struct {
-	Kind   TypeKind
-	Struct *StructDef // Kind == TypeStruct
-	Elem   *Type      // Kind == TypeArray
-	ArrLen int        // Kind == TypeArray
-	FB     *FBDef     // Kind == TypeFB
+	Kind       TypeKind
+	Struct     *StructDef // Kind == TypeStruct
+	Elem       *Type      // Kind == TypeArray
+	ArrLen     int        // Kind == TypeArray
+	ArrLoBound int        // Kind == TypeArray — IEC arrays may start at any integer
+	FB         *FBDef     // Kind == TypeFB
 }
 
 // Singleton scalar types. Use these instead of allocating new *Type for every reference.
@@ -80,6 +81,27 @@ type FBDef struct {
 	// Slots, body, etc. added when FB support lands.
 }
 
+// String renders the type for diagnostic messages.
+func (t *Type) String() string {
+	if t == nil {
+		return "?"
+	}
+	switch t.Kind {
+	case TypeStruct:
+		if t.Struct != nil && t.Struct.Name != "" {
+			return t.Struct.Name
+		}
+		return "STRUCT"
+	case TypeArray:
+		elem := "?"
+		if t.Elem != nil {
+			elem = t.Elem.String()
+		}
+		return "ARRAY OF " + elem
+	}
+	return t.Kind.String()
+}
+
 // IsNumeric reports whether t permits arithmetic operators.
 func (t *Type) IsNumeric() bool {
 	if t == nil {
@@ -103,7 +125,7 @@ func (t *Type) Equal(other *Type) bool {
 	case TypeStruct:
 		return t.Struct == other.Struct
 	case TypeArray:
-		return t.ArrLen == other.ArrLen && t.Elem.Equal(other.Elem)
+		return t.ArrLen == other.ArrLen && t.ArrLoBound == other.ArrLoBound && t.Elem.Equal(other.Elem)
 	case TypeFB:
 		return t.FB == other.FB
 	}
