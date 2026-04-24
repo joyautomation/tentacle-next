@@ -37,9 +37,25 @@
   });
 
   const isSourceMode = $derived(!!component?.source);
-  const css = $derived(
-    compileScopedCss(componentClasses, prefix, isSourceMode ? 'descendant' : 'compound'),
-  );
+  const css = $derived.by(() => {
+    const parts: string[] = [];
+    const base = compileScopedCss(
+      componentClasses,
+      prefix,
+      isSourceMode ? 'descendant' : 'compound',
+    );
+    if (base) parts.push(base);
+    // Mirror the editor: when the source-mode container establishes a
+    // positioning context, auto-position direct children so their inline
+    // left/top/right/bottom resolve.
+    if (isSourceMode && prefix) {
+      const pos = component?.containerProps?.position;
+      if (pos === 'absolute' || pos === 'relative') {
+        parts.push(`.${prefix} > * { position: absolute; }`);
+      }
+    }
+    return parts.join('\n\n');
+  });
 
   // For source-mode components: feed the live UDT object (or undefined) to the
   // mounted Svelte component as the `udt` prop. The tagStore reactivity flows

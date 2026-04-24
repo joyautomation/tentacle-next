@@ -72,6 +72,16 @@
       const c = compileScopedCss(componentClasses, prefix, 'descendant');
       if (c) parts.push(c);
     }
+    // When the container establishes an absolute positioning context, every
+    // direct child needs `position: absolute` for left/top/right/bottom to
+    // resolve. Inject the rule so dragged elements with bare offsets in
+    // their inline style actually move, without polluting the source.
+    if (
+      prefix &&
+      (containerProps?.position === 'absolute' || containerProps?.position === 'relative')
+    ) {
+      parts.push(`.${prefix} > * { position: absolute; }`);
+    }
     return parts.join('\n\n');
   });
 
