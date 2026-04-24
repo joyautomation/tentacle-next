@@ -63,6 +63,13 @@ var catalog = []Builtin{
 		InsertText: `set_var("$1", $2)`,
 		Doc:        "Write a value to a PLC variable. The value is coerced to the variable's declared type.",
 	},
+	{
+		Name: "read_tag", Kind: "function", Category: "Tags",
+		Signature:  `read_tag(device_id: str, tag_path: str) -> value`,
+		Params:     []string{"device_id", "tag_path"},
+		InsertText: `read_tag("$1", "$2")`,
+		Doc:        "Read a device tag directly by (deviceId, tagPath). Returns None if the PLC hasn't yet observed a value for that tag on the bus.",
+	},
 
 	// --- Logging --------------------------------------------------------
 	{
