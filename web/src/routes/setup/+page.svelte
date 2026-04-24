@@ -7,6 +7,7 @@
   import ArchitectureCard from '$lib/components/setup/ArchitectureCard.svelte';
   import SparkplugDiagram from '$lib/components/setup/SparkplugDiagram.svelte';
   import NatDiagram from '$lib/components/setup/NatDiagram.svelte';
+  import MantleDiagram from '$lib/components/setup/MantleDiagram.svelte';
   import ProtocolSelector from '$lib/components/setup/ProtocolSelector.svelte';
   import MqttConfigForm from '$lib/components/setup/MqttConfigForm.svelte';
   import AddOnSelector from '$lib/components/setup/AddOnSelector.svelte';
@@ -300,7 +301,7 @@
             onclick={() => selectArchetype('mantle-host')}
           >
             {#snippet diagram()}
-              <div class="archetype-icon-fallback">↧↧↧</div>
+              <MantleDiagram compact={true} />
             {/snippet}
           </ArchitectureCard>
         {/if}
