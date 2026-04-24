@@ -100,14 +100,15 @@ func (e *Engine) builtinReadTag(thread *starlark.Thread, fn *starlark.Builtin, a
 	if e.deviceTags == nil {
 		return starlark.None, nil
 	}
-	if v, ok := e.deviceTags.Get(deviceID, tagPath); ok {
-		return goToStarlark(v), nil
-	}
-	// Not a leaf — maybe it names a template instance. Collect children
-	// under the prefix and return them as a dict, so users can read a
-	// whole struct (e.g. a UDT instance) in a single call.
+	// Aggregate first: if this path has any children (i.e. names a
+	// template instance), return the whole struct as a dict. Some
+	// scanners also publish the struct root as a stringified value, so
+	// a naive leaf-first lookup would hide the fields.
 	if children, ok := e.deviceTags.GetAggregate(deviceID, tagPath); ok {
 		return goMapToStarlark(children), nil
+	}
+	if v, ok := e.deviceTags.Get(deviceID, tagPath); ok {
+		return goToStarlark(v), nil
 	}
 	return starlark.None, nil
 }
