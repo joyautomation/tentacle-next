@@ -30,7 +30,9 @@ class TagStore {
   acquire(): void {
     this.refCount++;
     if (this.refCount === 1) {
-      this.cleanup = subscribe<PlcDataMessage>('/variables/stream', (msg) => {
+      // Subscribe to the pre-RBE Live stream so the HMI sees every value,
+      // not just the deadband-filtered set routed to MQTT / historian.
+      this.cleanup = subscribe<PlcDataMessage>('/variables/stream?live=true', (msg) => {
         const k = keyFor(msg.moduleId, msg.variableId);
         // Re-assign to trigger reactivity — Svelte 5 needs new identity for nested objects.
         this.values = { ...this.values, [k]: msg.value };

@@ -18,6 +18,13 @@ func StatusBrowse(moduleType string) string { return moduleType + ".status.brows
 func Data(moduleID, deviceID, variableID string) string { return fmt.Sprintf("%s.data.%s.%s", moduleID, deviceID, variableID) }
 func DataWildcard(moduleID string) string               { return moduleID + ".data.>" }
 func AllData() string                                   { return "*.data.>" }
+
+// Live subjects — same payload shape as Data, but published BEFORE RBE
+// so UI consumers (HMI) see every value the gateway produces. Historian
+// and MQTT continue to subscribe to Data so they remain RBE-filtered.
+func Live(moduleID, deviceID, variableID string) string { return fmt.Sprintf("%s.live.%s.%s", moduleID, deviceID, variableID) }
+func LiveWildcard(moduleID string) string               { return moduleID + ".live.>" }
+func AllLive() string                                   { return "*.live.>" }
 func Command(moduleID, variableID string) string        { return fmt.Sprintf("%s.command.%s", moduleID, variableID) }
 func CommandWildcard(moduleID string) string             { return moduleID + ".command.>" }
 func Variables(moduleID string) string                  { return moduleID + ".variables" }
