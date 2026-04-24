@@ -857,6 +857,343 @@ func checkDictAgainstTemplate(dict *syntax.DictExpr, tmpl *TemplateInfo) []Diagn
 	return diags
 }
 
+// ─── Unbound identifier checking ──────────────────────────────────────────
+//
+// analyzeUnboundNames flags every identifier *read* that doesn't resolve to
+// something bound in an enclosing scope, a builtin, or a provider-exposed
+// cross-program name. The pass is deliberately conservative: when in doubt
+// (e.g. we can't tell if a name is a binding or a read) it stays silent.
+// Severity is warning because a false positive would punish the user for
+// perfectly valid code the checker simply doesn't understand.
+//
+// The one tricky bit is scope. Starlark is function-scoped, so forward
+// references inside a def body are legal — we do a pre-pass over each
+// function to collect every binding before walking reads. Comprehensions
+// and lambdas each introduce their own nested scope.
+func analyzeUnboundNames(file *syntax.File, provider SymbolProvider) []Diagnostic {
+	if file == nil {
+		return nil
+	}
+	external := knownExternalNames(provider)
+	module := &nameScope{names: map[string]bool{}, parent: &nameScope{names: external}}
+	collectStmtBindings(file.Stmts, module)
+	var diags []Diagnostic
+	walkReads(file.Stmts, module, &diags)
+	return diags
+}
+
+// nameScope is one level of the lexical scope stack used by the unbound
+// identifier checker. `names` holds bindings introduced at this level;
+// `parent` chains up to enclosing scopes.
+type nameScope struct {
+	names  map[string]bool
+	parent *nameScope
+}
+
+func (s *nameScope) has(name string) bool {
+	for cur := s; cur != nil; cur = cur.parent {
+		if cur.names[name] {
+			return true
+		}
+	}
+	return false
+}
+
+// knownExternalNames is the set of identifiers the user may reference
+// that aren't bound locally — Starlark keywords, our PLC builtin catalog,
+// Starlark's built-in functions, and every cross-program symbol the
+// provider knows about.
+func knownExternalNames(provider SymbolProvider) map[string]bool {
+	names := map[string]bool{
+		"True": true, "False": true, "None": true,
+	}
+	for _, b := range catalog {
+		names[b.Name] = true
+	}
+	// Starlark core builtins that aren't in our PLC catalog.
+	for _, n := range []string{
+		"any", "all", "bool", "bytes", "chr", "dict", "dir", "enumerate",
+		"fail", "float", "getattr", "hasattr", "hash", "int", "len", "list",
+		"max", "min", "ord", "print", "range", "repr", "reversed", "set",
+		"sorted", "str", "tuple", "type", "zip",
+	} {
+		names[n] = true
+	}
+	if provider != nil {
+		for _, n := range provider.FunctionNames() {
+			names[n] = true
+		}
+		for _, n := range provider.VariableNames() {
+			names[n] = true
+		}
+		for _, n := range provider.TemplateNames() {
+			names[n] = true
+		}
+	}
+	return names
+}
+
+// collectStmtBindings records every name bound at the current scope level
+// without descending into nested defs, lambdas, or comprehensions (each
+// starts its own scope). Starlark's function-scoped semantics mean forward
+// references inside a function body are legal, so callers pre-populate
+// the scope before walking reads.
+func collectStmtBindings(stmts []syntax.Stmt, s *nameScope) {
+	for _, stmt := range stmts {
+		switch st := stmt.(type) {
+		case *syntax.AssignStmt:
+			collectLHSBindings(st.LHS, s)
+		case *syntax.DefStmt:
+			if st.Name != nil {
+				s.names[st.Name.Name] = true
+			}
+		case *syntax.ForStmt:
+			collectLHSBindings(st.Vars, s)
+			collectStmtBindings(st.Body, s)
+		case *syntax.IfStmt:
+			collectStmtBindings(st.True, s)
+			collectStmtBindings(st.False, s)
+		case *syntax.WhileStmt:
+			collectStmtBindings(st.Body, s)
+		case *syntax.LoadStmt:
+			for _, to := range st.To {
+				if to != nil {
+					s.names[to.Name] = true
+				}
+			}
+		}
+	}
+}
+
+// collectLHSBindings pulls bound names out of an assignment/for-clause
+// target. Handles plain idents, tuple/list unpacking, and parenthesized
+// targets. Subscript and dot targets don't introduce new names.
+func collectLHSBindings(e syntax.Expr, s *nameScope) {
+	switch x := e.(type) {
+	case *syntax.Ident:
+		s.names[x.Name] = true
+	case *syntax.TupleExpr:
+		for _, el := range x.List {
+			collectLHSBindings(el, s)
+		}
+	case *syntax.ListExpr:
+		for _, el := range x.List {
+			collectLHSBindings(el, s)
+		}
+	case *syntax.ParenExpr:
+		collectLHSBindings(x.X, s)
+	}
+}
+
+// bindParams seeds a function/lambda scope with its parameter names,
+// including defaulted params (`x=1`) and variadics (`*args`, `**kwargs`).
+func bindParams(params []syntax.Expr, s *nameScope) {
+	for _, p := range params {
+		switch x := p.(type) {
+		case *syntax.Ident:
+			s.names[x.Name] = true
+		case *syntax.BinaryExpr:
+			if x.Op == syntax.EQ {
+				if id, ok := x.X.(*syntax.Ident); ok {
+					s.names[id.Name] = true
+				}
+			}
+		case *syntax.UnaryExpr:
+			if id, ok := x.X.(*syntax.Ident); ok {
+				s.names[id.Name] = true
+			}
+		}
+	}
+}
+
+// walkParamDefaults checks name references inside default-value expressions.
+// Defaults are evaluated in the enclosing scope, not the function's own.
+func walkParamDefaults(params []syntax.Expr, s *nameScope, diags *[]Diagnostic) {
+	for _, p := range params {
+		if be, ok := p.(*syntax.BinaryExpr); ok && be.Op == syntax.EQ {
+			walkExprReads(be.Y, s, diags)
+		}
+	}
+}
+
+func walkReads(stmts []syntax.Stmt, s *nameScope, diags *[]Diagnostic) {
+	for _, stmt := range stmts {
+		walkStmtReads(stmt, s, diags)
+	}
+}
+
+func walkStmtReads(stmt syntax.Stmt, s *nameScope, diags *[]Diagnostic) {
+	switch st := stmt.(type) {
+	case *syntax.AssignStmt:
+		walkLHSReads(st.LHS, s, diags)
+		walkExprReads(st.RHS, s, diags)
+		// Augmented assignment (`x += 1`) reads the LHS ident as well.
+		if st.Op != syntax.EQ {
+			if id, ok := st.LHS.(*syntax.Ident); ok {
+				checkIdent(id, s, diags)
+			}
+		}
+	case *syntax.DefStmt:
+		fnScope := &nameScope{names: map[string]bool{}, parent: s}
+		bindParams(st.Params, fnScope)
+		collectStmtBindings(st.Body, fnScope)
+		walkParamDefaults(st.Params, s, diags)
+		walkReads(st.Body, fnScope, diags)
+	case *syntax.IfStmt:
+		walkExprReads(st.Cond, s, diags)
+		walkReads(st.True, s, diags)
+		walkReads(st.False, s, diags)
+	case *syntax.ForStmt:
+		walkExprReads(st.X, s, diags)
+		walkReads(st.Body, s, diags)
+	case *syntax.WhileStmt:
+		walkExprReads(st.Cond, s, diags)
+		walkReads(st.Body, s, diags)
+	case *syntax.ReturnStmt:
+		if st.Result != nil {
+			walkExprReads(st.Result, s, diags)
+		}
+	case *syntax.ExprStmt:
+		walkExprReads(st.X, s, diags)
+	}
+}
+
+// walkLHSReads visits read-positions inside an assignment target. A bare
+// ident on the LHS is a pure write (skip it); a subscript or dot target's
+// base is read so the assignment can take effect.
+func walkLHSReads(e syntax.Expr, s *nameScope, diags *[]Diagnostic) {
+	switch x := e.(type) {
+	case *syntax.Ident:
+		// Pure write — not a read.
+	case *syntax.TupleExpr:
+		for _, el := range x.List {
+			walkLHSReads(el, s, diags)
+		}
+	case *syntax.ListExpr:
+		for _, el := range x.List {
+			walkLHSReads(el, s, diags)
+		}
+	case *syntax.ParenExpr:
+		walkLHSReads(x.X, s, diags)
+	case *syntax.IndexExpr:
+		walkExprReads(x.X, s, diags)
+		walkExprReads(x.Y, s, diags)
+	case *syntax.DotExpr:
+		walkExprReads(x.X, s, diags)
+	default:
+		walkExprReads(e, s, diags)
+	}
+}
+
+func walkExprReads(e syntax.Expr, s *nameScope, diags *[]Diagnostic) {
+	if e == nil {
+		return
+	}
+	switch x := e.(type) {
+	case *syntax.Ident:
+		checkIdent(x, s, diags)
+	case *syntax.Literal:
+		// literal — no names
+	case *syntax.BinaryExpr:
+		walkExprReads(x.X, s, diags)
+		walkExprReads(x.Y, s, diags)
+	case *syntax.UnaryExpr:
+		walkExprReads(x.X, s, diags)
+	case *syntax.ParenExpr:
+		walkExprReads(x.X, s, diags)
+	case *syntax.CallExpr:
+		walkCallReads(x, s, diags)
+	case *syntax.DotExpr:
+		walkExprReads(x.X, s, diags)
+	case *syntax.ListExpr:
+		for _, el := range x.List {
+			walkExprReads(el, s, diags)
+		}
+	case *syntax.TupleExpr:
+		for _, el := range x.List {
+			walkExprReads(el, s, diags)
+		}
+	case *syntax.DictExpr:
+		for _, entry := range x.List {
+			if de, ok := entry.(*syntax.DictEntry); ok {
+				walkExprReads(de.Key, s, diags)
+				walkExprReads(de.Value, s, diags)
+			}
+		}
+	case *syntax.DictEntry:
+		walkExprReads(x.Key, s, diags)
+		walkExprReads(x.Value, s, diags)
+	case *syntax.IndexExpr:
+		walkExprReads(x.X, s, diags)
+		walkExprReads(x.Y, s, diags)
+	case *syntax.SliceExpr:
+		walkExprReads(x.X, s, diags)
+		walkExprReads(x.Lo, s, diags)
+		walkExprReads(x.Hi, s, diags)
+		walkExprReads(x.Step, s, diags)
+	case *syntax.CondExpr:
+		walkExprReads(x.Cond, s, diags)
+		walkExprReads(x.True, s, diags)
+		walkExprReads(x.False, s, diags)
+	case *syntax.LambdaExpr:
+		lambdaScope := &nameScope{names: map[string]bool{}, parent: s}
+		bindParams(x.Params, lambdaScope)
+		walkParamDefaults(x.Params, s, diags)
+		walkExprReads(x.Body, lambdaScope, diags)
+	case *syntax.Comprehension:
+		// A comprehension's for-clause targets are visible in every
+		// following clause and in the body. Pre-collect them so order
+		// doesn't matter; the X expression of each for-clause itself is
+		// evaluated in the enclosing comprehension scope.
+		compScope := &nameScope{names: map[string]bool{}, parent: s}
+		for _, clause := range x.Clauses {
+			if fc, ok := clause.(*syntax.ForClause); ok {
+				collectLHSBindings(fc.Vars, compScope)
+			}
+		}
+		for _, clause := range x.Clauses {
+			switch c := clause.(type) {
+			case *syntax.ForClause:
+				walkExprReads(c.X, compScope, diags)
+			case *syntax.IfClause:
+				walkExprReads(c.Cond, compScope, diags)
+			}
+		}
+		walkExprReads(x.Body, compScope, diags)
+	}
+}
+
+// walkCallReads walks the args of a call, treating the `x` in `foo(x=1)`
+// as a parameter name on the callee (not a read) but still checking the
+// value and any variadic spreads.
+func walkCallReads(call *syntax.CallExpr, s *nameScope, diags *[]Diagnostic) {
+	walkExprReads(call.Fn, s, diags)
+	for _, arg := range call.Args {
+		if be, ok := arg.(*syntax.BinaryExpr); ok && be.Op == syntax.EQ {
+			walkExprReads(be.Y, s, diags)
+			continue
+		}
+		walkExprReads(arg, s, diags)
+	}
+}
+
+func checkIdent(id *syntax.Ident, s *nameScope, diags *[]Diagnostic) {
+	if id == nil || id.Name == "" {
+		return
+	}
+	if s.has(id.Name) {
+		return
+	}
+	start, end := id.Span()
+	d := rangeDiag(
+		int(start.Line), int(start.Col),
+		int(end.Line), int(end.Col),
+		fmt.Sprintf("unknown name %q", id.Name),
+	)
+	d.Severity = SeverityWarning
+	*diags = append(*diags, d)
+}
+
 // containerBody returns the child statement list of a compound statement
 // so we can recurse into nested defs that live inside control flow.
 func containerBody(stmt syntax.Stmt) ([]syntax.Stmt, bool) {

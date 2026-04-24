@@ -324,6 +324,146 @@ func TestReturnTypeNestedDefHasOwnScope(t *testing.T) {
 	}
 }
 
+// ─── Unbound identifier checking ──────────────────────────────────────────
+
+func TestUnboundFlagsUnknownInReturnExpr(t *testing.T) {
+	// Screenshot case: param is `ai` but user wrote `analog.VALUE` — the
+	// head `analog` is unbound and should surface as "unknown name".
+	src := "def f(ai) -> Motor:\n    return {\"speed\": analog.VALUE}\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name \"analog\""); d == nil {
+		t.Fatalf("expected unknown name diagnostic on analog, got %+v", diags)
+	}
+}
+
+func TestUnboundAcceptsParamReference(t *testing.T) {
+	src := "def f(x):\n    return x\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("did not expect unknown name, got %q", d.Message)
+	}
+}
+
+func TestUnboundAcceptsBuiltin(t *testing.T) {
+	src := "def f():\n    log(\"hi\")\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("did not expect unknown name, got %q", d.Message)
+	}
+}
+
+func TestUnboundAcceptsForwardReferenceInFunction(t *testing.T) {
+	// Starlark is function-scoped; a name bound anywhere in the function
+	// is considered in-scope throughout — a linter pass shouldn't flag
+	// statically legal code even if the reference order looks odd.
+	src := "def f():\n    x = y\n    y = 1\n    return x\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("forward ref should be allowed, got %q", d.Message)
+	}
+}
+
+func TestUnboundAcceptsComprehensionTarget(t *testing.T) {
+	src := "def f():\n    return [i*2 for i in range(10)]\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("comprehension target should be bound, got %q", d.Message)
+	}
+}
+
+func TestUnboundAcceptsForLoopTarget(t *testing.T) {
+	src := "def f():\n    for x in range(3):\n        log(x)\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("for target should be bound, got %q", d.Message)
+	}
+}
+
+func TestUnboundAcceptsTupleUnpacking(t *testing.T) {
+	src := "def f():\n    pair = (1, 2)\n    a, b = pair\n    log(a)\n    log(b)\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("tuple unpacking should bind both names, got %q", d.Message)
+	}
+}
+
+func TestUnboundAcceptsCrossProgramFunction(t *testing.T) {
+	// `check` is a provider-exposed cross-program function.
+	src := "def main():\n    check(\"hello\")\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("cross-program fn should be known, got %q", d.Message)
+	}
+}
+
+func TestUnboundAcceptsProviderVariable(t *testing.T) {
+	// `count` is a provider-exposed variable name — users can reference
+	// it directly in programs (e.g. for get_var calls by name).
+	src := "def main():\n    return count\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name"); d != nil {
+		t.Errorf("provider var should be known, got %q", d.Message)
+	}
+}
+
+func TestUnboundFlagsTypoedBuiltin(t *testing.T) {
+	src := "def f():\n    lag(\"hi\")\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name \"lag\""); d == nil {
+		t.Fatalf("expected unknown name for typo'd builtin, got %+v", diags)
+	}
+}
+
+func TestUnboundFlagsInnerParamLeakToOuter(t *testing.T) {
+	// Inner def's param `x` must not be visible from outer's body.
+	src := "def outer():\n" +
+		"    def inner(x):\n" +
+		"        return x\n" +
+		"    return x\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name \"x\""); d == nil {
+		t.Fatalf("expected inner param not visible from outer, got %+v", diags)
+	}
+}
+
+func TestUnboundDotExpressionFieldNotChecked(t *testing.T) {
+	// In `a.b.c`, only `a` is a name reference. Fields `b` and `c` must
+	// never be flagged — they belong to the resolved object's shape.
+	src := "def f(m):\n    return m.nonexistent.chain\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	for _, d := range diags {
+		if strings.Contains(d.Message, "unknown name \"nonexistent\"") ||
+			strings.Contains(d.Message, "unknown name \"chain\"") {
+			t.Errorf("dot field should not be checked: %q", d.Message)
+		}
+	}
+}
+
+func TestUnboundKeywordArgNameNotChecked(t *testing.T) {
+	// In `scale(x=1, factor=2)`, `x`/`factor` are param names on the
+	// callee, not local reads. They must not be flagged.
+	src := "def main():\n    scale(x=1, factor=2)\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown name \"x\""); d != nil {
+		t.Errorf("kwarg name must not be flagged: %q", d.Message)
+	}
+	if d := findTypeDiag(diags, "unknown name \"factor\""); d != nil {
+		t.Errorf("kwarg name must not be flagged: %q", d.Message)
+	}
+}
+
+func TestUnboundOnlyRunsWithProvider(t *testing.T) {
+	// Without a provider we have no authoritative cross-program name set,
+	// so the pass should stay silent to avoid false positives.
+	src := "def f():\n    return totally_unknown\n"
+	diags := Analyze(src, "starlark")
+	for _, d := range diags {
+		if strings.Contains(d.Message, "unknown name") {
+			t.Errorf("unbound pass must not run without provider: %q", d.Message)
+		}
+	}
+}
+
 func TestReturnTypeWalksControlFlow(t *testing.T) {
 	// `return` inside `if` still belongs to the enclosing def.
 	src := "def main() -> bool:\n" +

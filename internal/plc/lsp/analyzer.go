@@ -73,6 +73,7 @@ func analyzeStarlark(source string, provider SymbolProvider, currentProgram stri
 	if file != nil && provider != nil {
 		diags = append(diags, analyzeCallSites(file, provider, currentProgram)...)
 		diags = append(diags, analyzeReturnTypes(file, sigs, provider, currentProgram)...)
+		diags = append(diags, analyzeUnboundNames(file, provider)...)
 	}
 	return diags
 }
