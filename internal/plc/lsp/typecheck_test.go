@@ -256,3 +256,82 @@ func TestTypeCheckSkipsWhenActualAny(t *testing.T) {
 		t.Errorf("should not flag when actual is any, got %q", d.Message)
 	}
 }
+
+// ─── Return type checking ──────────────────────────────────────────────────
+
+func TestReturnTypeFlagsPrimitiveMismatch(t *testing.T) {
+	src := "def main() -> bool:\n    return 42\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "return type mismatch"); d == nil {
+		t.Fatalf("expected return type mismatch, got %+v", diags)
+	}
+}
+
+func TestReturnTypeAcceptsMatchingPrimitive(t *testing.T) {
+	src := "def main() -> bool:\n    return True\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "return type mismatch"); d != nil {
+		t.Errorf("did not expect mismatch, got %q", d.Message)
+	}
+}
+
+func TestReturnTypeFlagsUnknownDictKey(t *testing.T) {
+	// "speed" is valid on Motor; "velocity" is not — the typo should flag.
+	src := "def build() -> Motor:\n    return {\"speed\": 10, \"velocity\": 5}\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown field"); d == nil {
+		t.Fatalf("expected unknown field diagnostic, got %+v", diags)
+	}
+}
+
+func TestReturnTypeAcceptsValidDictKeys(t *testing.T) {
+	src := "def build() -> Motor:\n    return {\"speed\": 10, \"running\": True}\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "unknown field"); d != nil {
+		t.Errorf("did not expect unknown field, got %q", d.Message)
+	}
+	if d := findTypeDiag(diags, "return type mismatch"); d != nil {
+		t.Errorf("did not expect mismatch, got %q", d.Message)
+	}
+}
+
+func TestReturnTypeFlagsMissingValueForNonNone(t *testing.T) {
+	src := "def main() -> bool:\n    return\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "return value missing"); d == nil {
+		t.Fatalf("expected missing return value diagnostic, got %+v", diags)
+	}
+}
+
+func TestReturnTypeAcceptsBareReturnForOptional(t *testing.T) {
+	src := "def main() -> Optional[bool]:\n    return\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "return value missing"); d != nil {
+		t.Errorf("Optional should allow bare return, got %q", d.Message)
+	}
+}
+
+func TestReturnTypeNestedDefHasOwnScope(t *testing.T) {
+	// Inner def returns a number; its declared return is number. Outer def
+	// declares bool. The inner's return must not be attributed to outer.
+	src := "def outer() -> bool:\n" +
+		"    def inner() -> number:\n" +
+		"        return 5\n" +
+		"    return True\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "return type mismatch"); d != nil {
+		t.Errorf("nested def return must not bleed to outer, got %q", d.Message)
+	}
+}
+
+func TestReturnTypeWalksControlFlow(t *testing.T) {
+	// `return` inside `if` still belongs to the enclosing def.
+	src := "def main() -> bool:\n" +
+		"    if True:\n" +
+		"        return 99\n" +
+		"    return True\n"
+	diags := AnalyzeWithProvider(src, "starlark", newTypedProvider(), "")
+	if d := findTypeDiag(diags, "return type mismatch"); d == nil {
+		t.Fatalf("expected mismatch for `return 99` inside if, got %+v", diags)
+	}
+}

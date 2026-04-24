@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/joyautomation/tentacle/internal/plc"
 	"go.starlark.net/syntax"
 )
 
@@ -704,4 +705,170 @@ func typeMismatchDiag(param *FunctionParam, arg syntax.Expr, env *typeEnv) (Diag
 		param.Name, expected.String(), actual.String(),
 	)
 	return rangeDiag(int(start.Line), int(start.Col)-1, int(end.Line), int(end.Col)-1, msg), true
+}
+
+// ─── Return type checking ──────────────────────────────────────────────────
+
+// analyzeReturnTypes walks each annotated `def` and compares the type of
+// every `return <expr>` in its body against the declared return type.
+// Nested def scopes are handled independently — a return inside an inner
+// def is attributed to the inner def's declared return type, not the
+// enclosing one.
+//
+// Dict-literal returns against a template get a targeted key check: each
+// literal key is compared to the template's field names, so typos like
+// `{"vale": ...}` against `-> Analog:` surface as "unknown field".
+func analyzeReturnTypes(file *syntax.File, sigs []plc.DefSignature, provider SymbolProvider, currentProgram string) []Diagnostic {
+	if file == nil || len(sigs) == 0 {
+		return nil
+	}
+	env := newTypeEnv(file, provider, currentProgram)
+
+	// There may be multiple defs with the same name (rare, but nested
+	// redefinition is legal in Starlark). Match sigs to AST nodes in
+	// declaration order so each def gets its own return type.
+	sigQueue := map[string][]plc.DefSignature{}
+	for _, s := range sigs {
+		sigQueue[s.Name] = append(sigQueue[s.Name], s)
+	}
+
+	var diags []Diagnostic
+	var visit func(stmts []syntax.Stmt)
+	visit = func(stmts []syntax.Stmt) {
+		for _, stmt := range stmts {
+			def, ok := stmt.(*syntax.DefStmt)
+			if !ok || def.Name == nil {
+				if blk, ok := containerBody(stmt); ok {
+					visit(blk)
+				}
+				continue
+			}
+			// Pop the next sig matching this def's name.
+			var sig plc.DefSignature
+			haveSig := false
+			if q := sigQueue[def.Name.Name]; len(q) > 0 {
+				sig = q[0]
+				sigQueue[def.Name.Name] = q[1:]
+				haveSig = true
+			}
+			if haveSig && sig.HasReturn {
+				expected := ParseTypeAnnotation(sig.ReturnType)
+				if expected.Kind != TypeAny {
+					diags = append(diags, checkDefReturns(def, expected, env, provider)...)
+				}
+			}
+			visit(def.Body)
+		}
+	}
+	visit(file.Stmts)
+	return diags
+}
+
+// checkDefReturns emits diagnostics for every `return` in def's body that
+// belongs to def's own scope. Nested defs are skipped — their returns
+// target their own declared types.
+func checkDefReturns(def *syntax.DefStmt, expected TypeExpr, env *typeEnv, provider SymbolProvider) []Diagnostic {
+	var diags []Diagnostic
+	for _, stmt := range def.Body {
+		syntax.Walk(stmt, func(n syntax.Node) bool {
+			if d, ok := n.(*syntax.DefStmt); ok && d != def {
+				return false
+			}
+			if r, ok := n.(*syntax.ReturnStmt); ok {
+				diags = append(diags, checkReturnStmt(r, expected, env, provider)...)
+			}
+			return true
+		})
+	}
+	return diags
+}
+
+// checkReturnStmt compares one return statement against the declared
+// return type. Returns diagnostics; empty slice when the return is valid
+// or the check can't produce a confident verdict.
+func checkReturnStmt(ret *syntax.ReturnStmt, expected TypeExpr, env *typeEnv, provider SymbolProvider) []Diagnostic {
+	if ret.Result == nil {
+		if IsAssignable(expected, noneType()) {
+			return nil
+		}
+		start, end := ret.Span()
+		return []Diagnostic{rangeDiag(
+			int(start.Line), int(start.Col),
+			int(end.Line), int(end.Col),
+			fmt.Sprintf("return value missing: expected %s", expected.String()),
+		)}
+	}
+	// Specialized check: dict literal returned where a template is expected
+	// — verify each key matches a template field.
+	if expected.Kind == TypeTemplate && provider != nil {
+		if dict, ok := ret.Result.(*syntax.DictExpr); ok {
+			if tmpl := provider.Template(expected.Name); tmpl != nil {
+				return checkDictAgainstTemplate(dict, tmpl)
+			}
+		}
+	}
+	actual := env.inferExpr(ret.Result)
+	if actual.Kind == TypeAny {
+		return nil
+	}
+	if IsAssignable(expected, actual) {
+		return nil
+	}
+	start, end := ret.Result.Span()
+	return []Diagnostic{rangeDiag(
+		int(start.Line), int(start.Col),
+		int(end.Line), int(end.Col),
+		fmt.Sprintf("return type mismatch: expected %s, got %s", expected.String(), actual.String()),
+	)}
+}
+
+// checkDictAgainstTemplate flags dict keys that don't correspond to a
+// field on the template. Dynamic (non-literal) keys are ignored — they
+// could resolve to anything at runtime.
+func checkDictAgainstTemplate(dict *syntax.DictExpr, tmpl *TemplateInfo) []Diagnostic {
+	fieldSet := make(map[string]bool, len(tmpl.Fields))
+	for _, f := range tmpl.Fields {
+		fieldSet[f.Name] = true
+	}
+	var diags []Diagnostic
+	for _, entry := range dict.List {
+		de, ok := entry.(*syntax.DictEntry)
+		if !ok {
+			continue
+		}
+		lit, ok := de.Key.(*syntax.Literal)
+		if !ok || lit.Token != syntax.STRING {
+			continue
+		}
+		keyName, ok := lit.Value.(string)
+		if !ok || keyName == "" {
+			continue
+		}
+		if fieldSet[keyName] {
+			continue
+		}
+		start, end := de.Key.Span()
+		diags = append(diags, rangeDiag(
+			int(start.Line), int(start.Col),
+			int(end.Line), int(end.Col),
+			fmt.Sprintf("unknown field %q: template %q has no field by that name", keyName, tmpl.Name),
+		))
+	}
+	return diags
+}
+
+// containerBody returns the child statement list of a compound statement
+// so we can recurse into nested defs that live inside control flow.
+func containerBody(stmt syntax.Stmt) ([]syntax.Stmt, bool) {
+	switch s := stmt.(type) {
+	case *syntax.IfStmt:
+		body := append([]syntax.Stmt{}, s.True...)
+		body = append(body, s.False...)
+		return body, true
+	case *syntax.ForStmt:
+		return s.Body, true
+	case *syntax.WhileStmt:
+		return s.Body, true
+	}
+	return nil, false
 }

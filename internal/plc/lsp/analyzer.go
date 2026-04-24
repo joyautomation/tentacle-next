@@ -46,8 +46,10 @@ func analyzeStarlark(source string, provider SymbolProvider, currentProgram stri
 	}
 	// Strip Python-style annotations so Starlark's parser doesn't complain
 	// about them. Byte offsets are preserved, so any diagnostics the parser
-	// produces still land at the user's original caret.
-	source, _ = plc.StripAnnotations(source)
+	// produces still land at the user's original caret. The extracted
+	// signatures carry the return-type annotations (blanked from source),
+	// which the return-type checker needs.
+	source, sigs := plc.StripAnnotations(source)
 	var parserDiags []Diagnostic
 	file, err := syntax.Parse("program.star", source, 0)
 	if err != nil {
@@ -70,6 +72,7 @@ func analyzeStarlark(source string, provider SymbolProvider, currentProgram stri
 	// succeeded (file != nil) and there's a provider to ask.
 	if file != nil && provider != nil {
 		diags = append(diags, analyzeCallSites(file, provider, currentProgram)...)
+		diags = append(diags, analyzeReturnTypes(file, sigs, provider, currentProgram)...)
 	}
 	return diags
 }
