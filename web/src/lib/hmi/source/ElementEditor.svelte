@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ExpansionPanel from '$lib/components/ExpansionPanel.svelte';
+
   interface Props {
     /** Selected element index (null = nothing selected). */
     idx: number | null;
@@ -11,8 +13,7 @@
   let { idx, anchors, onAnchorChange, onClear }: Props = $props();
 </script>
 
-<details class="element-editor" open>
-  <summary class="hdr"><span class="h3">Element</span></summary>
+<ExpansionPanel title="Element">
   <div class="body">
     {#if idx === null}
       <p class="hint">Click an element in the preview to select it.</p>
@@ -49,44 +50,13 @@
       <p class="hint">Toggling re-pins the element from its current position so it stays put visually.</p>
     {/if}
   </div>
-</details>
+</ExpansionPanel>
 
 <style lang="scss">
-  .element-editor {
-    background: var(--theme-surface);
-    border: 1px solid var(--theme-border);
-    border-radius: var(--rounded-md);
-    overflow: hidden;
-  }
-  .hdr {
-    list-style: none;
-    cursor: pointer;
-    padding: 0.5rem 0.75rem;
-    user-select: none;
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    &::-webkit-details-marker { display: none; }
-    &::before {
-      content: '▸';
-      font-size: 0.625rem;
-      color: var(--theme-text-muted);
-      transition: transform 0.12s ease;
-    }
-    .h3 {
-      font-size: 0.6875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--theme-text-muted);
-      font-weight: 600;
-    }
-  }
-  .element-editor[open] > .hdr::before { transform: rotate(90deg); }
   .body {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    padding: 0 0.75rem 0.75rem;
   }
   .top {
     display: flex;

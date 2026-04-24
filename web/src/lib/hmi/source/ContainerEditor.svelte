@@ -1,5 +1,6 @@
 <script lang="ts">
   import { slide } from 'svelte/transition';
+  import ExpansionPanel from '$lib/components/ExpansionPanel.svelte';
 
   interface Props {
     props: Record<string, string>;
@@ -35,9 +36,7 @@
   }
 </script>
 
-<details class="container-editor" open>
-  <summary class="hdr"><span class="h3">Container</span></summary>
-
+<ExpansionPanel title="Container">
   <div class="body">
   <div class="row">
     <label for="ce-position">position</label>
@@ -153,44 +152,13 @@
     <p class="hint">Applied as inline <code>style</code> on the wrapper.</p>
   </div>
   </div>
-</details>
+</ExpansionPanel>
 
 <style lang="scss">
-  .container-editor {
-    background: var(--theme-surface);
-    border: 1px solid var(--theme-border);
-    border-radius: var(--rounded-md);
-    overflow: hidden;
-  }
-  .hdr {
-    list-style: none;
-    cursor: pointer;
-    padding: 0.5rem 0.75rem;
-    user-select: none;
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    &::-webkit-details-marker { display: none; }
-    &::before {
-      content: '▸';
-      font-size: 0.625rem;
-      color: var(--theme-text-muted);
-      transition: transform 0.12s ease;
-    }
-    .h3 {
-      font-size: 0.6875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--theme-text-muted);
-      font-weight: 600;
-    }
-  }
-  .container-editor[open] > .hdr::before { transform: rotate(90deg); }
   .body {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    padding: 0 0.75rem 0.75rem;
   }
   .subgroup {
     display: flex;

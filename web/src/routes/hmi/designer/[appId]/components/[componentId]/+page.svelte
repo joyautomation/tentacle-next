@@ -5,6 +5,7 @@
   import { ChevronLeft, ChevronRight } from '@joyautomation/salt/icons';
   import { getHmiApp, putHmiComponent, listHmiUdts } from '$lib/api/hmi';
   import { createDesignerLayout } from '$lib/hmi/designer/designer-layout.svelte';
+  import ExpansionPanel from '$lib/components/ExpansionPanel.svelte';
   import ClassRail from '$lib/hmi/styles/ClassRail.svelte';
   import ClassEditor from '$lib/hmi/styles/ClassEditor.svelte';
   import HtmlPalette from '$lib/hmi/source/HtmlPalette.svelte';
@@ -579,53 +580,54 @@
                   </header>
                   <div class="panel-body right-rail">
                     {#if inUdtMode}
-                      <details class="udt-info" open>
-                        <summary>UDT members</summary>
-                        {#if instances.length > 0}
-                          <div class="instance-picker">
-                            <label for="udt-instance-pick">preview instance</label>
-                            <select id="udt-instance-pick" bind:value={selectedInstanceKey}>
-                              {#each instances as inst (instanceKey(inst))}
-                                <option value={instanceKey(inst)}>{inst.tag || inst.id} ({inst.gatewayId})</option>
-                              {/each}
-                            </select>
-                          </div>
-                        {:else}
-                          <p class="hint no-inst">No live instances reported — preview uses mock values.</p>
-                        {/if}
-                        <p class="hint">Drag a member onto an element in the preview to insert <code>{'{udt.member}'}</code>.</p>
-                        <ul>
-                          {#each members as m (m.name)}
-                            {@const live = liveUdt && typeof liveUdt === 'object' ? (liveUdt as Record<string, unknown>)[m.name] : undefined}
-                            <li
-                              draggable="true"
-                              ondragstart={(e) => {
-                                if (!e.dataTransfer) return;
-                                e.dataTransfer.setData('application/x-hmi-udt-member', JSON.stringify({ name: m.name }));
-                                e.dataTransfer.setData('text/plain', `{udt.${m.name}}`);
-                                e.dataTransfer.effectAllowed = 'copy';
-                              }}
-                            >
-                              <code>udt.{m.name}</code>
-                              <span class="dt">{m.datatype}</span>
-                              {#if selectedInstanceKey}
-                                <span class="val" class:missing={live === undefined}>
-                                  {live === undefined ? '—' : String(live)}
-                                </span>
-                              {/if}
-                            </li>
-                          {/each}
-                        </ul>
-                        {#if selectedInstanceKey && liveUdt === undefined}
-                          <p class="hint warn">
-                            No live data for <code>{selectedInstanceKey}</code> yet. Either the gateway hasn't published, or the instance key doesn't match the stream's <code>{'{moduleId}/{variableId}'}</code>.
-                          </p>
-                        {:else if selectedInstanceKey && liveUdt && typeof liveUdt === 'object'}
-                          <p class="hint">
-                            live keys: <code>{Object.keys(liveUdt as Record<string, unknown>).join(', ') || '(empty)'}</code>
-                          </p>
-                        {/if}
-                      </details>
+                      <div class="udt-info">
+                        <ExpansionPanel title="UDT members" count={members.length || undefined}>
+                          {#if instances.length > 0}
+                            <div class="instance-picker">
+                              <label for="udt-instance-pick">preview instance</label>
+                              <select id="udt-instance-pick" bind:value={selectedInstanceKey}>
+                                {#each instances as inst (instanceKey(inst))}
+                                  <option value={instanceKey(inst)}>{inst.tag || inst.id} ({inst.gatewayId})</option>
+                                {/each}
+                              </select>
+                            </div>
+                          {:else}
+                            <p class="hint no-inst">No live instances reported — preview uses mock values.</p>
+                          {/if}
+                          <p class="hint">Drag a member onto an element in the preview to insert <code>{'{udt.member}'}</code>.</p>
+                          <ul>
+                            {#each members as m (m.name)}
+                              {@const live = liveUdt && typeof liveUdt === 'object' ? (liveUdt as Record<string, unknown>)[m.name] : undefined}
+                              <li
+                                draggable="true"
+                                ondragstart={(e) => {
+                                  if (!e.dataTransfer) return;
+                                  e.dataTransfer.setData('application/x-hmi-udt-member', JSON.stringify({ name: m.name }));
+                                  e.dataTransfer.setData('text/plain', `{udt.${m.name}}`);
+                                  e.dataTransfer.effectAllowed = 'copy';
+                                }}
+                              >
+                                <code>udt.{m.name}</code>
+                                <span class="dt">{m.datatype}</span>
+                                {#if selectedInstanceKey}
+                                  <span class="val" class:missing={live === undefined}>
+                                    {live === undefined ? '—' : String(live)}
+                                  </span>
+                                {/if}
+                              </li>
+                            {/each}
+                          </ul>
+                          {#if selectedInstanceKey && liveUdt === undefined}
+                            <p class="hint warn">
+                              No live data for <code>{selectedInstanceKey}</code> yet. Either the gateway hasn't published, or the instance key doesn't match the stream's <code>{'{moduleId}/{variableId}'}</code>.
+                            </p>
+                          {:else if selectedInstanceKey && liveUdt && typeof liveUdt === 'object'}
+                            <p class="hint">
+                              live keys: <code>{Object.keys(liveUdt as Record<string, unknown>).join(', ') || '(empty)'}</code>
+                            </p>
+                          {/if}
+                        </ExpansionPanel>
+                      </div>
                     {/if}
                     <ContainerEditor
                       props={containerProps}
@@ -930,33 +932,7 @@
     background: var(--theme-surface);
   }
   .udt-info {
-    background: var(--theme-surface);
-    border: 1px solid var(--theme-border);
-    border-radius: var(--rounded-md);
-    padding: 0 0.75rem 0.75rem;
     font-size: 0.75rem;
-    summary {
-      list-style: none;
-      cursor: pointer;
-      user-select: none;
-      color: var(--theme-text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-size: 0.6875rem;
-      font-weight: 600;
-      margin: 0 -0.75rem 0.5rem;
-      padding: 0.5rem 0.75rem;
-      display: flex;
-      align-items: center;
-      gap: 0.375rem;
-      &::-webkit-details-marker { display: none; }
-      &::before {
-        content: '▸';
-        font-size: 0.625rem;
-        transition: transform 0.12s ease;
-      }
-    }
-    &[open] > summary::before { transform: rotate(90deg); }
     .hint {
       margin: 0.5rem 0 0.25rem;
       color: var(--theme-text-muted);
