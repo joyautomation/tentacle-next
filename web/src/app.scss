@@ -190,6 +190,22 @@
   }
 }
 
+// Hint the browser which form-control palette to use for native widgets
+// (number spinners, date pickers, default scrollbars). Tied to the
+// user's theme choice rather than the OS.
+.themeDark {
+  color-scheme: dark;
+}
+.themeLight {
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  .themeSystem { color-scheme: dark; }
+}
+@media (prefers-color-scheme: light) {
+  .themeSystem { color-scheme: light; }
+}
+
 // Dark theme tentacle overrides
 .themeDark {
   --theme-surface: var(--gray-900);
