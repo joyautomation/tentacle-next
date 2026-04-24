@@ -476,9 +476,11 @@
                       <div class="preview-frame-wrap">
                         <div
                           class="preview-frame"
+                          class:fluid-w={previewWidth === null}
+                          class:fluid-h={previewHeight === null}
                           bind:this={previewFrameEl}
-                          style:width={previewWidth ? `${previewWidth}px` : '100%'}
-                          style:height={previewHeight ? `${previewHeight}px` : '100%'}
+                          style:width={previewWidth ? `${previewWidth}px` : undefined}
+                          style:height={previewHeight ? `${previewHeight}px` : undefined}
                         >
                           <SveltePreview
                             {source}
@@ -830,14 +832,27 @@
   }
   .preview-frame-wrap {
     flex: 1;
+    min-width: 0;
     min-height: 0;
-    overflow: hidden;
+    overflow: auto;
     position: relative;
+    display: flex;
+    flex-direction: column;
   }
   .preview-frame {
     position: relative;
-    max-width: 100%;
-    max-height: 100%;
+    box-sizing: border-box;
+    align-self: flex-start;
+    &.fluid-w {
+      align-self: stretch;
+      width: auto;
+      min-width: 0;
+    }
+    &.fluid-h {
+      flex: 1 1 0;
+      min-height: 0;
+      height: auto;
+    }
   }
   .resize-handle {
     position: absolute;
