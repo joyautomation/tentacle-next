@@ -260,7 +260,11 @@ func evalExpr(ctx *EvalCtx, e Expr) (Value, error) {
 	case *SlotRef:
 		return ctx.Frame.Slots[n.Slot], nil
 	case *GlobalRef:
-		return ctx.Host.ReadGlobal(n.Name)
+		v, err := ctx.Host.ReadGlobal(n.Name)
+		if err != nil {
+			return Value{}, err
+		}
+		return coerceValue(v, n.T), nil
 	case *BinOp:
 		l, err := evalExpr(ctx, n.L)
 		if err != nil {
@@ -410,4 +414,50 @@ func asFloat(v Value) float64 {
 		return v.F
 	}
 	return float64(v.I)
+}
+
+// coerceValue narrows a host-supplied Value to the IR-declared type t.
+// The host doesn't know which static type a program assigned to a global,
+// so we may receive (e.g.) a Real for an INT-declared var. This function
+// reconciles Kind, falling back to Zero(t) when coercion isn't sensible.
+func coerceValue(v Value, t *Type) Value {
+	if t == nil || v.Kind == t.Kind {
+		return v
+	}
+	switch t.Kind {
+	case TypeInt, TypeTime:
+		switch v.Kind {
+		case TypeInt, TypeTime:
+			return Value{Kind: t.Kind, I: v.I}
+		case TypeReal:
+			return Value{Kind: t.Kind, I: int64(v.F)}
+		case TypeBool:
+			if v.B {
+				return Value{Kind: t.Kind, I: 1}
+			}
+			return Value{Kind: t.Kind}
+		}
+	case TypeReal:
+		switch v.Kind {
+		case TypeInt, TypeTime:
+			return RealVal(float64(v.I))
+		case TypeBool:
+			if v.B {
+				return RealVal(1)
+			}
+			return RealVal(0)
+		}
+	case TypeBool:
+		switch v.Kind {
+		case TypeInt, TypeTime:
+			return BoolVal(v.I != 0)
+		case TypeReal:
+			return BoolVal(v.F != 0)
+		}
+	case TypeString:
+		if v.Kind == TypeString {
+			return v
+		}
+	}
+	return Zero(t)
 }

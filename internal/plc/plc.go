@@ -234,10 +234,16 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 			m.log.Error("plc: failed to parse updated program", "program", key, "error", err)
 			return
 		}
-		if eng.Source(prog.Name) == prog.Source {
-			return // pending-only write or no-op: live source unchanged
+		if isSTProgram(&prog) {
+			if eng.STSource(prog.Name) == prog.StSource {
+				return // pending-only write or no-op
+			}
+		} else {
+			if eng.Source(prog.Name) == prog.Source {
+				return // pending-only write or no-op
+			}
 		}
-		if err := eng.Compile(prog.Name, prog.Source); err != nil {
+		if err := compileProgram(eng, &prog); err != nil {
 			m.log.Error("plc: failed to recompile program", "program", prog.Name, "error", err)
 			return
 		}
@@ -530,7 +536,7 @@ func (m *Module) applyConfig(config *itypes.PlcConfigKV) {
 			m.log.Error("plc: failed to parse program", "program", key, "error", err)
 			continue
 		}
-		if err := m.engine.Compile(prog.Name, prog.Source); err != nil {
+		if err := compileProgram(m.engine, &prog); err != nil {
 			m.log.Error("plc: failed to compile program", "program", prog.Name, "error", err)
 			continue
 		}
@@ -932,4 +938,22 @@ func (m *Module) handleTaskStatsRequest(reply bus.ReplyFunc) {
 		return
 	}
 	reply(data)
+}
+
+// isSTProgram reports whether prog should be dispatched to the IR/ST engine.
+// A program is ST when its Language is "st" and StSource is non-empty;
+// missing StSource falls back to the Starlark path so older entries that
+// stored only generated Source still run.
+func isSTProgram(prog *itypes.PlcProgramKV) bool {
+	return prog != nil && prog.Language == "st" && prog.StSource != ""
+}
+
+// compileProgram compiles prog onto eng, dispatching to CompileST for ST
+// programs and Compile for everything else. Centralised so the loader and
+// the KV-watcher follow the same rule.
+func compileProgram(eng *Engine, prog *itypes.PlcProgramKV) error {
+	if isSTProgram(prog) {
+		return eng.CompileST(prog.Name, prog.StSource)
+	}
+	return eng.Compile(prog.Name, prog.Source)
 }

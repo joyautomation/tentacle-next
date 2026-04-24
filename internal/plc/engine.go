@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/joyautomation/tentacle/internal/plc/ir"
+	"github.com/joyautomation/tentacle/internal/plc/st"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
@@ -18,9 +20,12 @@ import (
 type Engine struct {
 	mu         sync.RWMutex
 	programs   map[string]*compiledProgram
+	stPrograms map[string]*ir.Program // language=="st" programs run on the IR VM
+	stSources  map[string]string      // raw ST source per program, for change-detection
 	sources    map[string]string
 	builtins   starlark.StringDict
 	vars       *VariableStore
+	host       ir.Host // shared host adapter for all ST programs
 	templates  map[string]*itypes.PlcTemplate
 	deviceTags *DeviceTagCache
 	log        *slog.Logger
@@ -60,6 +65,10 @@ type TaskState struct {
 	// thread is reused across scans to avoid allocating a fresh
 	// starlark.Thread per tick. Lazily initialised by Engine.Execute.
 	thread *starlark.Thread
+
+	// stFrame retains slot values across scans for ST programs.
+	// Lazily allocated on first scan via NewFrame, then reused.
+	stFrame *ir.Frame
 }
 
 // TimerState tracks a timer's persistent state.
@@ -93,11 +102,14 @@ func NewTaskState() *TaskState {
 // NewEngine creates a new Starlark execution engine.
 func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 	e := &Engine{
-		programs:  make(map[string]*compiledProgram),
-		sources:   make(map[string]string),
-		vars:      vars,
-		templates: make(map[string]*itypes.PlcTemplate),
-		log:       log,
+		programs:   make(map[string]*compiledProgram),
+		stPrograms: make(map[string]*ir.Program),
+		stSources:  make(map[string]string),
+		sources:    make(map[string]string),
+		vars:       vars,
+		host:       newIRHost(vars),
+		templates:  make(map[string]*itypes.PlcTemplate),
+		log:        log,
 	}
 	e.builtins = e.makeBuiltins()
 	return e
@@ -111,8 +123,45 @@ func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 func (e *Engine) Compile(name, source string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// A name can only live in one engine at a time. If this program
+	// previously ran as ST, drop the IR copy before compiling Starlark.
+	delete(e.stPrograms, name)
 	e.sources[name] = source
 	return e.compileAllLocked(name)
+}
+
+// CompileST parses, type-checks, and lowers an IEC 61131-3 Structured Text
+// source into the typed IR. The resulting *ir.Program is cached under name
+// and dispatched by Execute when the matching task fires. Like Compile,
+// CompileST is mutually exclusive with the Starlark slot for that name.
+func (e *Engine) CompileST(name, source string) error {
+	prog, err := st.Parse(source)
+	if err != nil {
+		return fmt.Errorf("parse st %s: %w", name, err)
+	}
+	if prog.Name == "" {
+		prog.Name = name
+	}
+	irProg, err := st.Lower(prog)
+	if err != nil {
+		return fmt.Errorf("lower st %s: %w", name, err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.programs, name)
+	delete(e.sources, name)
+	e.stPrograms[name] = irProg
+	e.stSources[name] = source
+	return nil
+}
+
+// STSource returns the most recently compiled ST source for name, or "" if
+// the program isn't currently registered as an ST program. Mirrors Source
+// for the ST path so the KV-watcher can skip no-op updates.
+func (e *Engine) STSource(name string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.stSources[name]
 }
 
 // Remove deletes a compiled program and recompiles the rest so any
@@ -122,6 +171,8 @@ func (e *Engine) Remove(name string) {
 	defer e.mu.Unlock()
 	delete(e.sources, name)
 	delete(e.programs, name)
+	delete(e.stPrograms, name)
+	delete(e.stSources, name)
 	_ = e.compileAllLocked("")
 }
 
@@ -247,13 +298,26 @@ func extractTopLevelDefs(source string) ([]string, error) {
 
 // Execute runs a named top-level function in a compiled program with the given
 // TaskState. fnName defaults to "main" when empty for backwards compatibility.
+//
+// ST programs ignore fnName: the entire program body is the entry point and
+// runs against state.stFrame, which retains slot values across scans.
 func (e *Engine) Execute(name, fnName string, state *TaskState) error {
 	if fnName == "" {
 		fnName = "main"
 	}
 	e.mu.RLock()
+	stProg, isST := e.stPrograms[name]
 	prog, ok := e.programs[name]
 	e.mu.RUnlock()
+	if isST {
+		if state.stFrame == nil {
+			state.stFrame = ir.NewFrame(stProg)
+		}
+		if err := ir.Run(stProg, state.stFrame, e.host); err != nil {
+			return fmt.Errorf("execute %s: %w", name, err)
+		}
+		return nil
+	}
 	if !ok {
 		return fmt.Errorf("execute: program %q not found", name)
 	}
@@ -299,11 +363,15 @@ func (e *Engine) EntryFunctions(name string) []string {
 	return out
 }
 
-// HasProgram returns true if a program with the given name is compiled.
+// HasProgram returns true if a program with the given name is compiled,
+// regardless of which engine (Starlark or ST/IR) owns it.
 func (e *Engine) HasProgram(name string) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	_, ok := e.programs[name]
+	if _, ok := e.programs[name]; ok {
+		return true
+	}
+	_, ok := e.stPrograms[name]
 	return ok
 }
 
