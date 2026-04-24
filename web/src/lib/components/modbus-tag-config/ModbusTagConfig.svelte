@@ -1145,9 +1145,9 @@
 
   .error-banner {
     padding: 1rem;
-    background: color-mix(in srgb, var(--color-red-500, #ef4444) 10%, transparent);
-    color: var(--color-red-500, #ef4444);
-    border-bottom: 1px solid var(--color-red-500, #ef4444);
+    background: color-mix(in srgb, var(--red-500, #ef4444) 10%, transparent);
+    color: var(--red-500, #ef4444);
+    border-bottom: 1px solid var(--red-500, #ef4444);
     font-size: 0.875rem;
   }
 
@@ -1232,7 +1232,7 @@
     background: none;
 
     &:hover { color: var(--theme-text); }
-    &.danger:hover { color: var(--color-red-500, #ef4444); }
+    &.danger:hover { color: var(--red-500, #ef4444); }
   }
 
   .add-row-btn {
@@ -1409,7 +1409,7 @@
 
   .csv-errors {
     font-size: 0.75rem;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
   }
 
   .csv-error {

@@ -8,6 +8,7 @@ export const SERVICE_NAMES: Record<string, string> = {
   gitops: 'GitOps',
   graphql: 'GraphQL',
   history: 'History',
+  hmi: 'HMI',
   mqtt: 'MQTT',
   nats: 'NATS',
   network: 'Network',

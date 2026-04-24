@@ -598,8 +598,8 @@
     }
 
     &.fail {
-      background: color-mix(in srgb, var(--color-red-500, #ef4444) 10%, transparent);
-      color: var(--color-red-500, #ef4444);
+      background: color-mix(in srgb, var(--red-500, #ef4444) 10%, transparent);
+      color: var(--red-500, #ef4444);
     }
 
     em {
@@ -626,7 +626,7 @@
     color: var(--theme-text-muted);
 
     &.ok { color: var(--badge-green-text); }
-    &.failed { color: var(--color-red-500, #ef4444); }
+    &.failed { color: var(--red-500, #ef4444); }
     &.warning { color: var(--badge-amber-text); }
     &.running { color: var(--theme-text); }
 
@@ -664,9 +664,9 @@
   .error-box {
     margin-top: 0.75rem;
     padding: 0.625rem 0.75rem;
-    background: color-mix(in srgb, var(--color-red-500, #ef4444) 10%, transparent);
-    border: 1px solid var(--color-red-500, #ef4444);
-    color: var(--color-red-500, #ef4444);
+    background: color-mix(in srgb, var(--red-500, #ef4444) 10%, transparent);
+    border: 1px solid var(--red-500, #ef4444);
+    color: var(--red-500, #ef4444);
     font-size: 0.8125rem;
     border-radius: var(--rounded-md);
   }

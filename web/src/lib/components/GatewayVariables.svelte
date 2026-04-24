@@ -828,7 +828,7 @@
     color: var(--theme-text-muted); cursor: pointer; flex-shrink: 0; white-space: nowrap;
     &:hover { border-color: var(--theme-primary); color: var(--theme-text); }
     &.rbe-custom { background: var(--badge-teal-bg); color: var(--badge-teal-text); border-color: var(--badge-teal-text); }
-    &.rbe-disabled { background: color-mix(in srgb, var(--color-red-500, #ef4444) 15%, transparent); color: var(--color-red-500, #ef4444); border-color: var(--color-red-500, #ef4444); }
+    &.rbe-disabled { background: color-mix(in srgb, var(--red-500, #ef4444) 15%, transparent); color: var(--red-500, #ef4444); border-color: var(--red-500, #ef4444); }
     &.rbe-dirty { box-shadow: 0 0 0 1.5px var(--badge-amber-text, #f59e0b); }
   }
 
@@ -992,8 +992,8 @@
 
   .error-box {
     padding: 1rem; border-radius: var(--rounded-lg); background: var(--theme-surface);
-    border: 1px solid var(--color-red-500, #ef4444); margin-bottom: 1.5rem;
-    p { margin: 0; font-size: 0.875rem; color: var(--color-red-500, #ef4444); }
+    border: 1px solid var(--red-500, #ef4444); margin-bottom: 1.5rem;
+    p { margin: 0; font-size: 0.875rem; color: var(--red-500, #ef4444); }
   }
 
   .empty-state { padding: 3rem 2rem; text-align: center; p { color: var(--theme-text-muted); font-size: 0.875rem; } }

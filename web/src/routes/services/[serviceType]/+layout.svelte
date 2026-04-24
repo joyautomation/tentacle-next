@@ -16,6 +16,8 @@
       'workspace', 'trends'
     ];
     for (const s of suffixes) if (path.endsWith(`/${s}`)) return s;
+    if (path.endsWith('/apps') || path.includes('/apps/')) return 'apps';
+    if (path.endsWith('/udts') || path.includes('/udts/')) return 'udts';
     return 'default';
   });
 
@@ -102,6 +104,12 @@
     modbus: [
       { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
       { id: 'tag-config', label: 'Tags', href: `/services/${serviceType}/tag-config` },
+      { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
+    ],
+    hmi: [
+      { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
+      { id: 'apps', label: 'Apps', href: `/services/${serviceType}/apps` },
+      { id: 'udts', label: 'UDTs', href: `/services/${serviceType}/udts` },
       { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
     ]
   });

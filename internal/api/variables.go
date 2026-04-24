@@ -133,7 +133,11 @@ func (m *Module) handleWriteVariable(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStreamVariables streams all variable data changes via SSE.
-// GET /api/v1/variables/stream?moduleId=
+// GET /api/v1/variables/stream?moduleId=&live=true
+//
+// `live=true` subscribes to the gateway's pre-RBE Live subjects so UI
+// consumers (HMI) receive every value the gateway produces, not just the
+// RBE-filtered set destined for historian / MQTT.
 func (m *Module) handleStreamVariables(w http.ResponseWriter, r *http.Request) {
 	sse, ok := newSSEWriter(w)
 	if !ok {
@@ -142,9 +146,18 @@ func (m *Module) handleStreamVariables(w http.ResponseWriter, r *http.Request) {
 	}
 
 	moduleID := r.URL.Query().Get("moduleId")
-	subject := topics.AllData()
-	if moduleID != "" {
+	live := r.URL.Query().Get("live") == "true"
+
+	var subject string
+	switch {
+	case live && moduleID != "":
+		subject = topics.LiveWildcard(moduleID)
+	case live:
+		subject = topics.AllLive()
+	case moduleID != "":
 		subject = topics.DataWildcard(moduleID)
+	default:
+		subject = topics.AllData()
 	}
 
 	sub, err := m.bus.Subscribe(subject, func(_ string, data []byte, _ bus.ReplyFunc) {

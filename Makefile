@@ -2,7 +2,7 @@
 
 # Stable module tags for release builds (excludes experimental modules).
 # Dev builds use "all" which includes everything.
-STABLE_TAGS = stable,api,orchestrator,gateway,ethernetip,snmp,mqtt,network,gitops
+STABLE_TAGS = stable,api,orchestrator,gateway,ethernetip,snmp,mqtt,network,gitops,hmi
 
 # Version injection via ldflags.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)

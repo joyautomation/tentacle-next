@@ -15,6 +15,7 @@
     Squares2x2,
     PlusCircle,
     RocketLaunch,
+    PaintBrush,
     ArrowPath,
     ArrowDownTray,
     ArrowUpTray,
@@ -97,7 +98,7 @@
     'ethernetip-server': 'server',
     'modbus-server': 'server',
     profinet: 'server',
-    mqtt: 'server',
+    mqtt: 'client',
     history: 'data',
     network: 'data',
     nftables: 'data',
@@ -162,7 +163,8 @@
     nftables: ShieldCheck,
     orchestrator: ArrowsRightLeft,
     snmp: ComputerDesktop,
-    opcua: CircleStack
+    opcua: CircleStack,
+    hmi: PaintBrush
   };
 
   /** Map moduleId to an icon */
@@ -311,7 +313,6 @@
         <span>Setup</span>
       </a>
     </li>
-
     {#if uniqueServices.length > 0}
       <li class="sidebar-section-label">Services</li>
       {#each uniqueServices as service}

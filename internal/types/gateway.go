@@ -37,6 +37,12 @@ type GatewayVariableConfig struct {
 	Deadband       *ttypes.DeadBandConfig  `json:"deadband,omitempty"`
 	DisableRBE     bool                    `json:"disableRBE,omitempty"`
 	HistoryEnabled bool                    `json:"historyEnabled,omitempty"`
+	// MqttEnabled gates downstream forwarding to MQTT only. The variable is
+	// always aggregated by the gateway (and emitted on bus subjects) once
+	// it is in the variables map; MQTT is just one optional consumer.
+	// Pointer so a missing field on legacy configs is treated as `true`,
+	// preserving the prior behavior where being in the map implied MQTT.
+	MqttEnabled    *bool                   `json:"mqttEnabled,omitempty"`
 	FunctionCode   *int                    `json:"functionCode,omitempty"`
 	ModbusDatatype string                  `json:"modbusDatatype,omitempty"`
 	ByteOrder      string                  `json:"byteOrder,omitempty"`
@@ -73,6 +79,8 @@ type GatewayUdtVariableConfig struct {
 	Deadband        *ttypes.DeadBandConfig            `json:"deadband,omitempty"`
 	DisableRBE      bool                              `json:"disableRBE,omitempty"`
 	HistoryEnabled  bool                              `json:"historyEnabled,omitempty"`
+	// MqttEnabled gates MQTT forwarding only — see GatewayVariableConfig.
+	MqttEnabled     *bool                             `json:"mqttEnabled,omitempty"`
 	// Modbus-specific per-instance fields.
 	MemberAddresses  map[string]int    `json:"memberAddresses,omitempty"`  // member name → register address
 	MemberByteOrders map[string]string `json:"memberByteOrders,omitempty"` // member name → byte order override

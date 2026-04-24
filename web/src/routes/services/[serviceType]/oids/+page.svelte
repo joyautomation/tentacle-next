@@ -468,13 +468,13 @@
     padding: 1rem;
     border-radius: var(--rounded-lg);
     background: var(--theme-surface);
-    border: 1px solid var(--color-red-500, #ef4444);
+    border: 1px solid var(--red-500, #ef4444);
     margin-bottom: 1.5rem;
 
     p {
       margin: 0;
       font-size: 0.875rem;
-      color: var(--color-red-500, #ef4444);
+      color: var(--red-500, #ef4444);
     }
   }
 

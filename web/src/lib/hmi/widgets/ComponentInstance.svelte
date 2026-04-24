@@ -1,0 +1,128 @@
+<script lang="ts">
+  import type { HmiComponentConfig } from '$lib/types/hmi';
+  import WidgetView from '../WidgetView.svelte';
+  import {
+    getHmiStyleContext,
+    setHmiStyleContext,
+    widgetClassString,
+  } from '../styles/styleContext';
+  import { compileScopedCss } from '../styles/cssScope';
+  import SvelteHost from '../source/SvelteHost.svelte';
+  import { tagStore } from '../tagStore.svelte';
+
+  interface Props {
+    /** Resolved component config (looked up by `componentId` in WidgetView). */
+    component?: HmiComponentConfig;
+    /** Resolved root binding info — gateway emits the full UDT object as the
+     * variable value. We pass it as the `udt` prop into source-mode components,
+     * and pipe it down to nested widgets via setHmiStyleContext for legacy. */
+    udtContext?: { moduleId: string; udtVariable: string };
+    components?: Record<string, HmiComponentConfig>;
+  }
+
+  let { component, udtContext, components }: Props = $props();
+
+  // Inherit the parent style context (app classes), then push a new one with
+  // this component's scope so nested widgets resolve `$classes` against both.
+  const parentCtx = getHmiStyleContext();
+  const prefix = $derived(component ? `cmp-${component.componentId}` : '');
+  const componentClasses = $derived(component?.classes ?? {});
+
+  $effect(() => {
+    if (!component) return;
+    setHmiStyleContext({
+      appClasses: parentCtx.appClasses,
+      component: { prefix, classes: componentClasses },
+    });
+  });
+
+  const isSourceMode = $derived(!!component?.source);
+  const css = $derived.by(() => {
+    const parts: string[] = [];
+    const base = compileScopedCss(
+      componentClasses,
+      prefix,
+      isSourceMode ? 'descendant' : 'compound',
+    );
+    if (base) parts.push(base);
+    // Mirror the editor: when the source-mode container establishes a
+    // positioning context, auto-position direct children so their inline
+    // left/top/right/bottom resolve.
+    if (isSourceMode && prefix) {
+      const pos = component?.containerProps?.position;
+      if (pos === 'absolute' || pos === 'relative') {
+        // Step through SvelteHost's display:contents wrapper — invisible
+        // to layout but a real DOM child for selector purposes.
+        parts.push(`.${prefix} > .svelte-host > * { position: absolute; }`);
+      }
+    }
+    return parts.join('\n\n');
+  });
+
+  // For source-mode components: feed the live UDT object (or undefined) to the
+  // mounted Svelte component as the `udt` prop. The tagStore reactivity flows
+  // through SvelteHost's prop sync.
+  const sourceProps = $derived.by<Record<string, unknown>>(() => {
+    if (!isSourceMode) return {};
+    if (!udtContext) return { udt: undefined };
+    const key = `${udtContext.moduleId}/${udtContext.udtVariable}`;
+    return { udt: tagStore.values[key] };
+  });
+
+  const containerStyle = $derived.by(() => {
+    if (!isSourceMode || !component) return '';
+    const decls: string[] = [];
+    const props = component.containerProps;
+    if (props) {
+      for (const [k, v] of Object.entries(props)) {
+        if (v) decls.push(`${k}: ${v}`);
+      }
+    }
+    const extra = component.containerCss?.trim();
+    if (extra) decls.push(extra.replace(/;$/, ''));
+    return decls.join('; ');
+  });
+</script>
+
+{#if !component}
+  <div class="missing">Component not found</div>
+{:else}
+  {#if css}
+    {@html `<style data-hmi-component=${component.componentId}>${css}</style>`}
+  {/if}
+  {#if isSourceMode}
+    <div class="root source {prefix}" style={containerStyle}>
+      <SvelteHost source={component.source ?? ''} componentProps={sourceProps} />
+    </div>
+  {:else}
+    <div class="root">
+      {#each component.widgets ?? [] as w (w.id)}
+        <div
+          class="slot {widgetClassString(w.props?.$classes, { appClasses: parentCtx.appClasses, component: { prefix, classes: componentClasses } })}"
+          style:left="{w.x}px"
+          style:top="{w.y}px"
+          style:width="{w.w}px"
+          style:height="{w.h}px"
+        >
+          <WidgetView widget={w} {udtContext} {components} />
+        </div>
+      {/each}
+    </div>
+  {/if}
+{/if}
+
+<style lang="scss">
+  .root { position: relative; width: 100%; height: 100%; }
+  .root.source { position: relative; }
+  .slot { position: absolute; }
+  .missing {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--theme-surface);
+    border: 1px dashed var(--theme-border);
+    border-radius: var(--rounded-md);
+    color: var(--theme-text-muted);
+    font-size: 0.75rem;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+</style>

@@ -13,6 +13,10 @@ type PlcDataMessage struct {
 	Deadband        *DeadBandConfig           `json:"deadband,omitempty"`
 	DisableRBE      bool                      `json:"disableRBE,omitempty"`
 	HistoryEnabled  bool                      `json:"historyEnabled,omitempty"`
+	// MqttEnabled gates downstream MQTT forwarding. Pointer so legacy
+	// publishers (no field) are treated as enabled, preserving prior behavior
+	// where being in the gateway aggregate implied MQTT.
+	MqttEnabled     *bool                     `json:"mqttEnabled,omitempty"`
 	UdtTemplate     *UdtTemplateDefinition    `json:"udtTemplate,omitempty"`
 	MemberDeadbands map[string]DeadBandConfig `json:"memberDeadbands,omitempty"`
 }

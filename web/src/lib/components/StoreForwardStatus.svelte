@@ -8,6 +8,10 @@
     state: string;
     primaryHostId: string | null;
     primaryHostOnline: boolean;
+    primaryHostConfigured: boolean;
+    primaryHostSeen: boolean;
+    brokerReachable: boolean;
+    nodeBorn: boolean;
     bufferedCount: number;
     maxRecords: number;
     usagePercent: number;
@@ -23,17 +27,50 @@
   let { initialStatus = null }: { initialStatus?: SFStatus | null } = $props();
 
   let status: SFStatus | null = $state(initialStatus);
+  let loaded = $state(initialStatus !== null);
   let gaugeContainer: SVGSVGElement;
   let timelineContainer: SVGSVGElement;
   let evictionDismissedAt = $state(0); // totalEvicted count when dismissed
+
+  type BannerKind = 'online' | 'waiting' | 'offline' | 'draining' | 'no-broker';
+  type Banner = { kind: BannerKind; title: string; subtitle: string };
+
+  function computeBanner(s: SFStatus): Banner {
+    if (s.draining) {
+      return { kind: 'draining', title: 'Backfilling', subtitle: `~${formatEta(s.drainEtaSeconds)} remaining` };
+    }
+    if (!s.brokerReachable) {
+      return { kind: 'no-broker', title: 'MQTT Broker Unreachable', subtitle: 'Buffering data locally' };
+    }
+    if (!s.nodeBorn) {
+      return { kind: 'no-broker', title: 'Sparkplug Session Not Established', subtitle: 'Buffering until NBIRTH completes' };
+    }
+    if (!s.primaryHostConfigured) {
+      return { kind: 'online', title: 'Publishing Live', subtitle: 'No primary host configured' };
+    }
+    if (!s.primaryHostSeen) {
+      return {
+        kind: 'waiting',
+        title: 'Waiting for Primary Host',
+        subtitle: `Buffering until ${s.primaryHostId ?? 'primary host'} announces ONLINE`,
+      };
+    }
+    if (s.primaryHostOnline) {
+      return { kind: 'online', title: 'Primary Host Online', subtitle: `Publishing live${s.primaryHostId ? ` to ${s.primaryHostId}` : ''}` };
+    }
+    return {
+      kind: 'offline',
+      title: 'Primary Host Offline',
+      subtitle: `Buffering data${s.primaryHostId ? ` (${s.primaryHostId})` : ''}`,
+    };
+  }
 
   async function poll() {
     try {
       const result = await api<SFStatus | null>('/mqtt/store-forward');
       if (result.data) {
         status = result.data;
-        renderGauge();
-        renderTimeline();
+        loaded = true;
       }
     } catch { /* ignore */ }
   }
@@ -42,6 +79,14 @@
     poll();
     const interval = setInterval(poll, 2000);
     return () => clearInterval(interval);
+  });
+
+  // Re-render d3 visuals after the DOM has committed. Using $effect ensures
+  // the svg elements mounted by {#if loaded} have bound refs before d3 runs.
+  $effect(() => {
+    if (!loaded || !status) return;
+    if (gaugeContainer) renderGauge();
+    if (timelineContainer) renderTimeline();
   });
 
   function formatBytes(bytes: number): string {
@@ -62,9 +107,9 @@
   }
 
   function getGaugeColor(pct: number): string {
-    if (pct < 50) return 'var(--color-green-500, #22c55e)';
-    if (pct < 80) return 'var(--color-amber-500, #f59e0b)';
-    return 'var(--color-red-500, #ef4444)';
+    if (pct < 50) return 'var(--green-500, #22c55e)';
+    if (pct < 80) return 'var(--amber-500, #f59e0b)';
+    return 'var(--red-500, #ef4444)';
   }
 
   function renderGauge() {
@@ -202,46 +247,62 @@
   }
 </script>
 
-{#if status}
 <div class="sf-container">
   <div class="sf-main">
     <!-- Buffer Gauge + Publish Rate -->
     <div class="sf-gauges">
       <div class="sf-gauge-wrapper">
-        <svg bind:this={gaugeContainer} class="sf-gauge"></svg>
+        {#if loaded}
+          <svg bind:this={gaugeContainer} class="sf-gauge"></svg>
+        {:else}
+          <div class="sf-gauge sf-skeleton sf-skeleton-gauge" aria-hidden="true"></div>
+        {/if}
         <span class="sf-gauge-label">Buffer</span>
       </div>
       <div class="sf-rate">
-        <span class="sf-rate-value">{status.publishRate.toFixed(1)}</span>
-        <span class="sf-rate-unit">metrics/s</span>
+        {#if loaded && status}
+          <span class="sf-rate-value">{status.publishRate.toFixed(1)}</span>
+          <span class="sf-rate-unit">metrics/s</span>
+        {:else}
+          <span class="sf-rate-value sf-skeleton sf-skeleton-text" aria-hidden="true">&nbsp;&nbsp;&nbsp;&nbsp;</span>
+          <span class="sf-rate-unit">metrics/s</span>
+        {/if}
       </div>
     </div>
 
     <!-- Status + details to the right of gauge -->
     <div class="sf-right">
-      <!-- Host Status Banner -->
-      <div class="sf-banner" class:online={status.primaryHostOnline} class:offline={!status.primaryHostOnline} class:draining={status.draining}>
-        <div class="sf-banner-dot"></div>
-        <div class="sf-banner-text">
-          {#if status.draining}
-            <strong>Backfilling</strong>
-            <span>~{formatEta(status.drainEtaSeconds)} remaining</span>
-          {:else if status.primaryHostOnline}
-            <strong>Primary Host Online</strong>
-            <span>Publishing live</span>
-          {:else}
-            <strong>Primary Host Offline</strong>
-            <span>Buffering data{status.primaryHostId ? ` (${status.primaryHostId})` : ''}</span>
-          {/if}
+      {#if loaded && status}
+        {@const banner = computeBanner(status)}
+        <div
+          class="sf-banner"
+          class:online={banner.kind === 'online'}
+          class:offline={banner.kind === 'offline' || banner.kind === 'no-broker'}
+          class:waiting={banner.kind === 'waiting'}
+          class:draining={banner.kind === 'draining'}
+        >
+          <div class="sf-banner-dot"></div>
+          <div class="sf-banner-text">
+            <strong>{banner.title}</strong>
+            <span>{banner.subtitle}</span>
+          </div>
         </div>
-      </div>
 
-      <!-- Eviction warning -->
-      {#if status.totalEvicted > evictionDismissedAt}
-        <button class="sf-eviction-warning" onclick={() => evictionDismissedAt = status!.totalEvicted}>
-          {(status.totalEvicted - evictionDismissedAt).toLocaleString()} records lost (buffer full) <span class="sf-dismiss">dismiss</span>
-        </button>
+        {#if status.totalEvicted > evictionDismissedAt}
+          <button class="sf-eviction-warning" onclick={() => evictionDismissedAt = status!.totalEvicted}>
+            {(status.totalEvicted - evictionDismissedAt).toLocaleString()} records lost (buffer full) <span class="sf-dismiss">dismiss</span>
+          </button>
+        {/if}
+      {:else}
+        <div class="sf-banner sf-skeleton-banner" aria-hidden="true">
+          <div class="sf-banner-dot sf-skeleton"></div>
+          <div class="sf-banner-text">
+            <strong class="sf-skeleton sf-skeleton-text">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</strong>
+            <span class="sf-skeleton sf-skeleton-text">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+          </div>
+        </div>
       {/if}
+
       <!-- Status Timeline (last hour) -->
       <div class="sf-timeline">
         <div class="sf-timeline-header">
@@ -252,12 +313,15 @@
             <span class="sf-legend-item"><span class="sf-legend-dot" style="background: #38bdf8"></span>Backfilling</span>
           </div>
         </div>
-        <svg bind:this={timelineContainer} class="sf-timeline-svg"></svg>
+        {#if loaded}
+          <svg bind:this={timelineContainer} class="sf-timeline-svg"></svg>
+        {:else}
+          <div class="sf-timeline-svg sf-skeleton" aria-hidden="true"></div>
+        {/if}
       </div>
     </div>
   </div>
 </div>
-{/if}
 
 <style lang="scss">
   .sf-container {
@@ -303,11 +367,51 @@
       .sf-banner-dot { background: #ef4444; box-shadow: 0 0 6px #ef4444; animation: pulse-dot 2s ease-in-out infinite; }
     }
 
+    &.waiting {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      .sf-banner-dot { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; animation: pulse-dot 2s ease-in-out infinite; }
+    }
+
     &.draining {
       background: rgba(56, 189, 248, 0.08);
       border: 1px solid rgba(56, 189, 248, 0.25);
       .sf-banner-dot { background: #38bdf8; box-shadow: 0 0 6px #38bdf8; }
     }
+  }
+
+  .sf-skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--theme-border) 0%,
+      var(--theme-surface-hover, rgba(255, 255, 255, 0.05)) 50%,
+      var(--theme-border) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    border-radius: var(--rounded-md);
+    color: transparent !important;
+  }
+
+  .sf-skeleton-gauge {
+    border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+    opacity: 0.4;
+  }
+
+  .sf-skeleton-text {
+    display: inline-block;
+    border-radius: var(--rounded-sm, 3px);
+  }
+
+  .sf-skeleton-banner {
+    background: var(--theme-surface, transparent);
+    border: 1px solid var(--theme-border);
+    .sf-banner-dot { animation: skeleton-shimmer 1.4s ease-in-out infinite; box-shadow: none; }
+  }
+
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   .sf-banner-dot {
@@ -343,7 +447,7 @@
 
   .sf-drain-fill {
     height: 100%;
-    background: var(--color-sky-400, #38bdf8);
+    background: var(--sky-400, #38bdf8);
     border-radius: 3px;
     transition: width 0.5s ease;
     background-image: repeating-linear-gradient(
@@ -419,7 +523,7 @@
     gap: 0.5rem;
     font-size: 0.6875rem;
     font-family: inherit;
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
     background: none;
     border: none;
     cursor: pointer;

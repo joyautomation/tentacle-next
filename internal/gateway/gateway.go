@@ -696,7 +696,9 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 	sanitizedDevice := types.SanitizeForSubject(deviceID)
 	key := fmt.Sprintf("%s.%s.%s", protocol, sanitizedDevice, sanitizedTag)
 
-	// Route to atomic variables
+	// Route to atomic variables. We always emit on the Live subject (pre-RBE
+	// — for UI consumers like the HMI). The Data subject (historian / MQTT)
+	// is gated by RBE per-variable deadband.
 	if varIDs, ok := g.tagIndex[key]; ok {
 		nowMs := time.Now().UnixMilli()
 		for _, varID := range varIDs {
@@ -705,10 +707,6 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 				continue
 			}
 			tv.Value = value
-
-			if !rbe.ShouldPublish(&tv.rbeState, value, nowMs, tv.Deadband, tv.DisableRBE) {
-				continue
-			}
 
 			dt := datatype
 			if dt == "" {
@@ -733,15 +731,22 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 			if tv.Config.HistoryEnabled {
 				outMsg.HistoryEnabled = true
 			}
+			outMsg.MqttEnabled = tv.Config.MqttEnabled
 
 			data, err := json.Marshal(outMsg)
 			if err != nil {
 				continue
 			}
 
-			pubSubject := topics.Data(g.gatewayID, types.SanitizeForSubject(tv.Config.DeviceID), types.SanitizeForSubject(tv.Config.Tag))
-			_ = g.b.Publish(pubSubject, data)
+			sanDevice := types.SanitizeForSubject(tv.Config.DeviceID)
+			sanTag := types.SanitizeForSubject(tv.Config.Tag)
 
+			_ = g.b.Publish(topics.Live(g.gatewayID, sanDevice, sanTag), data)
+
+			if !rbe.ShouldPublish(&tv.rbeState, value, nowMs, tv.Deadband, tv.DisableRBE) {
+				continue
+			}
+			_ = g.b.Publish(topics.Data(g.gatewayID, sanDevice, sanTag), data)
 			rbe.RecordPublish(&tv.rbeState, value, nowMs)
 		}
 	}

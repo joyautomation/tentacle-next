@@ -76,9 +76,10 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	// Start heartbeat
 	m.stopHeartbeat = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
 		meta := map[string]interface{}{
-			"brokerUrl": cfg.BrokerURL,
-			"clientId":  cfg.ClientID,
-			"connected": false,
+			"brokerUrl":       cfg.BrokerURL,
+			"clientId":        cfg.ClientID,
+			"brokerReachable": false,
+			"connected":       false,
 		}
 		if m.bridge != nil {
 			m.bridge.mu.RLock()
@@ -86,6 +87,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 			meta["clientId"] = m.bridge.config.ClientID
 			m.bridge.mu.RUnlock()
 			if m.bridge.node != nil {
+				meta["brokerReachable"] = m.bridge.node.IsBrokerReachable()
 				meta["connected"] = m.bridge.node.State() == StateBorn
 			}
 			if m.bridge.sf != nil {

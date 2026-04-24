@@ -64,10 +64,10 @@
 	{#if onBatchMqttEnable || onBatchMqttDisable}
 		<div class="batch-mqtt-group">
 			{#if onBatchMqttEnable}
-				<button class="batch-mqtt-btn mqtt-enable" onclick={onBatchMqttEnable}>MQTT All</button>
+				<button class="batch-mqtt-btn mqtt-enable" onclick={onBatchMqttEnable} title="Enable all in gateway">Enable All</button>
 			{/if}
 			{#if onBatchMqttDisable}
-				<button class="batch-mqtt-btn mqtt-disable" onclick={onBatchMqttDisable}>MQTT None</button>
+				<button class="batch-mqtt-btn mqtt-disable" onclick={onBatchMqttDisable} title="Disable all in gateway">Enable None</button>
 			{/if}
 		</div>
 	{/if}

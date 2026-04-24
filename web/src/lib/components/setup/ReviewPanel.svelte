@@ -482,7 +482,7 @@
 
     &.done { color: var(--theme-text); }
     &.running { color: var(--theme-text); }
-    &.error { color: var(--color-red-400, #f87171); }
+    &.error { color: var(--red-400, #f87171); }
   }
 
   .step-icon {
@@ -493,8 +493,8 @@
     align-items: center;
     justify-content: center;
 
-    .done & { color: var(--color-emerald-500, #10b981); }
-    .error & { color: var(--color-red-400, #f87171); }
+    .done & { color: var(--emerald-500, #10b981); }
+    .error & { color: var(--red-400, #f87171); }
     .running & { color: var(--theme-primary); }
   }
 
@@ -506,7 +506,7 @@
 
   .step-error {
     font-size: 0.75rem;
-    color: var(--color-red-400, #f87171);
+    color: var(--red-400, #f87171);
   }
 
   .spinner {

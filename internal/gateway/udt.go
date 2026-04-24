@@ -69,6 +69,12 @@ func (a *UdtAssembler) SetMember(memberName string, value interface{}) {
 }
 
 // publish sends the assembled UDT object via the Bus.
+//
+// Two subjects are emitted:
+//   - Live (always, pre-RBE) — for UI consumers that need every value the
+//     debounced assembler produces.
+//   - Data (RBE-filtered) — for historian / MQTT, where deadbands and
+//     min/max-time gating apply as configured.
 func (a *UdtAssembler) publish() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -78,7 +84,7 @@ func (a *UdtAssembler) publish() {
 	}
 	a.dirty = false
 
-	// Build the assembled value object
+	// Build the assembled value object.
 	assembled := make(map[string]interface{})
 	for _, member := range a.template.Members {
 		if val, ok := a.values[member.Name]; ok {
@@ -88,48 +94,7 @@ func (a *UdtAssembler) publish() {
 
 	nowMs := time.Now().UnixMilli()
 
-	// RBE check
-	if !a.disableRBE && a.lastPubTime > 0 {
-		elapsed := nowMs - a.lastPubTime
-
-		// UDT-level timing: maxTime forces publish, minTime suppresses
-		if a.deadband != nil && a.deadband.MaxTime > 0 && elapsed >= a.deadband.MaxTime {
-			// MaxTime exceeded — force publish regardless
-		} else if a.deadband != nil && a.deadband.MinTime > 0 && elapsed < a.deadband.MinTime {
-			// MinTime not elapsed — suppress and schedule deferred publish
-			remaining := a.deadband.MinTime - elapsed
-			a.dirty = true
-			a.timer = time.AfterFunc(time.Duration(remaining)*time.Millisecond, func() {
-				a.publish()
-			})
-			return
-		} else if len(a.memberDeadbands) > 0 && a.lastValues != nil {
-			// Per-member RBE: check if any member's change exceeds its deadband
-			if !a.anyMemberExceedsDeadband(assembled) {
-				return
-			}
-		} else {
-			// Fallback: whole-JSON comparison
-			jsonBytes, err := json.Marshal(assembled)
-			if err != nil {
-				return
-			}
-			if string(jsonBytes) == a.lastJSON {
-				return
-			}
-		}
-	}
-
-	// Update tracking state
-	jsonBytes, _ := json.Marshal(assembled)
-	a.lastJSON = string(jsonBytes)
-	a.lastValues = make(map[string]interface{}, len(assembled))
-	for k, v := range assembled {
-		a.lastValues[k] = v
-	}
-	a.lastPubTime = nowMs
-
-	// Build UdtTemplateDefinition for inline sending.
+	// Build the wire message once — used by both live and data emits.
 	members := make([]types.UdtMemberDefinition, len(a.template.Members))
 	for i, m := range a.template.Members {
 		datatype := m.Datatype
@@ -167,14 +132,58 @@ func (a *UdtAssembler) publish() {
 	if a.config.HistoryEnabled {
 		msg.HistoryEnabled = true
 	}
+	msg.MqttEnabled = a.config.MqttEnabled
 
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return
 	}
 
-	subject := topics.Data(a.gatewayID, types.SanitizeForSubject(a.config.DeviceID), types.SanitizeForSubject(a.variableID))
-	_ = a.b.Publish(subject, data)
+	sanDevice := types.SanitizeForSubject(a.config.DeviceID)
+	sanVar := types.SanitizeForSubject(a.variableID)
+
+	// Live subject — always emit pre-RBE.
+	_ = a.b.Publish(topics.Live(a.gatewayID, sanDevice, sanVar), data)
+
+	// RBE check gates the Data subject only.
+	if !a.disableRBE && a.lastPubTime > 0 {
+		elapsed := nowMs - a.lastPubTime
+
+		if a.deadband != nil && a.deadband.MaxTime > 0 && elapsed >= a.deadband.MaxTime {
+			// MaxTime exceeded — force publish regardless
+		} else if a.deadband != nil && a.deadband.MinTime > 0 && elapsed < a.deadband.MinTime {
+			// MinTime not elapsed — suppress data emit and schedule deferred publish
+			remaining := a.deadband.MinTime - elapsed
+			a.dirty = true
+			a.timer = time.AfterFunc(time.Duration(remaining)*time.Millisecond, func() {
+				a.publish()
+			})
+			return
+		} else if len(a.memberDeadbands) > 0 && a.lastValues != nil {
+			if !a.anyMemberExceedsDeadband(assembled) {
+				return
+			}
+		} else {
+			jsonBytes, err := json.Marshal(assembled)
+			if err != nil {
+				return
+			}
+			if string(jsonBytes) == a.lastJSON {
+				return
+			}
+		}
+	}
+
+	// Update RBE tracking state.
+	jsonBytes, _ := json.Marshal(assembled)
+	a.lastJSON = string(jsonBytes)
+	a.lastValues = make(map[string]interface{}, len(assembled))
+	for k, v := range assembled {
+		a.lastValues[k] = v
+	}
+	a.lastPubTime = nowMs
+
+	_ = a.b.Publish(topics.Data(a.gatewayID, sanDevice, sanVar), data)
 }
 
 // anyMemberExceedsDeadband checks if any member's change exceeds its configured deadband.

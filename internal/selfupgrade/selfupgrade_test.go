@@ -86,10 +86,10 @@ func TestExtractBinaryFromTarGz_NotFound(t *testing.T) {
 }
 
 func TestOfflineError(t *testing.T) {
-	cause := fmt.Errorf("dial tcp: lookup api.github.com: no such host")
+	cause := fmt.Errorf("dial tcp: lookup joyautomation.com: no such host")
 	err := &OfflineError{Cause: cause}
 
-	if got := err.Error(); got != "unable to reach GitHub — check your internet connection" {
+	if got := err.Error(); got != "unable to reach release manifest — check your internet connection" {
 		t.Errorf("got %q", got)
 	}
 

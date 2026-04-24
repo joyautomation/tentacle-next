@@ -36,6 +36,8 @@ export interface GatewayVariable {
   deadband?: DeadBandConfig | null;
   disableRBE?: boolean | null;
   historyEnabled?: boolean | null;
+  // null/undefined → MQTT enabled (legacy default). false → MQTT suppressed.
+  mqttEnabled?: boolean | null;
   functionCode?: number | null;
   modbusDatatype?: string | null;
   byteOrder?: string | null;
@@ -66,6 +68,8 @@ export interface GatewayUdtVariable {
   memberCipTypes?: Record<string, string> | null;
   memberDeadbands?: Record<string, DeadBandConfig> | null;
   historyEnabled?: boolean | null;
+  // null/undefined → MQTT enabled (legacy default). false → MQTT suppressed.
+  mqttEnabled?: boolean | null;
   memberAddresses?: Record<string, number> | null;
   memberByteOrders?: Record<string, string> | null;
 }

@@ -46,6 +46,15 @@ type Bridge struct {
 	drainStop chan struct{}
 
 	enabled bool
+
+	// Inputs to the store-forward state reconciler. hostOnline starts true
+	// when no primary host is configured (we publish whenever the node is
+	// born); otherwise it flips with STATE messages from the primary host.
+	// hostSeen records whether we've ever received a STATE message — it
+	// lets the UI distinguish "waiting for primary host" (never seen) from
+	// "primary host went offline" (seen then lost).
+	hostOnline bool
+	hostSeen   bool
 }
 
 // NewBridge creates a new NATS-to-MQTT bridge.
@@ -78,9 +87,19 @@ func (br *Bridge) Start() error {
 
 	// Set up store-forward
 	br.sf = NewStoreForwardBuffer(br.config.StoreForwardMax, br.config.StoreForwardSize, br.config.DrainRate, br.log)
+
+	// If no primary host is configured, the "host online" input is held high
+	// so SF state is driven entirely by node state. Otherwise it starts low
+	// and flips when a STATE message arrives.
+	br.hostOnline = br.config.PrimaryHostID == ""
 	if br.config.PrimaryHostID != "" {
 		br.node.OnHostState(br.handleHostState)
 	}
+	br.node.OnStateChange(br.handleNodeStateChange)
+
+	// SF starts offline until we've both connected (node Born) and, if
+	// configured, learned the primary host is online.
+	br.sf.SetOffline()
 
 	// Set up bus subscriptions BEFORE connecting so the module responds to
 	// status queries and buffers incoming data even when the broker is down.
@@ -95,7 +114,6 @@ func (br *Bridge) Start() error {
 	// Connect to MQTT broker
 	if err := br.node.Connect(); err != nil {
 		br.log.Warn("mqtt: broker unreachable, starting in offline/buffering mode", "error", err)
-		br.sf.SetOffline()
 		go br.reconnectLoop()
 		return nil
 	}
@@ -110,8 +128,8 @@ func (br *Bridge) Start() error {
 }
 
 // reconnectLoop retries the broker connection periodically after initial
-// connection failure. Once connected it loads variables and transitions
-// store-forward out of offline mode.
+// connection failure. The SF state is driven by the node state change
+// callback — this loop just keeps trying until the client exists.
 func (br *Bridge) reconnectLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -130,12 +148,6 @@ func (br *Bridge) reconnectLoop() {
 				continue
 			}
 			br.loadInitialVariables()
-			// Store-forward will transition to online/draining when
-			// the primary host STATE message arrives, or if no primary
-			// host is configured, set online now so data flows.
-			if br.config.PrimaryHostID == "" {
-				br.sf.SetOnline()
-			}
 			return
 		}
 	}
@@ -202,6 +214,13 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 
 	// Skip messages from the mqtt module itself
 	if msg.ModuleID == br.moduleID {
+		return
+	}
+
+	// Per-variable MQTT gate. Nil pointer (legacy publishers) is treated as
+	// enabled to preserve prior behavior where any variable in the gateway
+	// aggregate was forwarded to MQTT.
+	if msg.MqttEnabled != nil && !*msg.MqttEnabled {
 		return
 	}
 
@@ -545,9 +564,38 @@ func (br *Bridge) routeCommand(m sparkplug.Metric) {
 func (br *Bridge) handleHostState(hostID string, online bool) {
 	if online {
 		br.log.Info("mqtt: primary host online", "host", hostID)
-		br.sf.SetOnline()
 	} else {
 		br.log.Info("mqtt: primary host offline", "host", hostID)
+	}
+	br.mu.Lock()
+	br.hostOnline = online
+	br.hostSeen = true
+	br.mu.Unlock()
+	br.reconcileSFState()
+}
+
+// handleNodeStateChange is invoked whenever the Sparkplug node transitions
+// (Disconnected ↔ Dead ↔ Born). It drives the store-forward state so the
+// buffer flips offline the moment we lose our publish session — not only
+// when a primary host STATE message says so.
+func (br *Bridge) handleNodeStateChange(_ NodeState) {
+	br.reconcileSFState()
+}
+
+// reconcileSFState combines node + host inputs into the SF state. Online
+// requires the node to have published NBIRTH AND (no primary host configured
+// OR the primary host's last STATE message was ONLINE). Any other condition
+// → offline (buffer). Reads state fresh so goroutine ordering doesn't matter.
+func (br *Bridge) reconcileSFState() {
+	nodeBorn := br.node != nil && br.node.State() == StateBorn
+
+	br.mu.RLock()
+	hostOnline := br.hostOnline
+	br.mu.RUnlock()
+
+	if nodeBorn && hostOnline {
+		br.sf.SetOnline()
+	} else {
 		br.sf.SetOffline()
 	}
 }
@@ -720,6 +768,14 @@ func (br *Bridge) subscribeToSFStatus() {
 		}
 		status := br.sf.Status()
 		status.PrimaryHostID = br.config.PrimaryHostID
+		status.PrimaryHostConfigured = br.config.PrimaryHostID != ""
+		br.mu.RLock()
+		status.PrimaryHostSeen = br.hostSeen
+		br.mu.RUnlock()
+		if br.node != nil {
+			status.BrokerReachable = br.node.IsBrokerReachable()
+			status.NodeBorn = br.node.State() == StateBorn
+		}
 		respData, err := json.Marshal(status)
 		if err != nil {
 			return

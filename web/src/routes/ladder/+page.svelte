@@ -224,7 +224,7 @@
 
   .code-filename {
     font-size: 11px;
-    color: var(--color-cyan-400, #22d3ee);
+    color: var(--cyan-400, #22d3ee);
     font-family: monospace;
   }
 

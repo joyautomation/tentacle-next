@@ -880,8 +880,8 @@
   }
 
   .badge-enabled {
-    color: var(--color-green-500, #22c55e);
-    background: color-mix(in srgb, var(--color-green-500, #22c55e) 12%, transparent);
+    color: var(--green-500, #22c55e);
+    background: color-mix(in srgb, var(--green-500, #22c55e) 12%, transparent);
   }
 
   .badge-disabled {
@@ -1039,7 +1039,7 @@
   }
 
   .btn-danger:hover {
-    color: var(--color-red-500, #ef4444);
+    color: var(--red-500, #ef4444);
   }
 
   .btn-small {
@@ -1103,19 +1103,19 @@
     margin-top: 1.5rem;
     padding: 0.75rem 1rem;
     border-radius: var(--rounded-lg);
-    background: color-mix(in srgb, var(--color-amber-500, #f59e0b) 8%, transparent);
-    border: 1px solid color-mix(in srgb, var(--color-amber-500, #f59e0b) 30%, transparent);
+    background: color-mix(in srgb, var(--amber-500, #f59e0b) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--amber-500, #f59e0b) 30%, transparent);
 
     svg {
       flex-shrink: 0;
-      color: var(--color-amber-500, #f59e0b);
+      color: var(--amber-500, #f59e0b);
       margin-top: 0.125rem;
     }
 
     p {
       margin: 0;
       font-size: 0.8125rem;
-      color: var(--color-amber-500, #f59e0b);
+      color: var(--amber-500, #f59e0b);
     }
   }
 
@@ -1133,16 +1133,16 @@
     }
 
     &.error {
-      border-color: var(--color-red-500, #ef4444);
-      p { color: var(--color-red-500, #ef4444); }
+      border-color: var(--red-500, #ef4444);
+      p { color: var(--red-500, #ef4444); }
     }
   }
 
   .input-invalid {
-    border-color: var(--color-red-500, #ef4444) !important;
+    border-color: var(--red-500, #ef4444) !important;
 
     &:focus {
-      border-color: var(--color-red-500, #ef4444) !important;
+      border-color: var(--red-500, #ef4444) !important;
     }
   }
 
@@ -1150,12 +1150,12 @@
     margin-top: 0.5rem;
     padding: 0.375rem 0.625rem;
     border-radius: var(--rounded-md, 4px);
-    background: color-mix(in srgb, var(--color-red-500, #ef4444) 8%, transparent);
+    background: color-mix(in srgb, var(--red-500, #ef4444) 8%, transparent);
 
     p {
       margin: 0;
       font-size: 0.75rem;
-      color: var(--color-red-500, #ef4444);
+      color: var(--red-500, #ef4444);
       line-height: 1.5;
     }
   }

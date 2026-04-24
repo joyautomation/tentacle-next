@@ -32,11 +32,11 @@
 
   function buildDiagram(): { nodes: DiagramNode[]; links: DiagramLink[] } {
     const protocols = [
-      { id: 'ethernetip', label: 'EtherNet/IP', abbr: 'EIP', color: 'var(--color-teal-500, #14b8a6)' },
-      { id: 'opcua', label: 'OPC UA', abbr: 'OPC', color: 'var(--color-teal-500, #14b8a6)' },
-      { id: 'modbus', label: 'Modbus', abbr: 'MOD', color: 'var(--color-teal-500, #14b8a6)' },
-      { id: 'snmp', label: 'SNMP', abbr: 'SNMP', color: 'var(--color-teal-500, #14b8a6)' },
-      { id: 'profinetcontroller', label: 'PROFINET', abbr: 'PN', color: 'var(--color-teal-500, #14b8a6)' },
+      { id: 'ethernetip', label: 'EtherNet/IP', abbr: 'EIP', color: 'var(--teal-500, #14b8a6)' },
+      { id: 'opcua', label: 'OPC UA', abbr: 'OPC', color: 'var(--teal-500, #14b8a6)' },
+      { id: 'modbus', label: 'Modbus', abbr: 'MOD', color: 'var(--teal-500, #14b8a6)' },
+      { id: 'snmp', label: 'SNMP', abbr: 'SNMP', color: 'var(--teal-500, #14b8a6)' },
+      { id: 'profinetcontroller', label: 'PROFINET', abbr: 'PN', color: 'var(--teal-500, #14b8a6)' },
     ];
 
     const nodes: DiagramNode[] = [];
@@ -50,7 +50,7 @@
         abbr: 'DEV',
         layer: 0,
         row: i,
-        color: 'var(--color-amber-500, #f59e0b)',
+        color: 'var(--amber-500, #f59e0b)',
         protocol: p.id,
       });
     });
@@ -76,7 +76,7 @@
       abbr: 'GW',
       layer: 2,
       row: midRow,
-      color: 'var(--color-purple-500, #a855f7)',
+      color: 'var(--purple-500, #a855f7)',
     });
 
     // MQTT Bridge (layer 3)
@@ -86,7 +86,7 @@
       abbr: 'MQTT',
       layer: 3,
       row: midRow,
-      color: 'var(--color-teal-500, #14b8a6)',
+      color: 'var(--teal-500, #14b8a6)',
     });
 
     // Broker (layer 4)
@@ -96,7 +96,7 @@
       abbr: 'BRK',
       layer: 4,
       row: midRow,
-      color: 'var(--color-sky-500, #0ea5e9)',
+      color: 'var(--sky-500, #0ea5e9)',
     });
 
     // Links: device → scanner → gateway → mqtt → broker
@@ -194,7 +194,7 @@
       .attr('y1', d => nodeY(nodes.find(n => n.id === d.source)!))
       .attr('x2', d => nodeX(nodes.find(n => n.id === d.target)!))
       .attr('y2', d => nodeY(nodes.find(n => n.id === d.target)!))
-      .attr('stroke', 'var(--color-sky-400, #38bdf8)')
+      .attr('stroke', 'var(--sky-400, #38bdf8)')
       .attr('stroke-width', 2)
       .attr('stroke-opacity', 0.7)
       .attr('stroke-dasharray', '6 8');
