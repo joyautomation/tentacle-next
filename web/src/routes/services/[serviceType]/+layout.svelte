@@ -25,7 +25,6 @@
     plc: [
       { id: 'default', label: 'Config', href: `/services/${serviceType}` },
       { id: 'workspace', label: 'Workspace', href: `/services/${serviceType}/workspace` },
-      { id: 'info', label: 'Variables', href: `/services/${serviceType}/info` },
       { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
     ],
     network: [
