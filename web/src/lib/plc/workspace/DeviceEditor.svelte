@@ -68,33 +68,8 @@
 	let saving = $state(false);
 	let deleting = $state(false);
 
-	// Reseed local state when the underlying device changes (save/remote
-	// update) or when the tab first binds to a new deviceId.
-	let lastSeededFor = '';
-	$effect(() => {
-		if (isNew) {
-			if (lastSeededFor === '__new__') return;
-			lastSeededFor = '__new__';
-			pendingDeviceId = '';
-			protocol = defaultProtocol;
-			host = '';
-			port = '';
-			slot = '';
-			endpointUrl = '';
-			snmpVersion = '2c';
-			community = 'public';
-			unitId = '1';
-			scanRate = '';
-			deadbandValue = '';
-			deadbandMinTime = '';
-			deadbandMaxTime = '';
-			disableRBE = false;
-			return;
-		}
+	function seedFromExisting() {
 		if (!existing) return;
-		const key = `${existing.deviceId}::${gatewayConfig?.updatedAt ?? ''}`;
-		if (key === lastSeededFor) return;
-		lastSeededFor = key;
 		pendingDeviceId = existing.deviceId;
 		protocol = existing.protocol;
 		host = existing.host ?? '';
@@ -111,6 +86,40 @@
 		deadbandMaxTime =
 			existing.deadband?.maxTime != null ? String(existing.deadband.maxTime) : '';
 		disableRBE = existing.disableRBE ?? false;
+	}
+
+	function seedNew() {
+		pendingDeviceId = '';
+		protocol = defaultProtocol;
+		host = '';
+		port = '';
+		slot = '';
+		endpointUrl = '';
+		snmpVersion = '2c';
+		community = 'public';
+		unitId = '1';
+		scanRate = '';
+		deadbandValue = '';
+		deadbandMinTime = '';
+		deadbandMaxTime = '';
+		disableRBE = false;
+	}
+
+	// Reseed local state when the underlying device changes (save/remote
+	// update) or when the tab first binds to a new deviceId.
+	let lastSeededFor = '';
+	$effect(() => {
+		if (isNew) {
+			if (lastSeededFor === '__new__') return;
+			lastSeededFor = '__new__';
+			seedNew();
+			return;
+		}
+		if (!existing) return;
+		const key = `${existing.deviceId}::${gatewayConfig?.updatedAt ?? ''}`;
+		if (key === lastSeededFor) return;
+		lastSeededFor = key;
+		seedFromExisting();
 	});
 
 	const variableCount = $derived.by(() => {
@@ -244,10 +253,8 @@
 	}
 
 	function revert() {
-		lastSeededFor = '';
-		// Re-run the seeding effect by touching a reactive dep.
-		const tmp = protocol;
-		protocol = tmp;
+		if (isNew) seedNew();
+		else seedFromExisting();
 	}
 
 	async function del() {
