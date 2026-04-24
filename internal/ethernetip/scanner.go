@@ -63,6 +63,13 @@ type Scanner struct {
 
 	subs []bus.Subscription
 
+	// Browsed UDT schemas, per device. Populated after a successful
+	// browse so subscribers can auto-expand a struct tag subscription
+	// into its member tags.
+	schemaMu   sync.RWMutex
+	udts       map[string]map[string]UdtExport // deviceID → template name → def
+	structTags map[string]map[string]string    // deviceID → instance tag → template name
+
 	// Rate tracking (sliding window)
 	publishTimes []int64
 	pollTimes    []int64
@@ -77,6 +84,8 @@ func NewScanner(b bus.Bus, moduleID string, log *slog.Logger) *Scanner {
 		moduleID:    moduleID,
 		log:         log,
 		connections: make(map[string]*DeviceConnection),
+		udts:        make(map[string]map[string]UdtExport),
+		structTags:  make(map[string]map[string]string),
 	}
 	s.enabled.Store(true)
 	return s
@@ -368,6 +377,7 @@ func (s *Scanner) handleBrowse(subject string, data []byte, reply bus.ReplyFunc)
 			return
 		}
 		s.log.Info("eip: browse complete", "device", req.DeviceID, "vars", len(result.Variables), "udts", len(result.Udts))
+		s.storeSchema(req.DeviceID, result)
 		resultSubject := fmt.Sprintf("ethernetip.browse.result.%s", browseID)
 		resultData, err := json.Marshal(result)
 		if err != nil {
@@ -461,6 +471,26 @@ func (s *Scanner) handleSubscribe(subject string, data []byte, reply bus.ReplyFu
 
 	for _, tagName := range req.Tags {
 		conn.Subscribers[req.SubscriberID][tagName] = true
+
+		// If this tag names a browsed UDT instance, expand it into its
+		// leaf members and register those instead. libplctag reads the
+		// struct-root as an opaque blob; individual members read
+		// cleanly as their native CIP types. Also means read_tag can
+		// return the full aggregate without any extra config.
+		if members, ok := s.expandStructTag(req.DeviceID, tagName); ok {
+			for memberPath, cipType := range members {
+				conn.Subscribers[req.SubscriberID][memberPath] = true
+				if _, exists := conn.Variables[memberPath]; !exists {
+					conn.Variables[memberPath] = &CachedVar{
+						TagName: memberPath,
+						CipType: cipType,
+						Quality: "unknown",
+					}
+				}
+			}
+			// Skip the root — it would just re-fetch the opaque blob.
+			continue
+		}
 
 		if _, tagExists := conn.Variables[tagName]; !tagExists {
 			cipType := ""
