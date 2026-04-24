@@ -859,6 +859,12 @@
     font-size: 0.8125rem;
     text-align: left;
 
+    &:focus { outline: none; }
+    &:focus-visible {
+      outline: 1px solid var(--theme-primary);
+      outline-offset: -1px;
+    }
+
     &:hover {
       background: var(--theme-surface);
 

@@ -116,6 +116,12 @@
     text-align: left;
     cursor: pointer;
 
+    &:focus { outline: none; }
+    &:focus-visible {
+      outline: 1px solid var(--theme-primary);
+      outline-offset: -1px;
+    }
+
     &:hover {
       background: var(--theme-surface);
     }
