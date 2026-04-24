@@ -815,6 +815,7 @@ func (g *Gateway) routeValue(protocol, deviceID, sanitizedTag string, value inte
 			if tv.Config.HistoryEnabled {
 				outMsg.HistoryEnabled = true
 			}
+			outMsg.MqttEnabled = tv.Config.MqttEnabled
 
 			data, err := json.Marshal(outMsg)
 			if err != nil {

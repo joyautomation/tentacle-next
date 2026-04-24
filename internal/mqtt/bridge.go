@@ -217,6 +217,13 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 		return
 	}
 
+	// Per-variable MQTT gate. Nil pointer (legacy publishers) is treated as
+	// enabled to preserve prior behavior where any variable in the gateway
+	// aggregate was forwarded to MQTT.
+	if msg.MqttEnabled != nil && !*msg.MqttEnabled {
+		return
+	}
+
 	// Build a unique variable key
 	varKey := variableKey(msg.ModuleID, msg.DeviceID, msg.VariableID)
 

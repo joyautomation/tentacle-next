@@ -132,6 +132,7 @@ func (a *UdtAssembler) publish() {
 	if a.config.HistoryEnabled {
 		msg.HistoryEnabled = true
 	}
+	msg.MqttEnabled = a.config.MqttEnabled
 
 	data, err := json.Marshal(msg)
 	if err != nil {

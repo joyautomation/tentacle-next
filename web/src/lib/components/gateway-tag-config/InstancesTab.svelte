@@ -12,11 +12,13 @@
 		expandedInstances,
 		checkedInstances,
 		checkedHistoryInstances,
+		mqttDisabledInstances,
 		workingOverrides,
 		editingCell,
 		editDraft,
 		onTogglePublish,
 		onToggleHistoryPublish,
+		onToggleMqtt,
 		onToggleExpand,
 		onStartEdit,
 		onCancelEdit,
@@ -42,11 +44,13 @@
 		expandedInstances: Set<string>;
 		checkedInstances: Set<string>;
 		checkedHistoryInstances: Set<string>;
+		mqttDisabledInstances: Set<string>;
 		workingOverrides: Map<string, Record<string, DeadBandConfig>>;
 		editingCell: string | null;
 		editDraft: string;
 		onTogglePublish: (deviceId: string, tag: string) => void;
 		onToggleHistoryPublish: (deviceId: string, tag: string) => void;
+		onToggleMqtt: (deviceId: string, tag: string) => void;
 		onToggleExpand: (id: string) => void;
 		onStartEdit: (key: string, value: number) => void;
 		onCancelEdit: () => void;
@@ -147,8 +151,8 @@
 				{#if dirtyInstanceKeys.has(publishKey)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->
 				<div class="toggle-group">
-					<span class="toggle-label">MQTT</span>
-					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="MQTT">
+					<span class="toggle-label">AGG</span>
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Aggregate in gateway (publish on bus subjects for HMI / history / MQTT consumers)">
 						<input
 							type="checkbox"
 							checked={isPublished}
@@ -158,10 +162,23 @@
 					</label>
 				</div>
 				<div class="toggle-group">
-					<span class="toggle-label">HIST</span>
-					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="History">
+					<span class="toggle-label">MQTT</span>
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Forward to MQTT (requires Aggregate)">
 						<input
 							type="checkbox"
+							disabled={!isPublished}
+							checked={isPublished && !mqttDisabledInstances.has(publishKey)}
+							onchange={() => onToggleMqtt(inst.deviceId, inst.tag)}
+						/>
+						<span class="toggle-track"></span>
+					</label>
+				</div>
+				<div class="toggle-group">
+					<span class="toggle-label">HIST</span>
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Record to history (requires Aggregate)">
+						<input
+							type="checkbox"
+							disabled={!isPublished}
 							checked={checkedHistoryInstances.has(publishKey)}
 							onchange={() => onToggleHistoryPublish(inst.deviceId, inst.tag)}
 						/>
