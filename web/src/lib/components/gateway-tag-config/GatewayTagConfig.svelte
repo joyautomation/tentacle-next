@@ -2288,7 +2288,7 @@
   }
 
   .tc-tabs {
-    padding: 0 1.25rem;
+    padding: 0;
   }
 
   // ── Save bar ──
@@ -2322,7 +2322,7 @@
 
   @media (max-width: 640px) {
     .tc-header { padding: 0.625rem 0.875rem; }
-    .tc-tabs { padding: 0 0.875rem; }
+    .tc-tabs { padding: 0; }
     .save-bar { margin: 0 0.75rem; }
     .tc-subtitle { display: none; }
   }
