@@ -80,7 +80,10 @@
       prefix &&
       (containerProps?.position === 'absolute' || containerProps?.position === 'relative')
     ) {
-      parts.push(`.${prefix} > * { position: absolute; }`);
+      // SvelteHost interposes a display:contents wrapper between the
+      // container and the user's markup — the wrapper is invisible to
+      // layout but visible to selectors, so we have to step through it.
+      parts.push(`.${prefix} > .svelte-host > * { position: absolute; }`);
     }
     return parts.join('\n\n');
   });

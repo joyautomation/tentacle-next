@@ -51,7 +51,9 @@
     if (isSourceMode && prefix) {
       const pos = component?.containerProps?.position;
       if (pos === 'absolute' || pos === 'relative') {
-        parts.push(`.${prefix} > * { position: absolute; }`);
+        // Step through SvelteHost's display:contents wrapper — invisible
+        // to layout but a real DOM child for selector purposes.
+        parts.push(`.${prefix} > .svelte-host > * { position: absolute; }`);
       }
     }
     return parts.join('\n\n');
