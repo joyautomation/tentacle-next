@@ -281,8 +281,8 @@ cmd_deploy() {
 
   echo "==> Deploying to $ct_name from $wt_path..."
 
-  echo "==> Building web assets..."
-  (cd "$wt_path/web" && npm run build)
+  echo "==> Building web assets (inside $ct_name to avoid UID mismatch)..."
+  incus exec "$ct_name" -- bash -c "cd /root/tentacle-next/web && npm run build"
 
   echo "==> Building tentacle..."
   (cd "$wt_path" && \
