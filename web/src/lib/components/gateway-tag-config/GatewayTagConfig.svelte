@@ -24,6 +24,11 @@
     error: string | null;
   } = $props();
 
+  // Live tag values from the gateway's pre-RBE stream. Keyed by
+  // `${deviceId}::${variableId}` — matches gateway variable id, not the
+  // browsed tag name. We translate at render time using gatewayConfig.variables.
+  let liveValues: Record<string, unknown> = $state({});
+
   let activeSection: ActiveSection | null = $state<ActiveSection | null>(null);
   let activeTab: 'template' | 'instances' = $state('instances');
   let templatesExpanded = $state(false);
@@ -353,6 +358,34 @@
       cleanups.push(cleanup);
     }
     return () => cleanups.forEach(fn => fn());
+  });
+
+  // Subscribe to the gateway's pre-RBE live stream so the value column
+  // reflects the latest reading. Only enabled gateway variables publish
+  // here, so disabled rows stay at their browse-time value.
+  $effect(() => {
+    const cleanup = subscribe<{
+      moduleId: string;
+      deviceId: string;
+      variableId: string;
+      value: unknown;
+    }>('/variables/stream?live=true', (msg) => {
+      if (msg.moduleId !== 'gateway') return;
+      const key = `${msg.deviceId}::${msg.variableId}`;
+      liveValues = { ...liveValues, [key]: msg.value };
+    });
+    return cleanup;
+  });
+
+  // Lookup: `${deviceId}::${tag}` → gateway variable id. Browse items
+  // expose `item.tag` but live messages carry the variable id, so we
+  // need the gateway config to bridge the two.
+  const variableIdByTag = $derived.by(() => {
+    const map = new Map<string, string>();
+    for (const v of gatewayConfig?.variables ?? []) {
+      map.set(`${v.deviceId}::${v.tag}`, v.id);
+    }
+    return map;
   });
 
   // ── Derived for active template ──
@@ -1550,6 +1583,7 @@
       result.push({ deviceId: cache.deviceId, protocol: cache.protocol, atomicCount });
     }
 
+    result.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
     return result;
   });
 
@@ -1912,6 +1946,8 @@
             deviceId={activeDeviceId}
             browseCache={browseCaches.find(c => c.deviceId === activeDeviceId) ?? null}
             deviceDeadband={atomicDeviceDeadband}
+            {liveValues}
+            {variableIdByTag}
             {checkedAtomicTags}
             {checkedHistoryAtomicTags}
             mqttDisabledTags={mqttDisabledAtomicTags}

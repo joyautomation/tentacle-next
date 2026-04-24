@@ -9,6 +9,8 @@
 		deviceId,
 		browseCache,
 		deviceDeadband,
+		liveValues,
+		variableIdByTag,
 		checkedAtomicTags,
 		checkedHistoryAtomicTags,
 		mqttDisabledTags,
@@ -34,6 +36,8 @@
 		deviceId: string;
 		browseCache: BrowseCache | null;
 		deviceDeadband: DeadBandConfig | null;
+		liveValues: Record<string, unknown>;
+		variableIdByTag: Map<string, string>;
 		checkedAtomicTags: Set<string>;
 		checkedHistoryAtomicTags: Set<string>;
 		mqttDisabledTags: Set<string>;
@@ -91,7 +95,16 @@
 						return false;
 					return true;
 				})
-				.map((item) => ({ ...item, datatype: mapDatatype(item.datatype) }));
+				.map((item) => {
+					const varId = variableIdByTag.get(`${deviceId}::${item.tag}`);
+					const liveKey = varId ? `${deviceId}::${varId}` : null;
+					const liveValue = liveKey && liveKey in liveValues ? liveValues[liveKey] : undefined;
+					return {
+						...item,
+						datatype: mapDatatype(item.datatype),
+						value: liveValue !== undefined ? liveValue : item.value
+					};
+				});
 
 			const dir = sortAsc ? 1 : -1;
 			return filtered.sort((a, b) => {
