@@ -73,14 +73,43 @@
     workspaceTabs.openNew("device");
   }
 
-  let sections = $state({
-    devices: true,
-    variables: true,
-    types: true,
-    tasks: true,
-    programs: true,
-    tests: true,
-  });
+  const STORAGE_PREFIX = "plc-nav:";
+  function loadStored<T>(key: string, fallback: T): T {
+    if (typeof localStorage === "undefined") return fallback;
+    try {
+      const raw = localStorage.getItem(STORAGE_PREFIX + key);
+      return raw ? (JSON.parse(raw) as T) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function persist(key: string, value: unknown) {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
+    } catch {
+      // quota / serialization failure — state stays in-memory only
+    }
+  }
+
+  let sections = $state(
+    loadStored<Record<string, boolean>>("sections", {
+      devices: true,
+      variables: true,
+      types: true,
+      tasks: true,
+      programs: true,
+      tests: true,
+    }) as {
+      devices: boolean;
+      variables: boolean;
+      types: boolean;
+      tasks: boolean;
+      programs: boolean;
+      tests: boolean;
+    },
+  );
+  $effect(() => persist("sections", sections));
 
   let filter = $state("");
   let activeTags = $state<string[]>([]);
@@ -147,7 +176,10 @@
     return groups;
   });
 
-  let typeGroupsOpen = $state<Record<string, boolean>>({});
+  let typeGroupsOpen = $state<Record<string, boolean>>(
+    loadStored<Record<string, boolean>>("typeGroups", {}),
+  );
+  $effect(() => persist("typeGroups", typeGroupsOpen));
   function toggleTypeGroup(key: string) {
     typeGroupsOpen = { ...typeGroupsOpen, [key]: !(typeGroupsOpen[key] ?? true) };
   }
@@ -246,7 +278,10 @@
     | { status: "error"; message: string }
     | { status: "ready"; cache: BrowseCache };
 
-  let expandedDevices = $state<Record<string, boolean>>({});
+  let expandedDevices = $state<Record<string, boolean>>(
+    loadStored<Record<string, boolean>>("expandedDevices", {}),
+  );
+  $effect(() => persist("expandedDevices", expandedDevices));
   let browseCaches = $state<Record<string, BrowseEntry>>({});
 
   type BrowseProgress = {
@@ -281,6 +316,16 @@
     }
     browseCaches[deviceId] = { status: "ready", cache: res.data };
   }
+
+  // Devices restored as expanded from localStorage need their browse cache
+  // fetched — toggleDeviceExpand only fires on user click.
+  $effect(() => {
+    for (const [deviceId, open] of Object.entries(expandedDevices)) {
+      if (open && !browseCaches[deviceId]) {
+        loadBrowseCache(deviceId);
+      }
+    }
+  });
 
   async function toggleDeviceExpand(device: GatewayDevice, e: MouseEvent) {
     e.stopPropagation();
@@ -517,7 +562,10 @@
     return root.children;
   }
 
-  let treeExpanded = $state<Record<string, Record<string, boolean>>>({});
+  let treeExpanded = $state<Record<string, Record<string, boolean>>>(
+    loadStored<Record<string, Record<string, boolean>>>("treeExpanded", {}),
+  );
+  $effect(() => persist("treeExpanded", treeExpanded));
 
   function toggleTreeNode(deviceId: string, key: string) {
     const cur = treeExpanded[deviceId] ?? {};
