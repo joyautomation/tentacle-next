@@ -17,9 +17,13 @@ import (
 // that has been observed on any device/protocol. PLC programs read from
 // it via the read_tag(deviceId, tagPath) builtin.
 //
-// Keys are (deviceId, sanitizedTag). Values are raw Go primitives as
-// decoded from PlcDataMessage.Value. The cache is write-through from
-// NATS subscriptions — we never round-trip through the KV layer.
+// Keys are (deviceId, rawTagPath). Values are raw Go primitives as
+// decoded from PlcDataMessage.Value. Raw tag paths (carried in
+// PlcDataMessage.VariableID by publishers) preserve the dotted
+// structure — e.g. "RTU60_13XFR9_PLC_TOD.SECOND" — which the NATS
+// subject cannot (sanitization flattens dots to underscores). That
+// faithful structure is what lets read_tag return an aggregate dict
+// for a template-instance path.
 type DeviceTagCache struct {
 	b   bus.Bus
 	log *slog.Logger
@@ -70,33 +74,75 @@ func (c *DeviceTagCache) Stop() {
 	c.mu.Unlock()
 }
 
-// Get returns the most recent cached value for (deviceId, tagPath). The
-// tagPath is sanitized the same way as the publisher's subject so users
-// can pass the human-readable tag path (e.g. "Motor1.Speed").
+// Get returns the most recent cached value for (deviceId, tagPath).
+// tagPath is compared against raw (unsanitized) paths — pass the
+// human-readable form (e.g. "Motor1.Speed").
 func (c *DeviceTagCache) Get(deviceID, tagPath string) (interface{}, bool) {
-	sanitized := types.SanitizeForSubject(tagPath)
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	d, ok := c.values[deviceID]
 	if !ok {
 		return nil, false
 	}
-	v, ok := d[sanitized]
+	v, ok := d[tagPath]
 	return v, ok
 }
 
-func (c *DeviceTagCache) handle(subject string, data []byte) {
-	// Subject format: {protocol}.data.{deviceId}.{sanitizedTag}
-	parts := strings.SplitN(subject, ".", 4)
-	if len(parts) < 4 {
-		return
+// GetAggregate returns every child path of basePath on deviceID, keyed
+// by the portion of the path *after* `basePath.`. For example, if the
+// device has tags "RTU60_13XFR9_PLC_TOD.SECOND" and
+// "RTU60_13XFR9_PLC_TOD.DAY", GetAggregate(_, "RTU60_13XFR9_PLC_TOD")
+// returns {"SECOND": ..., "DAY": ...}. The second return is false when
+// no children are found, so callers can distinguish "empty aggregate"
+// from "no such path".
+//
+// Only direct children are flattened to top-level keys. Nested
+// grandchildren keep their dotted segments in the returned map — that
+// way a template instance with its own nested struct still round-trips
+// faithfully.
+func (c *DeviceTagCache) GetAggregate(deviceID, basePath string) (map[string]interface{}, bool) {
+	prefix := basePath + "."
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	d, ok := c.values[deviceID]
+	if !ok {
+		return nil, false
 	}
-	deviceID := parts[2]
-	tag := parts[3]
+	out := make(map[string]interface{})
+	for path, val := range d {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		out[path[len(prefix):]] = val
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
 
+func (c *DeviceTagCache) handle(subject string, data []byte) {
 	var msg types.PlcDataMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
+	}
+	deviceID := msg.DeviceID
+	tag := msg.VariableID
+	if deviceID == "" || tag == "" {
+		// Subject format: {protocol}.data.{deviceId}.{sanitizedTag}.
+		// Fall back to the subject if the publisher didn't populate
+		// VariableID — the sanitized tag is still usable for direct
+		// lookup by already-sanitized callers.
+		parts := strings.SplitN(subject, ".", 4)
+		if len(parts) < 4 {
+			return
+		}
+		if deviceID == "" {
+			deviceID = parts[2]
+		}
+		if tag == "" {
+			tag = parts[3]
+		}
 	}
 
 	c.mu.Lock()

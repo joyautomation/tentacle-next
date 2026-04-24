@@ -100,11 +100,27 @@ func (e *Engine) builtinReadTag(thread *starlark.Thread, fn *starlark.Builtin, a
 	if e.deviceTags == nil {
 		return starlark.None, nil
 	}
-	v, ok := e.deviceTags.Get(deviceID, tagPath)
-	if !ok {
-		return starlark.None, nil
+	if v, ok := e.deviceTags.Get(deviceID, tagPath); ok {
+		return goToStarlark(v), nil
 	}
-	return goToStarlark(v), nil
+	// Not a leaf — maybe it names a template instance. Collect children
+	// under the prefix and return them as a dict, so users can read a
+	// whole struct (e.g. a UDT instance) in a single call.
+	if children, ok := e.deviceTags.GetAggregate(deviceID, tagPath); ok {
+		return goMapToStarlark(children), nil
+	}
+	return starlark.None, nil
+}
+
+// goMapToStarlark wraps a Go map of scalar values as a Starlark dict.
+// Values are converted via goToStarlark; keys are strings. Used by
+// read_tag when aggregating a template instance's fields.
+func goMapToStarlark(m map[string]interface{}) starlark.Value {
+	d := starlark.NewDict(len(m))
+	for k, v := range m {
+		_ = d.SetKey(starlark.String(k), goToStarlark(v))
+	}
+	return d
 }
 
 func (e *Engine) builtinSetVar(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
