@@ -8,7 +8,13 @@
   import CodeEditor from '$lib/hmi/source/CodeEditor.svelte';
   import SveltePreview from '$lib/hmi/source/SveltePreview.svelte';
   import ContainerEditor from '$lib/hmi/source/ContainerEditor.svelte';
-  import { stripScriptBlock, addClassToElement, setInlineStyleProps } from '$lib/hmi/source/markupTools';
+  import ElementEditor from '$lib/hmi/source/ElementEditor.svelte';
+  import {
+    stripScriptBlock,
+    addClassToElement,
+    setInlineStyleProps,
+    getInlineStyleProps,
+  } from '$lib/hmi/source/markupTools';
   import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember } from '$lib/types/hmi';
 
   const appId = $derived($page.params.appId as string);
@@ -34,6 +40,19 @@
   let previewHeight = $state<number | null>(null);
   let snapEnabled = $state(false);
   const SNAP = 16;
+
+  let selectedIdx = $state<number | null>(null);
+
+  // Anchors derived from the selected element's source-side inline style.
+  const selectedAnchors = $derived.by<{ x: 'left' | 'right'; y: 'top' | 'bottom' } | null>(() => {
+    if (selectedIdx === null) return null;
+    const style = getInlineStyleProps(source, selectedIdx);
+    if (!style) return null;
+    return {
+      x: style.right && !style.left ? 'right' : 'left',
+      y: style.bottom && !style.top ? 'bottom' : 'top',
+    };
+  });
 
   let editorRef: any = $state();
 
@@ -110,6 +129,44 @@
 
   function onClassDrop(idx: number, name: string) {
     const next = addClassToElement(source, idx, name);
+    if (next === null || next === source) return;
+    source = next;
+    dirty = true;
+  }
+
+  function onElementSelect(idx: number | null) {
+    selectedIdx = idx;
+  }
+
+  function onAnchorChange(
+    axis: 'x' | 'y',
+    anchor: 'left' | 'right' | 'top' | 'bottom',
+  ) {
+    if (selectedIdx === null || !previewFrameEl) return;
+    const el = previewFrameEl.querySelector<HTMLElement>(`[data-hmi-el="${selectedIdx}"]`);
+    const surfaceEl = previewFrameEl.querySelector<HTMLElement>('.surface');
+    if (!el || !surfaceEl) return;
+    const elRect = el.getBoundingClientRect();
+    const surfRect = surfaceEl.getBoundingClientRect();
+    const props: Record<string, string | undefined> = {};
+    if (axis === 'x') {
+      if (anchor === 'left') {
+        props.left = `${Math.round(elRect.left - surfRect.left)}px`;
+        props.right = undefined;
+      } else {
+        props.right = `${Math.round(surfRect.right - elRect.right)}px`;
+        props.left = undefined;
+      }
+    } else {
+      if (anchor === 'top') {
+        props.top = `${Math.round(elRect.top - surfRect.top)}px`;
+        props.bottom = undefined;
+      } else {
+        props.bottom = `${Math.round(surfRect.bottom - elRect.bottom)}px`;
+        props.top = undefined;
+      }
+    }
+    const next = setInlineStyleProps(source, selectedIdx, props);
     if (next === null || next === source) return;
     source = next;
     dirty = true;
@@ -278,8 +335,10 @@
                 {containerProps}
                 {containerCss}
                 snapGrid={snapEnabled ? SNAP : 0}
+                {selectedIdx}
                 {onClassDrop}
                 {onElementMove}
+                {onElementSelect}
               />
               <div
                 class="resize-handle x"
@@ -328,6 +387,12 @@
           props={containerProps}
           css={containerCss}
           onChange={onContainerChange}
+        />
+        <ElementEditor
+          idx={selectedIdx}
+          anchors={selectedAnchors}
+          {onAnchorChange}
+          onClear={() => (selectedIdx = null)}
         />
         <ClassRail
           title="App classes"

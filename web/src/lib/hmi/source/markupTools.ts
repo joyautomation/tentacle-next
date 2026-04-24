@@ -187,6 +187,30 @@ export function setInlineStyleProps(
   return source.slice(0, t.openStart) + nextTag + source.slice(t.openEnd + 1);
 }
 
+/** Parse the inline `style="…"` declarations on the Nth element into a
+ * key→value map. Returns an empty map if no style attribute is present,
+ * or null when `idx` is out of range. */
+export function getInlineStyleProps(
+  source: string,
+  idx: number,
+): Record<string, string> | null {
+  const tags = findElementOpenTags(source);
+  const t = tags[idx];
+  if (!t) return null;
+  const tagText = source.slice(t.openStart, t.openEnd + 1);
+  const m = /\bstyle\s*=\s*"([^"]*)"/.exec(tagText);
+  const out: Record<string, string> = {};
+  if (!m) return out;
+  for (const decl of m[1].split(';')) {
+    const i = decl.indexOf(':');
+    if (i < 0) continue;
+    const k = decl.slice(0, i).trim();
+    const v = decl.slice(i + 1).trim();
+    if (k && v) out[k] = v;
+  }
+  return out;
+}
+
 /** Pull a leading `<script>…</script>` block out of source. Returns the
  * inner script text (trimmed) and the markup with the block removed. */
 export function stripScriptBlock(source: string): { script: string; markup: string } {

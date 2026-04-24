@@ -33,6 +33,13 @@
       idx: number,
       offsets: { left?: number; right?: number; top?: number; bottom?: number },
     ) => void;
+    /** Currently-selected element index (or null). The host owns selection
+     * state; preview just renders the visual outline. */
+    selectedIdx?: number | null;
+    /** Called when the user clicks on a tagged element (selection) or on
+     * empty surface (clears, idx=null). Click ≠ drag — fires only when no
+     * drag commit happened. */
+    onElementSelect?: (idx: number | null) => void;
   }
 
   let {
@@ -48,6 +55,8 @@
     debounceMs = 300,
     onClassDrop,
     onElementMove,
+    selectedIdx = null,
+    onElementSelect,
   }: Props = $props();
 
   let compiling = $state(false);
@@ -155,6 +164,12 @@
 
   const DRAG_THRESHOLD = 4;
 
+  // A pointerdown registers a pending selection — committed on pointerup
+  // unless the user dragged. `pendingSelectActive` distinguishes "ready to
+  // commit a select" from "no pointer interaction in flight".
+  let pendingSelect: number | null = null;
+  let pendingSelectActive = false;
+
   let drag: {
     idx: number;
     el: HTMLElement;
@@ -200,10 +215,23 @@
   }
 
   function onPointerDown(e: PointerEvent) {
-    if (!dragMode || !surfaceEl) return;
+    if (!surfaceEl) return;
     if (e.button !== 0) return;
     const hit = elementAt(e.target);
-    if (!hit) return;
+    // Selection-only mode: when drag isn't enabled, still capture the click
+    // for selection bookkeeping (handled in pointerup).
+    if (!dragMode) {
+      pendingSelect = hit ? hit.idx : null;
+      pendingSelectActive = true;
+      return;
+    }
+    if (!hit) {
+      pendingSelect = null;
+      pendingSelectActive = true;
+      return;
+    }
+    pendingSelect = hit.idx;
+    pendingSelectActive = true;
     const surfaceRect = surfaceEl.getBoundingClientRect();
     const elRect = hit.el.getBoundingClientRect();
     const anchorX = pickAnchorX(hit.el);
@@ -251,6 +279,8 @@
     if (!drag.committed) {
       if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
       commitDrag();
+      // A drag suppresses the would-be select for this gesture.
+      pendingSelectActive = false;
     }
     const { x, y } = liveOffsets(drag, e);
     drag.el.style[drag.anchorX] = `${x}px`;
@@ -259,6 +289,11 @@
   }
 
   function onPointerUp(e: PointerEvent) {
+    // Commit a pending select if no drag took over this gesture.
+    if (pendingSelectActive) {
+      pendingSelectActive = false;
+      onElementSelect?.(pendingSelect);
+    }
     if (!drag || e.pointerId !== drag.pointerId) return;
     const wasCommitted = drag.committed;
     if (wasCommitted) {
@@ -275,6 +310,19 @@
       drag = null;
     }
   }
+
+  // Toggle a `.hmi-selected` class on the currently-selected element so
+  // the visual outline tracks selection without re-rendering markup.
+  $effect(() => {
+    if (!surfaceEl) return;
+    surfaceEl
+      .querySelectorAll<HTMLElement>('[data-hmi-el].hmi-selected')
+      .forEach((el) => el.classList.remove('hmi-selected'));
+    if (selectedIdx !== null && selectedIdx !== undefined) {
+      const el = surfaceEl.querySelector<HTMLElement>(`[data-hmi-el="${selectedIdx}"]`);
+      el?.classList.add('hmi-selected');
+    }
+  });
 </script>
 
 {#if css}
@@ -344,6 +392,10 @@
       outline: 2px solid var(--theme-text);
       outline-offset: 2px;
       cursor: grabbing !important;
+    }
+    :global(.hmi-selected) {
+      outline: 2px solid color-mix(in srgb, var(--theme-text) 80%, transparent);
+      outline-offset: 1px;
     }
   }
   .preview-shell.dragmode .surface {
