@@ -385,6 +385,9 @@
     for (const v of gatewayConfig?.variables ?? []) {
       map.set(`${v.deviceId}::${v.tag}`, v.id);
     }
+    for (const v of gatewayConfig?.udtVariables ?? []) {
+      map.set(`${v.deviceId}::${v.tag}`, v.id);
+    }
     return map;
   });
 
