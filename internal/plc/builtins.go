@@ -101,27 +101,17 @@ func (e *Engine) builtinReadTag(thread *starlark.Thread, fn *starlark.Builtin, a
 		return starlark.None, nil
 	}
 	// Aggregate first: if this path has any children (i.e. names a
-	// template instance), return the whole struct as a dict. Some
-	// scanners also publish the struct root as a stringified value, so
-	// a naive leaf-first lookup would hide the fields.
+	// template instance), return the whole struct as a tag_group that
+	// supports both dot (tod.SECOND) and bracket (tod["SECOND"]) access.
+	// Some scanners also publish the struct root as a stringified value,
+	// so a naive leaf-first lookup would hide the fields.
 	if children, ok := e.deviceTags.GetAggregate(deviceID, tagPath); ok {
-		return goMapToStarlark(children), nil
+		return newTagGroup(tagPath, children), nil
 	}
 	if v, ok := e.deviceTags.Get(deviceID, tagPath); ok {
 		return goToStarlark(v), nil
 	}
 	return starlark.None, nil
-}
-
-// goMapToStarlark wraps a Go map of scalar values as a Starlark dict.
-// Values are converted via goToStarlark; keys are strings. Used by
-// read_tag when aggregating a template instance's fields.
-func goMapToStarlark(m map[string]interface{}) starlark.Value {
-	d := starlark.NewDict(len(m))
-	for k, v := range m {
-		_ = d.SetKey(starlark.String(k), goToStarlark(v))
-	}
-	return d
 }
 
 func (e *Engine) builtinSetVar(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
