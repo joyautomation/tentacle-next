@@ -151,8 +151,8 @@
 				{#if dirtyInstanceKeys.has(publishKey)}<span class="dirty-icon" title="Unsaved changes" transition:slide|local={{ axis: 'x', duration: 150 }}><PencilSquare size="1rem" /></span>{/if}
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events -->
 				<div class="toggle-group">
-					<span class="toggle-label">AGG</span>
-					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Aggregate in gateway (publish on bus subjects for HMI / history / MQTT consumers)">
+					<span class="toggle-label">ENABLE</span>
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Enable this variable in the gateway (publish on bus subjects for HMI / history / MQTT consumers)">
 						<input
 							type="checkbox"
 							checked={isPublished}
@@ -163,7 +163,7 @@
 				</div>
 				<div class="toggle-group">
 					<span class="toggle-label">MQTT</span>
-					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Forward to MQTT (requires Aggregate)">
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Forward to MQTT (requires Enable)">
 						<input
 							type="checkbox"
 							disabled={!isPublished}
@@ -175,7 +175,7 @@
 				</div>
 				<div class="toggle-group">
 					<span class="toggle-label">HIST</span>
-					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Record to history (requires Aggregate)">
+					<label class="toggle-switch" onclick={(e: MouseEvent) => e.stopPropagation()} title="Record to history (requires Enable)">
 						<input
 							type="checkbox"
 							disabled={!isPublished}

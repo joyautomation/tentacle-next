@@ -1030,14 +1030,14 @@
     const next = new Set(checkedUdtInstances);
     for (const key of keys) next.add(key);
     checkedUdtInstances = next;
-    saltState.addNotification({ message: `Aggregating ${keys.length} instances`, type: 'success' });
+    saltState.addNotification({ message: `Enabled ${keys.length} instances`, type: 'success' });
   }
 
   function batchMqttDisableInstances(keys: string[]) {
     const next = new Set(checkedUdtInstances);
     for (const key of keys) next.delete(key);
     checkedUdtInstances = next;
-    saltState.addNotification({ message: `Removed ${keys.length} instances from aggregate`, type: 'success' });
+    saltState.addNotification({ message: `Disabled ${keys.length} instances`, type: 'success' });
   }
 
   // ── UDT instance history toggle ──
@@ -1074,14 +1074,14 @@
     const next = new Set(checkedAtomicTags);
     for (const key of keys) next.add(key);
     checkedAtomicTags = next;
-    saltState.addNotification({ message: `Aggregating ${keys.length} tags`, type: 'success' });
+    saltState.addNotification({ message: `Enabled ${keys.length} tags`, type: 'success' });
   }
 
   function batchMqttDisable(keys: string[]) {
     const next = new Set(checkedAtomicTags);
     for (const key of keys) next.delete(key);
     checkedAtomicTags = next;
-    saltState.addNotification({ message: `Removed ${keys.length} tags from aggregate`, type: 'success' });
+    saltState.addNotification({ message: `Disabled ${keys.length} tags`, type: 'success' });
   }
 
   // ── Atomic history toggle ──

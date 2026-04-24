@@ -65,7 +65,7 @@
 	// Local filter/sort state
 	let filter = $state('');
 
-	type SortCol = 'tag' | 'value' | 'type' | 'agg' | 'mqtt' | 'history' | 'rbe' | 'deadband' | 'minTime' | 'maxTime' | 'status';
+	type SortCol = 'tag' | 'value' | 'type' | 'enable' | 'mqtt' | 'history' | 'rbe' | 'deadband' | 'minTime' | 'maxTime' | 'status';
 	let sortCol: SortCol = $state('tag');
 	let sortAsc = $state(true);
 
@@ -106,7 +106,7 @@
 					case 'tag': return dir * (a.name || a.tag).localeCompare(b.name || b.tag);
 					case 'value': return dir * String(a.value ?? '').localeCompare(String(b.value ?? ''));
 					case 'type': return dir * a.datatype.localeCompare(b.datatype);
-					case 'agg': return dir * (Number(pubA) - Number(pubB));
+					case 'enable': return dir * (Number(pubA) - Number(pubB));
 					case 'mqtt': {
 						const mA = pubA && !mqttDisabledTags.has(keyA);
 						const mB = pubB && !mqttDisabledTags.has(keyB);
@@ -193,7 +193,7 @@
 				<th style={hasValues ? 'width: 14%' : 'width: 18%'} class="sortable" class:sorted={sortCol === 'tag'} onclick={() => toggleSort('tag')}>Tag <span class="sort-arrow">{sortCol === 'tag' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				{#if hasValues}<th style="width: 11%" class="sortable" class:sorted={sortCol === 'value'} onclick={() => toggleSort('value')}>Value <span class="sort-arrow">{sortCol === 'value' ? (sortAsc ? '▲' : '▼') : ''}</span></th>{/if}
 				<th style="width: 6%" class="sortable" class:sorted={sortCol === 'type'} onclick={() => toggleSort('type')}>Type <span class="sort-arrow">{sortCol === 'type' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
-				<th style="width: 6%" class="sortable" class:sorted={sortCol === 'agg'} onclick={() => toggleSort('agg')}>Agg <span class="sort-arrow">{sortCol === 'agg' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
+				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'enable'} onclick={() => toggleSort('enable')}>Enable <span class="sort-arrow">{sortCol === 'enable' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 6%" class="sortable" class:sorted={sortCol === 'mqtt'} onclick={() => toggleSort('mqtt')}>MQTT <span class="sort-arrow">{sortCol === 'mqtt' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'history'} onclick={() => toggleSort('history')}>History <span class="sort-arrow">{sortCol === 'history' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
 				<th style="width: 7%" class="sortable" class:sorted={sortCol === 'rbe'} onclick={() => toggleSort('rbe')}>RBE <span class="sort-arrow">{sortCol === 'rbe' ? (sortAsc ? '▲' : '▼') : ''}</span></th>
@@ -233,8 +233,8 @@
 							{item.datatype}
 						</span>
 					</td>
-					<td data-label="Agg">
-						<label class="toggle-switch" title="Aggregate in gateway">
+					<td data-label="Enable">
+						<label class="toggle-switch" title="Enable this variable in the gateway">
 							<input
 								type="checkbox"
 								checked={published}
@@ -244,7 +244,7 @@
 						</label>
 					</td>
 					<td data-label="MQTT">
-						<label class="toggle-switch" title="Forward to MQTT (requires Aggregate)">
+						<label class="toggle-switch" title="Forward to MQTT (requires Enable)">
 							<input
 								type="checkbox"
 								disabled={!published}
@@ -255,7 +255,7 @@
 						</label>
 					</td>
 					<td data-label="History">
-						<label class="toggle-switch" title="Record to history (requires Aggregate)">
+						<label class="toggle-switch" title="Record to history (requires Enable)">
 							<input
 								type="checkbox"
 								disabled={!published}
