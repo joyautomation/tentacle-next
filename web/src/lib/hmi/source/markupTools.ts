@@ -187,6 +187,21 @@ export function setInlineStyleProps(
   return source.slice(0, t.openStart) + nextTag + source.slice(t.openEnd + 1);
 }
 
+/** Insert raw text immediately after the Nth element's open tag (i.e. as
+ * its first inner content). Self-closing tags can't have inner text and
+ * return null. Useful for dropping `{udt.member}` into an element. */
+export function insertTextInElement(
+  source: string,
+  idx: number,
+  text: string,
+): string | null {
+  const tags = findElementOpenTags(source);
+  const t = tags[idx];
+  if (!t || t.selfClosing) return null;
+  const insertAt = t.openEnd + 1;
+  return source.slice(0, insertAt) + text + source.slice(insertAt);
+}
+
 /** Parse the inline `style="…"` declarations on the Nth element into a
  * key→value map. Returns an empty map if no style attribute is present,
  * or null when `idx` is out of range. */

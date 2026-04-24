@@ -15,8 +15,12 @@
     setInlineStyleProps,
     getInlineStyleProps,
     deleteElementAtIndex,
+    insertTextInElement,
   } from '$lib/hmi/source/markupTools';
-  import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember } from '$lib/types/hmi';
+  import { tagStore, useLiveTags } from '$lib/hmi/tagStore.svelte';
+  import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember, HmiUdtInstance } from '$lib/types/hmi';
+
+  useLiveTags();
 
   const appId = $derived($page.params.appId as string);
   const componentId = $derived($page.params.componentId as string);
@@ -76,7 +80,31 @@
     return null;
   }
 
-  const previewProps = $derived<Record<string, unknown>>(inUdtMode ? { udt: mockUdt } : {});
+  // Picked UDT instance for the preview — defaults to the first instance the
+  // template reports. `null` falls back to the mock object so the preview
+  // still renders before the gateway has anything to offer.
+  let selectedInstanceKey = $state<string | null>(null);
+  const instances = $derived<HmiUdtInstance[]>(template?.instances ?? []);
+
+  function instanceKey(i: HmiUdtInstance): string {
+    return `${i.gatewayId}/${i.id}`;
+  }
+
+  $effect(() => {
+    if (!inUdtMode) {
+      selectedInstanceKey = null;
+      return;
+    }
+    if (selectedInstanceKey && instances.some((i) => instanceKey(i) === selectedInstanceKey)) return;
+    selectedInstanceKey = instances[0] ? instanceKey(instances[0]) : null;
+  });
+
+  const liveUdt = $derived(
+    selectedInstanceKey ? tagStore.values[selectedInstanceKey] : undefined,
+  );
+  const previewUdt = $derived(liveUdt && typeof liveUdt === 'object' ? liveUdt : mockUdt);
+
+  const previewProps = $derived<Record<string, unknown>>(inUdtMode ? { udt: previewUdt } : {});
   const scriptHeader = $derived(inUdtMode ? 'let { udt } = $props();' : '');
 
   async function refresh() {
@@ -137,6 +165,13 @@
 
   function onElementSelect(idx: number | null) {
     selectedIdx = idx;
+  }
+
+  function onUdtMemberDrop(idx: number, memberName: string) {
+    const next = insertTextInElement(source, idx, `{udt.${memberName}}`);
+    if (next === null || next === source) return;
+    source = next;
+    dirty = true;
   }
 
   function onAnchorChange(
@@ -367,6 +402,7 @@
                 snapGrid={snapEnabled ? SNAP : 0}
                 {selectedIdx}
                 {onClassDrop}
+                {onUdtMemberDrop}
                 {onElementMove}
                 {onElementSelect}
               />
@@ -405,10 +441,30 @@
         {#if inUdtMode}
           <details class="udt-info" open>
             <summary>UDT members</summary>
-            <p class="hint">Use <code>udt.&lt;member&gt;</code> in your markup.</p>
+            {#if instances.length > 0}
+              <div class="instance-picker">
+                <label for="udt-instance-pick">preview instance</label>
+                <select id="udt-instance-pick" bind:value={selectedInstanceKey}>
+                  {#each instances as inst (instanceKey(inst))}
+                    <option value={instanceKey(inst)}>{inst.tag || inst.id} ({inst.gatewayId})</option>
+                  {/each}
+                </select>
+              </div>
+            {:else}
+              <p class="hint no-inst">No live instances reported — preview uses mock values.</p>
+            {/if}
+            <p class="hint">Drag a member onto an element in the preview to insert <code>{'{udt.member}'}</code>.</p>
             <ul>
               {#each members as m (m.name)}
-                <li><code>udt.{m.name}</code> <span class="dt">{m.datatype}</span></li>
+                <li
+                  draggable="true"
+                  ondragstart={(e) => {
+                    if (!e.dataTransfer) return;
+                    e.dataTransfer.setData('application/x-hmi-udt-member', JSON.stringify({ name: m.name }));
+                    e.dataTransfer.setData('text/plain', `{udt.${m.name}}`);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                ><code>udt.{m.name}</code> <span class="dt">{m.datatype}</span></li>
               {/each}
             </ul>
           </details>
@@ -576,11 +632,38 @@
     ul { margin: 0; padding: 0 0 0 0.75rem; }
     li {
       list-style: none;
-      padding: 0.125rem 0;
+      padding: 0.125rem 0.25rem;
       color: var(--theme-text);
+      cursor: grab;
+      border-radius: var(--rounded-sm, 4px);
+      &:hover { background: color-mix(in srgb, var(--theme-text) 10%, transparent); }
+      &:active { cursor: grabbing; }
       code { font-family: 'IBM Plex Mono', monospace; }
       .dt { color: var(--theme-text-muted); margin-left: 0.5rem; font-size: 0.6875rem; }
     }
+    .instance-picker {
+      display: grid;
+      grid-template-columns: 6rem 1fr;
+      align-items: center;
+      gap: 0.5rem;
+      margin: 0.5rem 0;
+      label {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.6875rem;
+        color: var(--theme-text-muted);
+      }
+      select {
+        background: var(--theme-background);
+        border: 1px solid var(--theme-border);
+        color: var(--theme-text);
+        padding: 0.25rem 0.375rem;
+        border-radius: var(--rounded-sm, 4px);
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.75rem;
+        &:focus { outline: none; border-color: var(--theme-text); }
+      }
+    }
+    .no-inst { font-style: italic; }
   }
   .banner.error {
     margin: 0.75rem 1rem;

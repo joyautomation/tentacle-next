@@ -26,6 +26,9 @@
     /** Called when a class chip is dropped on the preview surface. The host
      * is expected to splice the class onto the source's Nth element. */
     onClassDrop?: (idx: number, className: string) => void;
+    /** Called when a UDT member chip is dropped on an element. The host
+     * inserts `{udt.<name>}` as inner text on the source's Nth element. */
+    onUdtMemberDrop?: (idx: number, memberName: string) => void;
     /** Called when an element is dragged to a new position in absolute mode.
      * `offsets` carries only the anchors that were in use (left vs right,
      * top vs bottom) — detected from the element's existing inline style. */
@@ -54,6 +57,7 @@
     snapGrid = 0,
     debounceMs = 300,
     onClassDrop,
+    onUdtMemberDrop,
     onElementMove,
     selectedIdx = null,
     onElementSelect,
@@ -127,9 +131,12 @@
     return null;
   }
 
+  const HMI_DRAG_TYPES = ['application/x-hmi-class', 'application/x-hmi-udt-member'];
+
   function onDragOver(e: DragEvent) {
     if (!e.dataTransfer) return;
-    if (!Array.from(e.dataTransfer.types).includes('application/x-hmi-class')) return;
+    const types = Array.from(e.dataTransfer.types);
+    if (!HMI_DRAG_TYPES.some((t) => types.includes(t))) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     dropTargetIdx = elementAt(e.target)?.idx ?? null;
@@ -141,16 +148,21 @@
 
   function onDrop(e: DragEvent) {
     if (!e.dataTransfer) return;
-    const raw = e.dataTransfer.getData('application/x-hmi-class');
-    if (!raw) return;
+    const classRaw = e.dataTransfer.getData('application/x-hmi-class');
+    const memberRaw = e.dataTransfer.getData('application/x-hmi-udt-member');
+    if (!classRaw && !memberRaw) return;
     e.preventDefault();
     const idx = elementAt(e.target)?.idx ?? null;
     dropTargetIdx = null;
     if (idx === null) return;
     try {
-      const { name } = JSON.parse(raw) as { name: string };
-      if (!name) return;
-      onClassDrop?.(idx, name);
+      if (classRaw) {
+        const { name } = JSON.parse(classRaw) as { name: string };
+        if (name) onClassDrop?.(idx, name);
+      } else if (memberRaw) {
+        const { name } = JSON.parse(memberRaw) as { name: string };
+        if (name) onUdtMemberDrop?.(idx, name);
+      }
     } catch {
       // ignore malformed
     }
