@@ -142,9 +142,9 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		changed bool
 	}
 	var syncWg sync.WaitGroup
-	syncResults := make([]syncResult, 3)
+	syncResults := make([]syncResult, 4)
 
-	syncWg.Add(3)
+	syncWg.Add(4)
 	go func() {
 		defer syncWg.Done()
 		syncResults[0].changed = m.syncNetworkInterfaces(cfg)
@@ -157,9 +157,13 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 		defer syncWg.Done()
 		syncResults[2].changed = m.syncModuleStatus(cfg, gatewayID, "mqtt")
 	}()
+	go func() {
+		defer syncWg.Done()
+		syncResults[3].changed = m.syncPlcVariables(cfg, gatewayID)
+	}()
 	syncWg.Wait()
 
-	configChanged := syncResults[0].changed || syncResults[1].changed || syncResults[2].changed
+	configChanged := syncResults[0].changed || syncResults[1].changed || syncResults[2].changed || syncResults[3].changed
 	if configChanged {
 		if err := m.putGatewayConfig(cfg); err != nil {
 			m.log.Warn("api: failed to persist auto-sync", "error", err)
