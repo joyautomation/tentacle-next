@@ -41,12 +41,33 @@
     testsRunning,
   }: Props = $props();
 
-  function newProgramTab() {
+  function newProgramTab(language: string = "starlark") {
     // Functions are created in-editor: a blank tab opens, the user types
-    // their def, and the program name is derived from the def header on
-    // save. No modal.
-    workspaceTabs.openNew("program", "starlark");
+    // their def/program header, and the program name is derived from the
+    // header on save. No modal.
+    workspaceTabs.openNew("program", language);
+    programMenuOpen = false;
   }
+
+  let programMenuOpen = $state(false);
+  let programMenuAnchor = $state<HTMLElement | null>(null);
+
+  function onProgramMenuKey(e: KeyboardEvent) {
+    if (e.key === "Escape") programMenuOpen = false;
+  }
+
+  function onDocumentClick(e: MouseEvent) {
+    if (!programMenuOpen) return;
+    const t = e.target as Node | null;
+    if (t && programMenuAnchor && programMenuAnchor.contains(t)) return;
+    programMenuOpen = false;
+  }
+
+  $effect(() => {
+    if (!programMenuOpen) return;
+    window.addEventListener("click", onDocumentClick);
+    return () => window.removeEventListener("click", onDocumentClick);
+  });
 
   function newTestTab() {
     workspaceTabs.openNew("test", "starlark");
@@ -551,15 +572,46 @@
           <span class="label">Functions</span>
           <span class="count">{programEntries.length}</span>
         </button>
-        <button
-          type="button"
-          class="add-btn"
-          onclick={newProgramTab}
-          title="New function"
-          aria-label="New function"
+        <div
+          class="add-menu-wrap"
+          bind:this={programMenuAnchor}
+          onkeydown={onProgramMenuKey}
+          role="presentation"
         >
-          <Plus size="0.875rem" />
-        </button>
+          <button
+            type="button"
+            class="add-btn"
+            onclick={() => (programMenuOpen = !programMenuOpen)}
+            title="New function"
+            aria-label="New function"
+            aria-haspopup="menu"
+            aria-expanded={programMenuOpen}
+          >
+            <Plus size="0.875rem" />
+          </button>
+          {#if programMenuOpen}
+            <div class="add-menu" role="menu" transition:slide={{ duration: 120 }}>
+              <button
+                type="button"
+                role="menuitem"
+                class="add-menu-item"
+                onclick={() => newProgramTab("starlark")}
+              >
+                <span class="badge lang">PY</span>
+                <span class="add-menu-label">Starlark</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="add-menu-item"
+                onclick={() => newProgramTab("st")}
+              >
+                <span class="badge lang">ST</span>
+                <span class="add-menu-label">Structured Text</span>
+              </button>
+            </div>
+          {/if}
+        </div>
       </div>
       {#if sections.programs}
         <ul class="items" transition:slide={{ duration: 150 }}>
@@ -1081,6 +1133,55 @@
   .play-icon {
     font-size: 0.625rem;
     line-height: 1;
+  }
+
+  .add-menu-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .add-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 10;
+    min-width: 11rem;
+    margin-top: 0.125rem;
+    padding: 0.25rem;
+    background: var(--theme-background);
+    border: 1px solid var(--theme-border);
+    border-radius: 0.375rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    gap: 0.0625rem;
+  }
+
+  .add-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.5rem;
+    background: transparent;
+    border: none;
+    border-radius: 0.25rem;
+    color: var(--theme-text);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    text-align: left;
+
+    &:hover {
+      background: var(--theme-surface);
+    }
+
+    &:focus-visible {
+      outline: 1px solid var(--theme-primary);
+      outline-offset: -1px;
+    }
+  }
+
+  .add-menu-label {
+    flex: 1;
   }
 
 </style>

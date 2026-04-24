@@ -64,9 +64,12 @@
 		onDirtyChange
 	}: Props = $props();
 
-	// Placeholder body seeded into a brand-new tab. The user edits the def
-	// name in-place — pendingName is derived from the def header below.
-	const NEW_PROGRAM_PLACEHOLDER = 'def new_function():\n    pass\n';
+	// Placeholder bodies seeded into brand-new tabs. The user edits the
+	// header name in-place — pendingName is derived from the def/PROGRAM
+	// header below depending on the language.
+	const NEW_STARLARK_PLACEHOLDER = 'def new_function():\n    pass\n';
+	const NEW_ST_PLACEHOLDER =
+		'PROGRAM new_program\nVAR_GLOBAL\nEND_VAR\n\nEND_PROGRAM\n';
 
 	let loading = $state(false);
 	let saving = $state(false);
@@ -81,12 +84,13 @@
 	let tryStarting = $state(false);
 	let tryRemaining = $state(0);
 	const TRY_TIMEOUT_SECONDS = 120;
-	let serverSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
-	let serverStSource = $state('');
+	const newIsST = isNew && initialLanguage === 'st';
+	let serverSource = $state(isNew && !newIsST ? NEW_STARLARK_PLACEHOLDER : '');
+	let serverStSource = $state(newIsST ? NEW_ST_PLACEHOLDER : '');
 	let serverTags = $state<string[]>([]);
 	let language = $state<string>(isNew ? initialLanguage : 'starlark');
-	let draftSource = $state(isNew ? NEW_PROGRAM_PLACEHOLDER : '');
-	let draftStSource = $state('');
+	let draftSource = $state(isNew && !newIsST ? NEW_STARLARK_PLACEHOLDER : '');
+	let draftStSource = $state(newIsST ? NEW_ST_PLACEHOLDER : '');
 	let draftTags = $state<string[]>([]);
 
 	const dirty = $derived(
@@ -103,17 +107,24 @@
 		!isNew && (draftSource !== serverSource || draftStSource !== serverStSource)
 	);
 
-	// Name derived from the first `def` header in the current source.
-	// Drives the tab label for unsaved tabs and the rename check for saved
-	// ones — editing the def is the user's way of naming the function.
+	// Name derived from the language-appropriate header in the current
+	// source. Drives the tab label for unsaved tabs and the rename check
+	// for saved ones — editing the header is the user's way of naming
+	// the function.
 	function extractDefName(src: string): string {
 		const m = src.match(/^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/m);
 		return m?.[1] ?? '';
 	}
 
+	function extractProgramName(src: string): string {
+		const m = src.match(/^\s*PROGRAM\s+([A-Za-z_][A-Za-z0-9_]*)/im);
+		return m?.[1] ?? '';
+	}
+
 	const pendingName = $derived.by(() => {
-		if (language !== 'starlark') return name;
-		return extractDefName(draftSource);
+		if (language === 'st') return extractProgramName(draftStSource);
+		if (language === 'starlark') return extractDefName(draftSource);
+		return name;
 	});
 
 	const nameIsValid = $derived(/^[A-Za-z_][A-Za-z0-9_]*$/.test(pendingName));
@@ -285,6 +296,11 @@
 			if (!nameIsValid) return `"${pendingName}" is not a valid identifier`;
 			if (nameCollision) return `A program named "${pendingName}" already exists`;
 		}
+		if (language === 'st') {
+			if (!pendingName) return 'Add a PROGRAM header to name this program';
+			if (!nameIsValid) return `"${pendingName}" is not a valid identifier`;
+			if (nameCollision) return `A program named "${pendingName}" already exists`;
+		}
 		if (errorCount > 0) return `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before saving`;
 		return undefined;
 	});
@@ -292,7 +308,7 @@
 	const canSave = $derived.by(() => {
 		if (!dirty || saving) return false;
 		if (errorCount > 0) return false;
-		if (language === 'starlark') {
+		if (language === 'starlark' || language === 'st') {
 			if (!nameIsValid) return false;
 			if (nameCollision) return false;
 		}
@@ -303,11 +319,13 @@
 		if (!canSave) return;
 		saving = true;
 		try {
-			// For Starlark, the stored key follows the def header. New tabs
-			// POST to the derived name; saved tabs PUT to the old key and
-			// ask the server to rename when the def has changed.
+			// The stored key follows the language's header (def for Starlark,
+			// PROGRAM for ST). New tabs POST to the derived name; saved tabs
+			// PUT to the old key and ask the server to rename when the
+			// header has changed.
 			const urlName = isNew ? pendingName : name;
-			const bodyName = language === 'starlark' ? pendingName : name;
+			const bodyName =
+				language === 'starlark' || language === 'st' ? pendingName : name;
 			const body: Record<string, unknown> = {
 				name: bodyName,
 				language,
