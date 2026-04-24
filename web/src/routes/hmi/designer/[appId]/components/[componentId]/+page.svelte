@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
+  import { Pane, Splitpanes } from 'svelte-splitpanes';
+  import { ChevronLeft, ChevronRight } from '@joyautomation/salt/icons';
   import { getHmiApp, putHmiComponent, listHmiUdts } from '$lib/api/hmi';
+  import { createDesignerLayout } from '$lib/hmi/designer/designer-layout.svelte';
   import ClassRail from '$lib/hmi/styles/ClassRail.svelte';
   import ClassEditor from '$lib/hmi/styles/ClassEditor.svelte';
   import HtmlPalette from '$lib/hmi/source/HtmlPalette.svelte';
@@ -21,6 +24,34 @@
   import type { HmiAppConfig, HmiComponentConfig, HmiUdtTemplate, HmiUdtMember, HmiUdtInstance } from '$lib/types/hmi';
 
   useLiveTags();
+
+  const layout = createDesignerLayout();
+
+  function toggleLeft() {
+    layout.leftOpen = !layout.leftOpen;
+  }
+  function toggleRight() {
+    layout.rightOpen = !layout.rightOpen;
+  }
+
+  function onMainResize(sizes: { size: number }[]) {
+    // sizes align with rendered panes: [left?, center, right?]
+    let i = 0;
+    if (layout.leftOpen) {
+      layout.leftSize = sizes[i].size;
+      i++;
+    }
+    // center (skip)
+    i++;
+    if (layout.rightOpen) {
+      layout.rightSize = sizes[i].size;
+    }
+  }
+
+  function onCenterResize(sizes: { size: number }[]) {
+    // [preview, editor]
+    if (sizes[0]) layout.previewSize = sizes[0].size;
+  }
 
   const appId = $derived($page.params.appId as string);
   const componentId = $derived($page.params.componentId as string);
@@ -366,150 +397,230 @@
     <p class="muted">Component not found.</p>
   {:else}
     <div class="workspace">
-      <HtmlPalette {onInsert} />
-      <div class="center">
-        <div class="preview-pane">
-          <div class="preview-toolbar">
-            <label class="snap">
-              <input type="checkbox" bind:checked={snapEnabled} />
-              snap to grid ({SNAP}px)
-            </label>
-            <span class="size-readout">
-              {previewWidth ? `${Math.round(previewWidth)}px` : 'fluid'}
-              ×
-              {previewHeight ? `${Math.round(previewHeight)}px` : 'fluid'}
-            </span>
-            <button class="reset" onclick={resetSize} disabled={previewWidth === null && previewHeight === null}>
-              reset
-            </button>
-          </div>
-          <div class="preview-frame-wrap">
-            <div
-              class="preview-frame"
-              bind:this={previewFrameEl}
-              style:width={previewWidth ? `${previewWidth}px` : '100%'}
-              style:height={previewHeight ? `${previewHeight}px` : '100%'}
-            >
-              <SveltePreview
-                {source}
-                {scriptHeader}
-                props={previewProps}
-                appClasses={app?.classes}
-                componentClasses={classes}
-                {prefix}
-                {containerProps}
-                {containerCss}
-                snapGrid={snapEnabled ? SNAP : 0}
-                {selectedIdx}
-                {onClassDrop}
-                {onUdtMemberDrop}
-                {onElementMove}
-                {onElementSelect}
-              />
-              <div
-                class="resize-handle x"
-                onpointerdown={startResize('x')}
-                role="separator"
-                aria-orientation="vertical"
-              ></div>
-              <div
-                class="resize-handle y"
-                onpointerdown={startResize('y')}
-                role="separator"
-                aria-orientation="horizontal"
-              ></div>
-              <div
-                class="resize-handle both"
-                onpointerdown={startResize('both')}
-                role="separator"
-              ></div>
-            </div>
-          </div>
-        </div>
-        <div class="editor-pane">
-          <CodeEditor
-            bind:this={editorRef}
-            value={source}
-            onChange={onSourceChange}
-            placeholder={inUdtMode
-              ? '<div>\n  <span>{udt.member}</span>\n</div>'
-              : '<div>...</div>'}
-          />
-        </div>
-      </div>
-      <div class="right-rail">
-        {#if inUdtMode}
-          <details class="udt-info" open>
-            <summary>UDT members</summary>
-            {#if instances.length > 0}
-              <div class="instance-picker">
-                <label for="udt-instance-pick">preview instance</label>
-                <select id="udt-instance-pick" bind:value={selectedInstanceKey}>
-                  {#each instances as inst (instanceKey(inst))}
-                    <option value={instanceKey(inst)}>{inst.tag || inst.id} ({inst.gatewayId})</option>
-                  {/each}
-                </select>
-              </div>
-            {:else}
-              <p class="hint no-inst">No live instances reported — preview uses mock values.</p>
-            {/if}
-            <p class="hint">Drag a member onto an element in the preview to insert <code>{'{udt.member}'}</code>.</p>
-            <ul>
-              {#each members as m (m.name)}
-                {@const live = liveUdt && typeof liveUdt === 'object' ? (liveUdt as Record<string, unknown>)[m.name] : undefined}
-                <li
-                  draggable="true"
-                  ondragstart={(e) => {
-                    if (!e.dataTransfer) return;
-                    e.dataTransfer.setData('application/x-hmi-udt-member', JSON.stringify({ name: m.name }));
-                    e.dataTransfer.setData('text/plain', `{udt.${m.name}}`);
-                    e.dataTransfer.effectAllowed = 'copy';
-                  }}
-                >
-                  <code>udt.{m.name}</code>
-                  <span class="dt">{m.datatype}</span>
-                  {#if selectedInstanceKey}
-                    <span class="val" class:missing={live === undefined}>
-                      {live === undefined ? '—' : String(live)}
-                    </span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-            {#if selectedInstanceKey && liveUdt === undefined}
-              <p class="hint warn">
-                No live data for <code>{selectedInstanceKey}</code> yet. Either the gateway hasn't published, or the instance key doesn't match the stream's <code>{'{moduleId}/{variableId}'}</code>.
-              </p>
-            {:else if selectedInstanceKey && liveUdt && typeof liveUdt === 'object'}
-              <p class="hint">
-                live keys: <code>{Object.keys(liveUdt as Record<string, unknown>).join(', ') || '(empty)'}</code>
-              </p>
-            {/if}
-          </details>
+      <div class="split-root">
+        {#if !layout.leftOpen}
+          <button
+            type="button"
+            class="rail rail-left"
+            onclick={toggleLeft}
+            title="Show palette"
+            aria-label="Show palette"
+          >
+            <ChevronRight size="0.875rem" />
+            <span class="rail-label">Palette</span>
+          </button>
         {/if}
-        <ContainerEditor
-          props={containerProps}
-          css={containerCss}
-          onChange={onContainerChange}
-        />
-        <ElementEditor
-          idx={selectedIdx}
-          anchors={selectedAnchors}
-          {onAnchorChange}
-          onClear={() => (selectedIdx = null)}
-        />
-        <ClassRail
-          title="App classes"
-          classes={app?.classes}
-          accent="app"
-          editHref="/hmi/designer/{encodeURIComponent(appId)}/styles"
-        />
-        <ClassEditor
-          {classes}
-          onChange={onClassesChange}
-          title="Component classes"
-          accent="component"
-        />
+        <div class="split-area">
+          <Splitpanes theme="hmi-designer" on:resized={(e) => onMainResize(e.detail)}>
+            {#if layout.leftOpen}
+              <Pane size={layout.leftSize} minSize={8}>
+                <section class="panel">
+                  <header class="panel-header">
+                    <span>Palette</span>
+                    <button
+                      type="button"
+                      class="collapse-btn"
+                      onclick={toggleLeft}
+                      title="Hide palette"
+                      aria-label="Hide palette"
+                    >
+                      <ChevronLeft size="0.875rem" />
+                    </button>
+                  </header>
+                  <div class="panel-body no-pad">
+                    <HtmlPalette {onInsert} />
+                  </div>
+                </section>
+              </Pane>
+            {/if}
+            <Pane minSize={20}>
+              <section class="panel">
+                <Splitpanes
+                  horizontal
+                  theme="hmi-designer"
+                  on:resized={(e) => onCenterResize(e.detail)}
+                >
+                  <Pane size={layout.previewSize} minSize={15}>
+                    <div class="preview-pane">
+                      <div class="preview-toolbar">
+                        <label class="snap">
+                          <input type="checkbox" bind:checked={snapEnabled} />
+                          snap to grid ({SNAP}px)
+                        </label>
+                        <span class="size-readout">
+                          {previewWidth ? `${Math.round(previewWidth)}px` : 'fluid'}
+                          ×
+                          {previewHeight ? `${Math.round(previewHeight)}px` : 'fluid'}
+                        </span>
+                        <button class="reset" onclick={resetSize} disabled={previewWidth === null && previewHeight === null}>
+                          reset
+                        </button>
+                      </div>
+                      <div class="preview-frame-wrap">
+                        <div
+                          class="preview-frame"
+                          bind:this={previewFrameEl}
+                          style:width={previewWidth ? `${previewWidth}px` : '100%'}
+                          style:height={previewHeight ? `${previewHeight}px` : '100%'}
+                        >
+                          <SveltePreview
+                            {source}
+                            {scriptHeader}
+                            props={previewProps}
+                            appClasses={app?.classes}
+                            componentClasses={classes}
+                            {prefix}
+                            {containerProps}
+                            {containerCss}
+                            snapGrid={snapEnabled ? SNAP : 0}
+                            {selectedIdx}
+                            {onClassDrop}
+                            {onUdtMemberDrop}
+                            {onElementMove}
+                            {onElementSelect}
+                          />
+                          <div
+                            class="resize-handle x"
+                            onpointerdown={startResize('x')}
+                            role="separator"
+                            aria-orientation="vertical"
+                          ></div>
+                          <div
+                            class="resize-handle y"
+                            onpointerdown={startResize('y')}
+                            role="separator"
+                            aria-orientation="horizontal"
+                          ></div>
+                          <div
+                            class="resize-handle both"
+                            onpointerdown={startResize('both')}
+                            role="separator"
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  </Pane>
+                  <Pane minSize={15}>
+                    <div class="editor-pane">
+                      <CodeEditor
+                        bind:this={editorRef}
+                        value={source}
+                        onChange={onSourceChange}
+                        placeholder={inUdtMode
+                          ? '<div>\n  <span>{udt.member}</span>\n</div>'
+                          : '<div>...</div>'}
+                      />
+                    </div>
+                  </Pane>
+                </Splitpanes>
+              </section>
+            </Pane>
+            {#if layout.rightOpen}
+              <Pane size={layout.rightSize} minSize={12}>
+                <section class="panel">
+                  <header class="panel-header">
+                    <span>Inspector</span>
+                    <button
+                      type="button"
+                      class="collapse-btn"
+                      onclick={toggleRight}
+                      title="Hide inspector"
+                      aria-label="Hide inspector"
+                    >
+                      <ChevronRight size="0.875rem" />
+                    </button>
+                  </header>
+                  <div class="panel-body right-rail">
+                    {#if inUdtMode}
+                      <details class="udt-info" open>
+                        <summary>UDT members</summary>
+                        {#if instances.length > 0}
+                          <div class="instance-picker">
+                            <label for="udt-instance-pick">preview instance</label>
+                            <select id="udt-instance-pick" bind:value={selectedInstanceKey}>
+                              {#each instances as inst (instanceKey(inst))}
+                                <option value={instanceKey(inst)}>{inst.tag || inst.id} ({inst.gatewayId})</option>
+                              {/each}
+                            </select>
+                          </div>
+                        {:else}
+                          <p class="hint no-inst">No live instances reported — preview uses mock values.</p>
+                        {/if}
+                        <p class="hint">Drag a member onto an element in the preview to insert <code>{'{udt.member}'}</code>.</p>
+                        <ul>
+                          {#each members as m (m.name)}
+                            {@const live = liveUdt && typeof liveUdt === 'object' ? (liveUdt as Record<string, unknown>)[m.name] : undefined}
+                            <li
+                              draggable="true"
+                              ondragstart={(e) => {
+                                if (!e.dataTransfer) return;
+                                e.dataTransfer.setData('application/x-hmi-udt-member', JSON.stringify({ name: m.name }));
+                                e.dataTransfer.setData('text/plain', `{udt.${m.name}}`);
+                                e.dataTransfer.effectAllowed = 'copy';
+                              }}
+                            >
+                              <code>udt.{m.name}</code>
+                              <span class="dt">{m.datatype}</span>
+                              {#if selectedInstanceKey}
+                                <span class="val" class:missing={live === undefined}>
+                                  {live === undefined ? '—' : String(live)}
+                                </span>
+                              {/if}
+                            </li>
+                          {/each}
+                        </ul>
+                        {#if selectedInstanceKey && liveUdt === undefined}
+                          <p class="hint warn">
+                            No live data for <code>{selectedInstanceKey}</code> yet. Either the gateway hasn't published, or the instance key doesn't match the stream's <code>{'{moduleId}/{variableId}'}</code>.
+                          </p>
+                        {:else if selectedInstanceKey && liveUdt && typeof liveUdt === 'object'}
+                          <p class="hint">
+                            live keys: <code>{Object.keys(liveUdt as Record<string, unknown>).join(', ') || '(empty)'}</code>
+                          </p>
+                        {/if}
+                      </details>
+                    {/if}
+                    <ContainerEditor
+                      props={containerProps}
+                      css={containerCss}
+                      onChange={onContainerChange}
+                    />
+                    <ElementEditor
+                      idx={selectedIdx}
+                      anchors={selectedAnchors}
+                      {onAnchorChange}
+                      onClear={() => (selectedIdx = null)}
+                    />
+                    <ClassRail
+                      title="App classes"
+                      classes={app?.classes}
+                      accent="app"
+                      editHref="/hmi/designer/{encodeURIComponent(appId)}/styles"
+                    />
+                    <ClassEditor
+                      {classes}
+                      onChange={onClassesChange}
+                      title="Component classes"
+                      accent="component"
+                    />
+                  </div>
+                </section>
+              </Pane>
+            {/if}
+          </Splitpanes>
+        </div>
+        {#if !layout.rightOpen}
+          <button
+            type="button"
+            class="rail rail-right"
+            onclick={toggleRight}
+            title="Show inspector"
+            aria-label="Show inspector"
+          >
+            <ChevronLeft size="0.875rem" />
+            <span class="rail-label">Inspector</span>
+          </button>
+        {/if}
       </div>
     </div>
   {/if}
@@ -539,20 +650,106 @@
     &:disabled { opacity: 0.5; cursor: default; }
   }
   .workspace { flex: 1; display: flex; min-height: 0; overflow: hidden; }
-  .center {
+  .split-root {
     flex: 1;
+    min-height: 0;
     min-width: 0;
     display: flex;
+    flex-direction: row;
+  }
+  .split-area {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
     flex-direction: column;
-    padding: 0.5rem;
+  }
+  .rail {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
     gap: 0.5rem;
+    padding: 0;
+    background: var(--theme-surface);
+    border: 0;
+    color: var(--theme-text-muted);
+    cursor: pointer;
+    transition: color 0.12s ease, background 0.12s ease;
+    &:hover {
+      color: var(--theme-primary);
+      background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-surface));
+    }
+  }
+  .rail-left,
+  .rail-right {
+    flex-direction: column;
+    width: 1.75rem;
+    flex-shrink: 0;
+    padding: 0.625rem 0;
+  }
+  .rail-left { border-right: 1px solid var(--theme-border); }
+  .rail-right { border-left: 1px solid var(--theme-border); }
+  .rail-label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background: var(--theme-background);
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-height: 20px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--theme-text-muted);
+    background: var(--theme-surface);
+    border-bottom: 1px solid var(--theme-border);
+  }
+  .collapse-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: var(--theme-text-muted);
+    cursor: pointer;
+    border-radius: 0.1875rem;
+    transition: color 0.12s ease, background 0.12s ease;
+    &:hover {
+      color: var(--theme-text);
+      background: var(--theme-border);
+    }
+  }
+  .panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.75rem;
+    &.no-pad { padding: 0; }
   }
   .preview-pane {
-    flex: 1 1 50%;
-    min-height: 8rem;
+    height: 100%;
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
+    padding: 0.5rem;
     min-height: 0;
   }
   .preview-toolbar {
@@ -615,19 +812,19 @@
     }
   }
   .editor-pane {
-    flex: 1 1 50%;
-    min-height: 10rem;
+    height: 100%;
+    min-height: 0;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    :global(> *) { flex: 1; min-height: 0; }
   }
   .right-rail {
-    width: 18rem;
-    flex-shrink: 0;
-    border-left: 1px solid var(--theme-border);
-    background: var(--theme-surface);
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
     padding: 0.5rem;
+    background: var(--theme-surface);
   }
   .udt-info {
     background: var(--theme-background);
@@ -704,4 +901,22 @@
     color: #ef4444;
   }
   .muted { color: var(--theme-text-muted); padding: 1.5rem; }
+
+  :global(.splitpanes.hmi-designer .splitpanes__splitter) {
+    background: var(--theme-border);
+    position: relative;
+    transition: background 0.15s ease;
+  }
+  :global(.splitpanes.hmi-designer .splitpanes__splitter:hover),
+  :global(.splitpanes.hmi-designer .splitpanes__splitter.splitpanes__splitter--active) {
+    background: var(--theme-primary);
+  }
+  :global(.splitpanes.hmi-designer.splitpanes--vertical > .splitpanes__splitter) {
+    width: 4px;
+    cursor: col-resize;
+  }
+  :global(.splitpanes.hmi-designer.splitpanes--horizontal > .splitpanes__splitter) {
+    height: 4px;
+    cursor: row-resize;
+  }
 </style>
