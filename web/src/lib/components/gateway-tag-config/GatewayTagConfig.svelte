@@ -1912,6 +1912,8 @@
             <InstancesTab
               instances={activeInstances}
               analogMembers={enabledAnalogMembers}
+              {liveValues}
+              {variableIdByTag}
               {expandedInstances}
               checkedInstances={checkedUdtInstances}
               checkedHistoryInstances={checkedHistoryUdtInstances}

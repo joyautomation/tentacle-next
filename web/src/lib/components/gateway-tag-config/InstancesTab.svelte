@@ -10,6 +10,8 @@
 	let {
 		instances,
 		analogMembers,
+		liveValues,
+		variableIdByTag,
 		expandedInstances,
 		checkedInstances,
 		checkedHistoryInstances,
@@ -40,6 +42,8 @@
 	}: {
 		instances: InstanceInfo[];
 		analogMembers: GatewayUdtTemplateMember[];
+		liveValues: Record<string, unknown>;
+		variableIdByTag: Map<string, string>;
 		dirtyInstanceKeys: Set<string>;
 		dirtyInstanceMembers: Map<string, Set<string>>;
 		expandedInstances: Set<string>;
@@ -146,6 +150,9 @@
 		{@const ovCount = getOverrideCount(inst.id)}
 		{@const publishKey = `${inst.deviceId}::${inst.tag}`}
 		{@const isPublished = checkedInstances.has(publishKey)}
+		{@const varId = variableIdByTag.get(publishKey)}
+		{@const liveObj = varId ? liveValues[`${inst.deviceId}::${varId}`] : undefined}
+		{@const memberValues = (liveObj && typeof liveObj === 'object') ? liveObj as Record<string, unknown> : null}
 		<div class="inst-row" class:row-dirty={dirtyInstanceKeys.has(publishKey)}>
 			<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
 			<div class="inst-head" onclick={() => onToggleExpand(inst.id)}>
@@ -211,12 +218,13 @@
 						<table class="inst-table">
 							<thead>
 								<tr>
-									<th style="width:20%">Member</th>
-									<th style="width:10%">RBE</th>
-									<th style="width:14%">Deadband</th>
-									<th style="width:12%">Min (ms)</th>
-									<th style="width:12%">Max (ms)</th>
-									<th style="width:12%">Status</th>
+									<th style="width:18%">Member</th>
+									<th style="width:12%">Value</th>
+									<th style="width:9%">RBE</th>
+									<th style="width:13%">Deadband</th>
+									<th style="width:11%">Min (ms)</th>
+									<th style="width:11%">Max (ms)</th>
+									<th style="width:11%">Status</th>
 									<th style="width:10%"></th>
 								</tr>
 							</thead>
@@ -227,8 +235,10 @@
 									{@const minKey = `inst::${inst.id}::${member.name}::minTime`}
 									{@const maxKey = `inst::${inst.id}::${member.name}::maxTime`}
 									{@const memberDirty = dirtyInstanceMembers.get(inst.id)?.has(member.name) ?? false}
+									{@const memberLive = memberValues ? memberValues[member.name] : undefined}
 									<tr class:row-override={!eff.inherited} class:row-dirty={memberDirty}>
 										<td data-label="Member">{#if memberDirty}<DirtyIcon slideIn inline />{/if}<span class="mono item-name">{member.name}</span></td>
+										<td data-label="Value"><span class="mono value-cell" title={memberLive !== undefined ? String(memberLive) : ''}>{memberLive !== undefined ? String(memberLive) : '—'}</span></td>
 										<td data-label="RBE">
 											<button
 												class="rbe-toggle"
@@ -478,6 +488,14 @@
 		&.rbe-overridden {
 			color: #a78bfa;
 		}
+	}
+	.value-cell {
+		display: inline-block;
+		max-width: 12rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: 0.75rem;
 	}
 
 	// Mobile
