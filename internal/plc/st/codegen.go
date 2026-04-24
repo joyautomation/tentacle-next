@@ -162,6 +162,12 @@ func (g *generator) stmt(s Statement) {
 
 	case *ReturnStmt:
 		g.writeLine("return")
+
+	case *ExitStmt:
+		g.writeLine("break")
+
+	case *ContinueStmt:
+		g.writeLine("continue")
 	}
 }
 
@@ -178,7 +184,24 @@ func (g *generator) stmtBlock(stmts []Statement) {
 func (g *generator) expr(e Expression) string {
 	switch expr := e.(type) {
 	case *NumberLit:
+		if expr.Base != 0 && expr.Base != 10 {
+			if n, err := strconv.ParseInt(expr.Value, expr.Base, 64); err == nil {
+				return strconv.FormatInt(n, 10)
+			}
+		}
 		return expr.Value
+
+	case *TypedLit:
+		// Starlark has no types; fall through to the inner payload.
+		return g.expr(expr.Inner)
+
+	case *IndexExpr:
+		// IEC arrays are 1-indexed; Starlark lists are 0-indexed. Adjust.
+		var parts []string
+		for _, idx := range expr.Indices {
+			parts = append(parts, fmt.Sprintf("(%s) - 1", g.expr(idx)))
+		}
+		return fmt.Sprintf("%s[%s]", g.expr(expr.Array), strings.Join(parts, "]["))
 
 	case *StringLit:
 		return strconv.Quote(expr.Value)
@@ -204,6 +227,9 @@ func (g *generator) expr(e Expression) string {
 		var args []string
 		for _, a := range expr.Args {
 			args = append(args, g.expr(a))
+		}
+		for _, na := range expr.NamedArgs {
+			args = append(args, fmt.Sprintf("%s=%s", na.Name, g.expr(na.Value)))
 		}
 		return fmt.Sprintf("%s(%s)", expr.Name, strings.Join(args, ", "))
 

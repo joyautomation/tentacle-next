@@ -10,25 +10,133 @@ type Node interface {
 // ─── Top-level ──────────────────────────────────────────────────────────────
 
 // Program is the top-level PROGRAM ... END_PROGRAM block.
+// TypeDecls are file-scope TYPE ... END_TYPE declarations; they live on
+// Program for convenience even though they conceptually sit outside it.
 type Program struct {
 	Name       string
+	TypeDecls  []TypeDecl
 	VarBlocks  []VarBlock
 	Statements []Statement
 }
 
 func (p *Program) nodeType() string { return "Program" }
 
-// VarBlock is a VAR / VAR_INPUT / VAR_OUTPUT ... END_VAR block.
+// VarBlock is a VAR / VAR_INPUT / VAR_OUTPUT / VAR_IN_OUT / VAR_TEMP / VAR_GLOBAL / VAR_EXTERNAL block.
 type VarBlock struct {
-	Kind      string // "VAR", "VAR_INPUT", "VAR_OUTPUT"
+	Kind      string // "VAR", "VAR_INPUT", "VAR_OUTPUT", "VAR_IN_OUT", "VAR_TEMP", "VAR_GLOBAL", "VAR_EXTERNAL"
+	Retain    bool   // VAR RETAIN
+	Constant  bool   // VAR CONSTANT
 	Variables []VarDecl
 }
 
 // VarDecl is a single variable declaration.
+// Datatype is the textual form (scalar name, UDT name, or a rendered array
+// signature like "ARRAY[1..10] OF INT") and is preserved so the LSP /
+// /transpile endpoint can expose a simple string to existing consumers.
+// Type carries the structured type expression used by the lowering pass.
 type VarDecl struct {
 	Name     string
-	Datatype string // "INT", "REAL", "BOOL", "STRING", "DINT", "LREAL"
+	Datatype string
+	Type     TypeExpr
 	Initial  Expression
+}
+
+// TypeDecl is a top-level TYPE Name : <typeExpr>; END_TYPE entry.
+// Most commonly used for STRUCT UDTs, but the parser allows aliasing any
+// type expression so enums/subranges can be added later without grammar churn.
+type TypeDecl struct {
+	Name string
+	Type TypeExpr
+}
+
+func (t *TypeDecl) nodeType() string { return "TypeDecl" }
+
+// ─── Type expressions ───────────────────────────────────────────────────────
+
+// TypeExpr describes a variable's type as written in source.
+// Concrete kinds: ScalarType, ArrayType, NamedType, StructType.
+type TypeExpr interface {
+	Node
+	typeExprNode()
+	// String renders the type in its canonical textual form, suitable for
+	// the VarDecl.Datatype shim and LSP hover displays.
+	String() string
+}
+
+// ScalarType is a builtin IEC elementary type: BOOL, INT, REAL, TIME, ...
+type ScalarType struct {
+	Name string
+}
+
+func (s *ScalarType) nodeType() string { return "ScalarType" }
+func (s *ScalarType) typeExprNode()    {}
+func (s *ScalarType) String() string   { return s.Name }
+
+// NamedType references a user-defined type by name (UDT or FB type).
+// Resolution to StructDef or FBDef happens in the lowering pass; the parser
+// has no way to distinguish a UDT from an FB type here.
+type NamedType struct {
+	Name string
+}
+
+func (n *NamedType) nodeType() string { return "NamedType" }
+func (n *NamedType) typeExprNode()    {}
+func (n *NamedType) String() string   { return n.Name }
+
+// ArrayType describes ARRAY [lo..hi [, lo..hi]*] OF Elem.
+type ArrayType struct {
+	Dims []ArrayDim
+	Elem TypeExpr
+}
+
+func (a *ArrayType) nodeType() string { return "ArrayType" }
+func (a *ArrayType) typeExprNode()    {}
+func (a *ArrayType) String() string {
+	out := "ARRAY["
+	for i, d := range a.Dims {
+		if i > 0 {
+			out += ", "
+		}
+		out += d.String()
+	}
+	out += "] OF " + a.Elem.String()
+	return out
+}
+
+// ArrayDim is a single dimension expressed as lo..hi. Bounds must be compile-time
+// constants; the parser stores arbitrary expressions and the lowering pass evaluates them.
+type ArrayDim struct {
+	Lo, Hi Expression
+}
+
+func (d ArrayDim) String() string {
+	// Best-effort pretty-print: only literal bounds render readably here.
+	return exprShort(d.Lo) + ".." + exprShort(d.Hi)
+}
+
+// StructType is an inline STRUCT ... END_STRUCT body.
+// Wrapped in a TypeDecl for user-defined UDTs; can also appear inline
+// inside arrays or other structs if the parser is extended later.
+type StructType struct {
+	Fields []VarDecl
+}
+
+func (s *StructType) nodeType() string { return "StructType" }
+func (s *StructType) typeExprNode()    {}
+func (s *StructType) String() string   { return "STRUCT" }
+
+// exprShort renders an expression as a compact string for type pretty-printing.
+// Only covers the literal shapes that appear in array bounds / initial values.
+func exprShort(e Expression) string {
+	switch v := e.(type) {
+	case *NumberLit:
+		return v.Value
+	case *IdentExpr:
+		return v.Name
+	case *UnaryExpr:
+		return v.Op + exprShort(v.Operand)
+	}
+	return "?"
 }
 
 // ─── Statements ─────────────────────────────────────────────────────────────
@@ -39,10 +147,14 @@ type Statement interface {
 	stmtNode()
 }
 
-// AssignStmt is a variable assignment: x := expr;
+// AssignStmt is a variable assignment: target := expr;
+// Target is kept as a string for back-compat with the Starlark codegen path.
+// TargetExpr holds the structured LValue (IdentExpr / MemberExpr / IndexExpr)
+// and is what the IR lowering pass should consume.
 type AssignStmt struct {
-	Target string
-	Value  Expression
+	Target     string
+	TargetExpr Expression
+	Value      Expression
 }
 
 func (s *AssignStmt) nodeType() string { return "AssignStmt" }
@@ -109,7 +221,7 @@ type CaseClause struct {
 func (s *CaseStmt) nodeType() string { return "CaseStmt" }
 func (s *CaseStmt) stmtNode()        {}
 
-// CallStmt is a standalone function call: func(args);
+// CallStmt is a standalone function or FB-instance call: name(args);
 type CallStmt struct {
 	Call *CallExpr
 }
@@ -123,6 +235,18 @@ type ReturnStmt struct{}
 func (s *ReturnStmt) nodeType() string { return "ReturnStmt" }
 func (s *ReturnStmt) stmtNode()        {}
 
+// ExitStmt is EXIT; (break out of the innermost loop).
+type ExitStmt struct{}
+
+func (s *ExitStmt) nodeType() string { return "ExitStmt" }
+func (s *ExitStmt) stmtNode()        {}
+
+// ContinueStmt is CONTINUE; (skip to the next loop iteration).
+type ContinueStmt struct{}
+
+func (s *ContinueStmt) nodeType() string { return "ContinueStmt" }
+func (s *ContinueStmt) stmtNode()        {}
+
 // ─── Expressions ────────────────────────────────────────────────────────────
 
 // Expression is the interface for all expressions.
@@ -131,9 +255,11 @@ type Expression interface {
 	exprNode()
 }
 
-// NumberLit is a numeric literal.
+// NumberLit is a numeric literal. Value is the canonical decimal string —
+// based literals (16#FF, 2#1010) are decoded by the lexer.
 type NumberLit struct {
 	Value string
+	Base  int // 10, 16, 2, 8. 10 is the default for conventional literals.
 }
 
 func (e *NumberLit) nodeType() string { return "NumberLit" }
@@ -182,10 +308,20 @@ type UnaryExpr struct {
 func (e *UnaryExpr) nodeType() string { return "UnaryExpr" }
 func (e *UnaryExpr) exprNode()        {}
 
-// CallExpr is a function call: func(arg1, arg2, ...).
+// CallExpr is a function call: func(arg1, arg2, ...) or func(IN := x, PT := T#5s).
+// Args holds positional arguments in declaration order. NamedArgs holds the
+// IEC-style "name := value" form used for FB instance calls. A call may use
+// either form exclusively — mixing is not validated at parse time.
 type CallExpr struct {
-	Name string
-	Args []Expression
+	Name      string
+	Args      []Expression
+	NamedArgs []NamedArg
+}
+
+// NamedArg is a `name := value` argument in an FB/function call.
+type NamedArg struct {
+	Name  string
+	Value Expression
 }
 
 func (e *CallExpr) nodeType() string { return "CallExpr" }
@@ -200,10 +336,29 @@ type MemberExpr struct {
 func (e *MemberExpr) nodeType() string { return "MemberExpr" }
 func (e *MemberExpr) exprNode()        {}
 
-// TimeLit is a time literal: T#5s, T#100ms.
+// IndexExpr is an array subscript: a[i] or a[i, j].
+type IndexExpr struct {
+	Array   Expression
+	Indices []Expression
+}
+
+func (e *IndexExpr) nodeType() string { return "IndexExpr" }
+func (e *IndexExpr) exprNode()        {}
+
+// TimeLit is a time literal: T#5s, T#100ms, T#1h30m.
 type TimeLit struct {
-	Raw string // e.g., "5s", "100ms"
+	Raw string // e.g., "5s", "100ms", "1h30m"
 }
 
 func (e *TimeLit) nodeType() string { return "TimeLit" }
 func (e *TimeLit) exprNode()        {}
+
+// TypedLit is a type-prefixed literal: INT#42, REAL#3.14, BOOL#TRUE, STRING#'x'.
+// TypeName is the prefix as written (uppercased); Inner is the payload literal.
+type TypedLit struct {
+	TypeName string
+	Inner    Expression
+}
+
+func (e *TypedLit) nodeType() string { return "TypedLit" }
+func (e *TypedLit) exprNode()        {}
