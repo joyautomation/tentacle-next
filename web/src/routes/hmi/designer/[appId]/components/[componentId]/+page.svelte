@@ -456,6 +456,7 @@
             <p class="hint">Drag a member onto an element in the preview to insert <code>{'{udt.member}'}</code>.</p>
             <ul>
               {#each members as m (m.name)}
+                {@const live = liveUdt && typeof liveUdt === 'object' ? (liveUdt as Record<string, unknown>)[m.name] : undefined}
                 <li
                   draggable="true"
                   ondragstart={(e) => {
@@ -464,9 +465,26 @@
                     e.dataTransfer.setData('text/plain', `{udt.${m.name}}`);
                     e.dataTransfer.effectAllowed = 'copy';
                   }}
-                ><code>udt.{m.name}</code> <span class="dt">{m.datatype}</span></li>
+                >
+                  <code>udt.{m.name}</code>
+                  <span class="dt">{m.datatype}</span>
+                  {#if selectedInstanceKey}
+                    <span class="val" class:missing={live === undefined}>
+                      {live === undefined ? '—' : String(live)}
+                    </span>
+                  {/if}
+                </li>
               {/each}
             </ul>
+            {#if selectedInstanceKey && liveUdt === undefined}
+              <p class="hint warn">
+                No live data for <code>{selectedInstanceKey}</code> yet. Either the gateway hasn't published, or the instance key doesn't match the stream's <code>{'{moduleId}/{variableId}'}</code>.
+              </p>
+            {:else if selectedInstanceKey && liveUdt && typeof liveUdt === 'object'}
+              <p class="hint">
+                live keys: <code>{Object.keys(liveUdt as Record<string, unknown>).join(', ') || '(empty)'}</code>
+              </p>
+            {/if}
           </details>
         {/if}
         <ContainerEditor
@@ -640,6 +658,18 @@
       &:active { cursor: grabbing; }
       code { font-family: 'IBM Plex Mono', monospace; }
       .dt { color: var(--theme-text-muted); margin-left: 0.5rem; font-size: 0.6875rem; }
+      .val {
+        margin-left: auto;
+        float: right;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.6875rem;
+        color: var(--theme-text);
+        &.missing { color: var(--theme-text-muted); opacity: 0.5; }
+      }
+    }
+    .hint.warn {
+      color: #f59e0b;
+      code { color: inherit; }
     }
     .instance-picker {
       display: grid;
