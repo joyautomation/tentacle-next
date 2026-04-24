@@ -19,48 +19,63 @@
   }
 </script>
 
-<div class="rail" data-accent={accent}>
-  <header class="hdr">
-    <h3>{title}</h3>
+<details class="rail" data-accent={accent} open>
+  <summary class="hdr"><span class="h3">{title}</span></summary>
+  <div class="body">
     {#if editHref}
       <a href={editHref} target="_blank" rel="noopener" class="edit" title="Edit in App Styles">Edit ↗</a>
     {/if}
-  </header>
-  {#if names.length === 0}
-    <p class="muted">{editHref ? 'No app classes yet.' : 'No classes yet.'}</p>
-  {:else}
-    <ul class="chips">
-      {#each names as name (name)}
-        <li
-          class="chip"
-          draggable="true"
-          ondragstart={(e) => onDragStart(e, name)}
-          title={`Drag onto a widget to apply${classes?.[name] ? `\n\n${classes[name]}` : ''}`}
-        >
-          .{name}
-        </li>
-      {/each}
-    </ul>
-  {/if}
-</div>
+    {#if names.length === 0}
+      <p class="muted">{editHref ? 'No app classes yet.' : 'No classes yet.'}</p>
+    {:else}
+      <ul class="chips">
+        {#each names as name (name)}
+          <li
+            class="chip"
+            draggable="true"
+            ondragstart={(e) => onDragStart(e, name)}
+            title={`Drag onto a widget to apply${classes?.[name] ? `\n\n${classes[name]}` : ''}`}
+          >
+            .{name}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </div>
+</details>
 
 <style lang="scss">
   .rail {
-    padding: 0.625rem 0.75rem;
     background: var(--theme-surface);
     border: 1px solid var(--theme-border);
     border-radius: var(--rounded-md);
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
+    overflow: hidden;
     &[data-accent="app"] .chip { border-color: color-mix(in srgb, var(--theme-text) 35%, transparent); }
     &[data-accent="component"] .chip { border-color: color-mix(in srgb, var(--theme-text) 25%, transparent); border-style: dashed; }
   }
   .hdr {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    user-select: none;
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    h3 { margin: 0; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--theme-text-muted); }
+    align-items: center;
+    gap: 0.375rem;
+    &::-webkit-details-marker { display: none; }
+    &::before {
+      content: '▸';
+      font-size: 0.625rem;
+      color: var(--theme-text-muted);
+      transition: transform 0.12s ease;
+    }
+    .h3 { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--theme-text-muted); font-weight: 600; }
+  }
+  .rail[open] > .hdr::before { transform: rotate(90deg); }
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0 0.75rem 0.625rem;
   }
   .edit { font-size: 0.6875rem; color: var(--theme-text-muted); text-decoration: none; &:hover { color: var(--theme-text); } }
   .muted { margin: 0; font-size: 0.6875rem; color: var(--theme-text-muted); }

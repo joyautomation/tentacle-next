@@ -11,77 +11,95 @@
   let { idx, anchors, onAnchorChange, onClear }: Props = $props();
 </script>
 
-<div class="element-editor">
-  <header class="hdr">
-    <h3>Element</h3>
-    {#if idx !== null}
-      <button class="clear" onclick={onClear} title="Clear selection">×</button>
+<details class="element-editor" open>
+  <summary class="hdr"><span class="h3">Element</span></summary>
+  <div class="body">
+    {#if idx === null}
+      <p class="hint">Click an element in the preview to select it.</p>
+    {:else}
+      <div class="top">
+        <button class="clear" onclick={onClear} title="Clear selection">clear</button>
+      </div>
+      <div class="row">
+        <span class="label">x anchor</span>
+        <div class="seg">
+          <button
+            class:active={anchors?.x === 'left'}
+            onclick={() => onAnchorChange('x', 'left')}
+          >left</button>
+          <button
+            class:active={anchors?.x === 'right'}
+            onclick={() => onAnchorChange('x', 'right')}
+          >right</button>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">y anchor</span>
+        <div class="seg">
+          <button
+            class:active={anchors?.y === 'top'}
+            onclick={() => onAnchorChange('y', 'top')}
+          >top</button>
+          <button
+            class:active={anchors?.y === 'bottom'}
+            onclick={() => onAnchorChange('y', 'bottom')}
+          >bottom</button>
+        </div>
+      </div>
+      <p class="hint">Toggling re-pins the element from its current position so it stays put visually.</p>
     {/if}
-  </header>
-
-  {#if idx === null}
-    <p class="hint">Click an element in the preview to select it.</p>
-  {:else}
-    <div class="row">
-      <span class="label">x anchor</span>
-      <div class="seg">
-        <button
-          class:active={anchors?.x === 'left'}
-          onclick={() => onAnchorChange('x', 'left')}
-        >left</button>
-        <button
-          class:active={anchors?.x === 'right'}
-          onclick={() => onAnchorChange('x', 'right')}
-        >right</button>
-      </div>
-    </div>
-    <div class="row">
-      <span class="label">y anchor</span>
-      <div class="seg">
-        <button
-          class:active={anchors?.y === 'top'}
-          onclick={() => onAnchorChange('y', 'top')}
-        >top</button>
-        <button
-          class:active={anchors?.y === 'bottom'}
-          onclick={() => onAnchorChange('y', 'bottom')}
-        >bottom</button>
-      </div>
-    </div>
-    <p class="hint">Toggling re-pins the element from its current position so it stays put visually.</p>
-  {/if}
-</div>
+  </div>
+</details>
 
 <style lang="scss">
   .element-editor {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.75rem;
     background: var(--theme-surface);
     border: 1px solid var(--theme-border);
     border-radius: var(--rounded-md);
+    overflow: hidden;
   }
   .hdr {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    user-select: none;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    h3 {
-      margin: 0;
+    gap: 0.375rem;
+    &::-webkit-details-marker { display: none; }
+    &::before {
+      content: '▸';
+      font-size: 0.625rem;
+      color: var(--theme-text-muted);
+      transition: transform 0.12s ease;
+    }
+    .h3 {
       font-size: 0.6875rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: var(--theme-text-muted);
+      font-weight: 600;
     }
+  }
+  .element-editor[open] > .hdr::before { transform: rotate(90deg); }
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0 0.75rem 0.75rem;
+  }
+  .top {
+    display: flex;
+    justify-content: flex-end;
     .clear {
       background: transparent;
-      border: none;
+      border: 1px solid var(--theme-border);
       color: var(--theme-text-muted);
       cursor: pointer;
-      font-size: 1rem;
-      line-height: 1;
-      padding: 0 0.25rem;
-      &:hover { color: var(--theme-text); }
+      font-size: 0.6875rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: var(--rounded-sm, 4px);
+      &:hover { color: var(--theme-text); border-color: var(--theme-text); }
     }
   }
   .row {

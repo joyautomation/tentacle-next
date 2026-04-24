@@ -71,11 +71,14 @@
   let saving = $state(false);
   let saveError = $state<string | null>(null);
 
-  // Preview-pane size (visual only — not persisted with the component).
+  // Preview-pane size is per-component and persisted to localStorage so the
+  // editor reopens at the size the user last worked at.
+  const previewKey = $derived(`${appId}::${componentId}`);
   let previewWidth = $state<number | null>(null);
   let previewHeight = $state<number | null>(null);
   let snapEnabled = $state(false);
   const SNAP = 16;
+  let editorTab = $state<'markup' | 'style'>('markup');
 
   let selectedIdx = $state<number | null>(null);
 
@@ -315,6 +318,7 @@
         target.releasePointerCapture(ev.pointerId);
         target.removeEventListener('pointermove', onMove);
         target.removeEventListener('pointerup', onUp);
+        savePreviewSize();
       };
       target.addEventListener('pointermove', onMove);
       target.addEventListener('pointerup', onUp);
@@ -324,9 +328,22 @@
   function resetSize() {
     previewWidth = null;
     previewHeight = null;
+    savePreviewSize();
   }
 
   onMount(refresh);
+
+  // Rehydrate the preview size when the component key changes (initial load
+  // or nav to a different component via the same page instance).
+  $effect(() => {
+    const saved = layout.getPreviewFrame(previewKey);
+    previewWidth = saved.width;
+    previewHeight = saved.height;
+  });
+
+  function savePreviewSize() {
+    layout.setPreviewFrame(previewKey, { width: previewWidth, height: previewHeight });
+  }
 
   function deleteSelected() {
     if (selectedIdx === null) return;
@@ -502,14 +519,42 @@
                   </Pane>
                   <Pane minSize={15}>
                     <div class="editor-pane">
-                      <CodeEditor
-                        bind:this={editorRef}
-                        value={source}
-                        onChange={onSourceChange}
-                        placeholder={inUdtMode
-                          ? '<div>\n  <span>{udt.member}</span>\n</div>'
-                          : '<div>...</div>'}
-                      />
+                      <div class="editor-tabs" role="tablist">
+                        <button
+                          role="tab"
+                          class:active={editorTab === 'markup'}
+                          aria-selected={editorTab === 'markup'}
+                          onclick={() => (editorTab = 'markup')}
+                        >Markup</button>
+                        <button
+                          role="tab"
+                          class:active={editorTab === 'style'}
+                          aria-selected={editorTab === 'style'}
+                          onclick={() => (editorTab = 'style')}
+                        >Style</button>
+                      </div>
+                      <div class="editor-body">
+                        <div class="editor-panel" class:hidden={editorTab !== 'markup'}>
+                          <CodeEditor
+                            bind:this={editorRef}
+                            value={source}
+                            onChange={onSourceChange}
+                            placeholder={inUdtMode
+                              ? '<div>\n  <span>{udt.member}</span>\n</div>'
+                              : '<div>...</div>'}
+                          />
+                        </div>
+                        {#if editorTab === 'style'}
+                          <div class="editor-panel style-panel">
+                            <ClassEditor
+                              {classes}
+                              onChange={onClassesChange}
+                              title="Component classes"
+                              accent="component"
+                            />
+                          </div>
+                        {/if}
+                      </div>
                     </div>
                   </Pane>
                 </Splitpanes>
@@ -519,7 +564,7 @@
               <Pane size={layout.rightSize} minSize={12}>
                 <section class="panel">
                   <header class="panel-header">
-                    <span>Inspector</span>
+                    <span>Configuration</span>
                     <button
                       type="button"
                       class="collapse-btn"
@@ -597,10 +642,9 @@
                       accent="app"
                       editHref="/hmi/designer/{encodeURIComponent(appId)}/styles"
                     />
-                    <ClassEditor
-                      {classes}
-                      onChange={onClassesChange}
+                    <ClassRail
                       title="Component classes"
+                      classes={classes}
                       accent="component"
                     />
                   </div>
@@ -618,7 +662,7 @@
             aria-label="Show inspector"
           >
             <ChevronLeft size="0.875rem" />
-            <span class="rail-label">Inspector</span>
+            <span class="rail-label">Configuration</span>
           </button>
         {/if}
       </div>
@@ -787,7 +831,7 @@
   .preview-frame-wrap {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
     position: relative;
   }
   .preview-frame {
@@ -814,10 +858,54 @@
   .editor-pane {
     height: 100%;
     min-height: 0;
-    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+  }
+  .editor-tabs {
+    display: flex;
+    gap: 0;
+    background: var(--theme-surface);
+    border-bottom: 1px solid var(--theme-border);
+    flex-shrink: 0;
+    button {
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      color: var(--theme-text-muted);
+      padding: 0.4375rem 0.875rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: color 0.12s ease, border-color 0.12s ease;
+      &:hover { color: var(--theme-text); }
+      &.active {
+        color: var(--theme-text);
+        border-bottom-color: var(--theme-primary, var(--theme-text));
+      }
+    }
+  }
+  .editor-body {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .editor-panel {
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     :global(> *) { flex: 1; min-height: 0; }
+    &.hidden { display: none; }
+    &.style-panel {
+      overflow: auto;
+      padding: 0.75rem;
+      background: var(--theme-surface);
+      :global(> *) { flex: none; }
+    }
   }
   .right-rail {
     display: flex;
@@ -827,18 +915,33 @@
     background: var(--theme-surface);
   }
   .udt-info {
-    background: var(--theme-background);
+    background: var(--theme-surface);
     border: 1px solid var(--theme-border);
     border-radius: var(--rounded-md);
-    padding: 0.5rem 0.625rem;
+    padding: 0 0.75rem 0.75rem;
     font-size: 0.75rem;
     summary {
+      list-style: none;
       cursor: pointer;
+      user-select: none;
       color: var(--theme-text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.05em;
       font-size: 0.6875rem;
+      font-weight: 600;
+      margin: 0 -0.75rem 0.5rem;
+      padding: 0.5rem 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+      &::-webkit-details-marker { display: none; }
+      &::before {
+        content: '▸';
+        font-size: 0.625rem;
+        transition: transform 0.12s ease;
+      }
     }
+    &[open] > summary::before { transform: rotate(90deg); }
     .hint {
       margin: 0.5rem 0 0.25rem;
       color: var(--theme-text-muted);

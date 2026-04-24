@@ -88,7 +88,6 @@
 </script>
 
 <aside class="palette">
-  <header class="title">Elements</header>
   {#each groups as group (group.name)}
     <div class="group">
       <div class="group-name">{group.name}</div>
@@ -118,15 +117,6 @@
     background: var(--theme-surface);
     overflow-y: auto;
     padding: 0.5rem;
-  }
-  .title {
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--theme-text-muted);
-    padding: 0.25rem 0.25rem 0.5rem;
-    border-bottom: 1px solid var(--theme-border);
-    margin-bottom: 0.5rem;
   }
   .group { margin-bottom: 0.75rem; }
   .group-name {

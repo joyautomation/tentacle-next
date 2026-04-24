@@ -122,8 +122,6 @@
     height: 100%;
     width: 100%;
     background: var(--theme-surface);
-    border: 1px solid var(--theme-border);
-    border-radius: var(--rounded-md);
     overflow: hidden;
     :global(.cm-editor) { outline: none; }
     :global(.cm-editor.cm-focused) { outline: none; }

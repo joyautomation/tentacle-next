@@ -91,11 +91,12 @@
   }
 </script>
 
-<div class="class-editor" data-accent={accent}>
-  <header class="hdr">
-    <h3>{title}</h3>
-    <button class="add" onclick={() => (addOpen = !addOpen)}>{addOpen ? '×' : '+ Add'}</button>
-  </header>
+<details class="class-editor" data-accent={accent} open>
+  <summary class="hdr">
+    <span class="h3">{title}</span>
+    <button class="add" onclick={(e) => { e.preventDefault(); e.stopPropagation(); addOpen = !addOpen; }}>{addOpen ? '×' : '+ Add'}</button>
+  </summary>
+  <div class="body">
 
   {#if addOpen}
     <form class="add-form" onsubmit={addClass} transition:slide={{ duration: 120 }}>
@@ -157,26 +158,45 @@
       <p class="hint">Plain CSS. Properties only — selectors are wrapped automatically.</p>
     </section>
   {/if}
-</div>
+  </div>
+</details>
 
 <style lang="scss">
   .class-editor {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.75rem;
     background: var(--theme-surface);
     border: 1px solid var(--theme-border);
     border-radius: var(--rounded-md);
+    overflow: hidden;
 
     &[data-accent="app"] .chip { border-color: color-mix(in srgb, var(--theme-text) 35%, transparent); }
     &[data-accent="component"] .chip { border-color: color-mix(in srgb, var(--theme-text) 25%, transparent); border-style: dashed; }
   }
   .hdr {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    user-select: none;
     display: flex;
+    align-items: center;
     justify-content: space-between;
-    align-items: baseline;
-    h3 { margin: 0; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--theme-text-muted); }
+    gap: 0.375rem;
+    &::-webkit-details-marker { display: none; }
+    .h3 {
+      font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--theme-text-muted); font-weight: 600;
+      display: inline-flex; align-items: center; gap: 0.375rem;
+      &::before {
+        content: '▸';
+        font-size: 0.625rem;
+        transition: transform 0.12s ease;
+      }
+    }
+  }
+  .class-editor[open] > .hdr .h3::before { transform: rotate(90deg); }
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0 0.75rem 0.75rem;
   }
   .add {
     background: transparent;
