@@ -60,14 +60,11 @@
 
 	const selectedTemplate = $derived(templateByName[datatype] ?? null);
 
-	// Seed local state from current config when variable or config changes.
-	let lastLoadedFor = '';
-	$effect(() => {
-		const key = `${name}::${plcConfig?.updatedAt ?? 0}`;
-		if (!current || key === lastLoadedFor) return;
-		lastLoadedFor = key;
+	function seedFromCurrent() {
+		if (!current) return;
 		datatype = current.datatype;
 		description = current.description ?? '';
+		prevDatatype = current.datatype; // prevent the datatype-change effect from wiping defaults
 		if (isPrimitiveDatatype(current.datatype)) {
 			const d = current.default;
 			primitiveDefault = current.datatype === 'boolean' ? (d ? 'true' : 'false') : String(d ?? '');
@@ -84,6 +81,15 @@
 			}
 			templateDefaults = next;
 		}
+	}
+
+	// Seed local state from current config when variable or config changes.
+	let lastLoadedFor = '';
+	$effect(() => {
+		const key = `${name}::${plcConfig?.updatedAt ?? 0}`;
+		if (!current || key === lastLoadedFor) return;
+		lastLoadedFor = key;
+		seedFromCurrent();
 	});
 
 	// When user switches datatype, seed sensible defaults for the new type.
@@ -332,10 +338,7 @@
 	}
 
 	function revert() {
-		lastLoadedFor = ''; // force re-seed from current
-		// Trigger re-read by nudging a state used in the seeding effect.
-		const tmp = datatype;
-		datatype = tmp;
+		seedFromCurrent();
 	}
 
 	async function del() {
