@@ -65,7 +65,6 @@
     ],
     gateway: [
       { id: 'default', label: 'Overview', href: `/services/${serviceType}` },
-      { id: 'devices', label: 'Sources', href: `/services/${serviceType}/devices` },
       { id: 'tag-config', label: 'Variables', href: `/services/${serviceType}/tag-config` },
       { id: 'logs', label: 'Logs', href: `/services/${serviceType}/logs` }
     ],

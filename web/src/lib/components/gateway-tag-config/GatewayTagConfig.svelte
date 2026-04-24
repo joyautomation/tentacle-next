@@ -6,8 +6,11 @@
   import { fly, slide } from 'svelte/transition';
   import { untrack } from 'svelte';
   import { state as saltState } from '@joyautomation/salt';
-  import { ArrowPath, ChevronRight, ExclamationTriangle, Signal, XMark } from '@joyautomation/salt/icons';
+  import { ArrowPath, ChevronRight, Cog6Tooth, ExclamationTriangle, Plus, Signal, Trash, XMark } from '@joyautomation/salt/icons';
   import DirtyIcon from '$lib/components/DirtyIcon.svelte';
+  import AddDeviceForm from '$lib/components/AddDeviceForm.svelte';
+  import DeviceSettingsPanel from '$lib/components/DeviceSettingsPanel.svelte';
+  import DeleteDeviceModal from '$lib/components/DeleteDeviceModal.svelte';
   import { mapDatatype, type RbeState, type InstanceInfo, type ActiveSection } from './utils';
   import TemplateDefaultsTab from './TemplateDefaultsTab.svelte';
   import InstancesTab from './InstancesTab.svelte';
@@ -24,6 +27,19 @@
   let activeSection: ActiveSection | null = $state<ActiveSection | null>(null);
   let activeTab: 'template' | 'instances' = $state('instances');
   let templatesExpanded = $state(false);
+  let sourcesExpanded = $state(true);
+  let showAddDevice = $state(false);
+  let editingDeviceId: string | null = $state(null);
+  let deleteTarget: { deviceId: string; varCount: number } | null = $state(null);
+
+  const availableProtocols = $derived(gatewayConfig?.availableProtocols ?? []);
+
+  const deviceVarCounts = $derived.by(() => {
+    const counts: Record<string, number> = {};
+    for (const v of gatewayConfig?.variables ?? []) counts[v.deviceId] = (counts[v.deviceId] ?? 0) + 1;
+    for (const v of gatewayConfig?.udtVariables ?? []) counts[v.deviceId] = (counts[v.deviceId] ?? 0) + 1;
+    return counts;
+  });
 
   // ── Derived data ──
   const templates = $derived(gatewayConfig?.udtTemplates ?? []);
@@ -1485,12 +1501,7 @@
     <div class="error-box"><p>{error}</p></div>
   {/if}
 
-  {#if sideNavDevices.length === 0 && mergedTemplates.length === 0}
-    <div class="empty-state">
-      <p>No browse data or templates configured. Go to Devices to browse a PLC and discover tags.</p>
-    </div>
-  {:else}
-    <div class="tc-layout">
+  <div class="tc-layout">
       <!-- Side nav (desktop) -->
       <nav class="tc-side-nav">
         {#if mergedTemplates.length > 0}
@@ -1523,75 +1534,134 @@
           {/if}
         {/if}
 
-        {#each sideNavDevices as device}
-          {@const browseState = activeBrowseStates.get(device.deviceId)}
-          {@const isBusy = browseState?.status === 'browsing' || (liveProgress.has(device.deviceId) && liveProgress.get(device.deviceId)?.status === 'completed')}
-          {@const cache = browseCaches.find(c => c.deviceId === device.deviceId)}
-          {@const pct = isBusy && browseState && browseState.totalCount > 0 ? Math.round((browseState.discoveredCount / browseState.totalCount) * 100) : 0}
-          <div class="tc-side-head">
-            {#if dirtyDevices.has(device.deviceId)}<DirtyIcon slideIn />{/if}
-            <span class="side-device-name">{device.deviceId}</span>
-            <span class="side-proto">{device.protocol}</span>
-            {#if !device.autoManaged}
-            <span class="side-browse-area">
-              {#if isBusy && browseState}
-                <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
-                  <circle cx="10" cy="10" r="8" fill="none" stroke="var(--theme-border)" stroke-width="2.5" />
-                  <circle cx="10" cy="10" r="8" fill="none" stroke="var(--badge-teal-text)" stroke-width="2.5"
-                    stroke-dasharray={`${browseState.status === 'completed' ? 50.3 : pct * 0.503} ${browseState.status === 'completed' ? 0 : 50.3 - pct * 0.503}`}
-                    stroke-dashoffset="12.6" stroke-linecap="round"
-                    class:spinning={browseState.status === 'browsing' && browseState.totalCount === 0} />
-                </svg>
-                {#if browseState.status === 'completed'}
-                  <span class="side-browse-count">done</span>
-                {:else if browseState.totalCount > 0}
-                  <span class="side-browse-count">{browseState.discoveredCount}/{browseState.totalCount}</span>
-                {:else if browseState.discoveredCount > 0}
-                  <span class="side-browse-count">{browseState.discoveredCount}</span>
-                {/if}
-                {#if browseState.status === 'browsing'}
-                  <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
-                    <XMark size="0.85rem" />
+        <div class="tc-side-section-header">
+          <button class="tc-side-section-label flex-label" onclick={() => sourcesExpanded = !sourcesExpanded}>
+            <span class="section-chevron" class:expanded={sourcesExpanded}><ChevronRight size="0.75rem" /></span>
+            Sources
+            <span class="tc-side-count">{sideNavDevices.length}</span>
+          </button>
+          <button
+            type="button"
+            class="tc-add-btn"
+            onclick={() => (showAddDevice = !showAddDevice)}
+            title={showAddDevice ? 'Cancel' : 'New device'}
+            aria-label={showAddDevice ? 'Cancel' : 'New device'}
+            aria-expanded={showAddDevice}
+          >
+            <Plus size="0.875rem" />
+          </button>
+        </div>
+
+        {#if showAddDevice}
+          <AddDeviceForm
+            {availableProtocols}
+            onSaved={() => (showAddDevice = false)}
+            onCancel={() => (showAddDevice = false)}
+          />
+        {/if}
+
+        {#if sourcesExpanded}
+          <div transition:slide|local={{ duration: 150 }}>
+            {#each sideNavDevices as device}
+              {@const browseState = activeBrowseStates.get(device.deviceId)}
+              {@const isBusy = browseState?.status === 'browsing' || (liveProgress.has(device.deviceId) && liveProgress.get(device.deviceId)?.status === 'completed')}
+              {@const cache = browseCaches.find(c => c.deviceId === device.deviceId)}
+              {@const pct = isBusy && browseState && browseState.totalCount > 0 ? Math.round((browseState.discoveredCount / browseState.totalCount) * 100) : 0}
+              {@const deviceObj = devices.find(d => d.deviceId === device.deviceId)}
+              <div class="tc-side-head">
+                {#if dirtyDevices.has(device.deviceId)}<DirtyIcon slideIn />{/if}
+                <span class="side-device-name">{device.deviceId}</span>
+                <span class="side-proto">{device.protocol}</span>
+                {#if deviceObj && !device.autoManaged}
+                  <button
+                    class="side-row-action"
+                    onclick={() => editingDeviceId = editingDeviceId === device.deviceId ? null : device.deviceId}
+                    title={editingDeviceId === device.deviceId ? 'Close settings' : 'Device settings'}
+                    aria-label="Edit device settings"
+                    aria-expanded={editingDeviceId === device.deviceId}
+                  >
+                    <Cog6Tooth size="0.875rem" />
+                  </button>
+                  <button
+                    class="side-row-action delete"
+                    onclick={() => deleteTarget = { deviceId: device.deviceId, varCount: deviceVarCounts[device.deviceId] ?? 0 }}
+                    title="Remove device"
+                    aria-label="Remove device"
+                  >
+                    <Trash size="0.875rem" />
                   </button>
                 {/if}
-              {:else}
-                <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
-                  <ArrowPath size="1rem" />
+                {#if !device.autoManaged}
+                <span class="side-browse-area">
+                  {#if isBusy && browseState}
+                    <svg class="circular-progress" viewBox="0 0 20 20" width="16" height="16">
+                      <circle cx="10" cy="10" r="8" fill="none" stroke="var(--theme-border)" stroke-width="2.5" />
+                      <circle cx="10" cy="10" r="8" fill="none" stroke="var(--badge-teal-text)" stroke-width="2.5"
+                        stroke-dasharray={`${browseState.status === 'completed' ? 50.3 : pct * 0.503} ${browseState.status === 'completed' ? 0 : 50.3 - pct * 0.503}`}
+                        stroke-dashoffset="12.6" stroke-linecap="round"
+                        class:spinning={browseState.status === 'browsing' && browseState.totalCount === 0} />
+                    </svg>
+                    {#if browseState.status === 'completed'}
+                      <span class="side-browse-count">done</span>
+                    {:else if browseState.totalCount > 0}
+                      <span class="side-browse-count">{browseState.discoveredCount}/{browseState.totalCount}</span>
+                    {:else if browseState.discoveredCount > 0}
+                      <span class="side-browse-count">{browseState.discoveredCount}</span>
+                    {/if}
+                    {#if browseState.status === 'browsing'}
+                      <button class="side-cancel-btn" onclick={() => cancelBrowse(device.deviceId)} title="Cancel browse">
+                        <XMark size="0.85rem" />
+                      </button>
+                    {/if}
+                  {:else}
+                    <button class="side-refresh-btn" onclick={() => refreshDevice(device.deviceId)} title={cache?.cachedAt ? `Last: ${new Date(cache.cachedAt).toLocaleString()}` : 'Browse device'}>
+                      <ArrowPath size="1rem" />
+                    </button>
+                  {/if}
+                </span>
+                {/if}
+              </div>
+              {#if deviceObj && editingDeviceId === device.deviceId}
+                <DeviceSettingsPanel
+                  device={deviceObj}
+                  onClose={() => (editingDeviceId = null)}
+                />
+              {/if}
+              {#if device.protocol === 'snmp' && !isBusy}
+                <div class="snmp-root-oid">
+                  <select
+                    class="snmp-root-oid-select"
+                    value={snmpRootOids.get(device.deviceId) || snmpRootOidPresets[0].value}
+                    onchange={(e) => { const next = new Map(snmpRootOids); next.set(device.deviceId, (e.target as HTMLSelectElement).value); snmpRootOids = next; }}
+                  >
+                    {#each snmpRootOidPresets as preset}
+                      <option value={preset.value}>{preset.label}</option>
+                    {/each}
+                  </select>
+                </div>
+              {/if}
+              {#if device.atomicCount > 0}
+                <button
+                  class="tc-side-item"
+                  class:active={activeSection?.kind === 'atomic' && activeSection.deviceId === device.deviceId}
+                  onclick={() => { activeSection = { kind: 'atomic', deviceId: device.deviceId }; }}
+                >
+                  {#if dirtySidebarSections.has(`a::${device.deviceId}`)}<DirtyIcon slideIn />{/if}
+                  <span class="tc-side-icon a-icon">A</span>
+                  <span class="tc-side-name">Atomic Tags</span>
+                  {#if publishedAtomicDevices.has(device.deviceId)}<span class="mqtt-icon" title="Has MQTT-published tags"><Signal size="1rem" /></span>{/if}
+                  <span class="tc-side-count">{device.atomicCount}</span>
                 </button>
               {/if}
-            </span>
+              {#if device.atomicCount === 0 && !cache && !device.autoManaged}
+                <div class="tc-side-empty">Click <button class="side-refresh-link" onclick={() => refreshDevice(device.deviceId)}>browse</button> to discover tags</div>
+              {/if}
+            {/each}
+            {#if sideNavDevices.length === 0}
+              <div class="tc-side-empty">No sources. Click + to add a device.</div>
             {/if}
           </div>
-          {#if device.protocol === 'snmp' && !isBusy}
-            <div class="snmp-root-oid">
-              <select
-                class="snmp-root-oid-select"
-                value={snmpRootOids.get(device.deviceId) || snmpRootOidPresets[0].value}
-                onchange={(e) => { const next = new Map(snmpRootOids); next.set(device.deviceId, (e.target as HTMLSelectElement).value); snmpRootOids = next; }}
-              >
-                {#each snmpRootOidPresets as preset}
-                  <option value={preset.value}>{preset.label}</option>
-                {/each}
-              </select>
-            </div>
-          {/if}
-          {#if device.atomicCount > 0}
-            <button
-              class="tc-side-item"
-              class:active={activeSection?.kind === 'atomic' && activeSection.deviceId === device.deviceId}
-              onclick={() => { activeSection = { kind: 'atomic', deviceId: device.deviceId }; }}
-            >
-              {#if dirtySidebarSections.has(`a::${device.deviceId}`)}<DirtyIcon slideIn />{/if}
-              <span class="tc-side-icon a-icon">A</span>
-              <span class="tc-side-name">Atomic Tags</span>
-              {#if publishedAtomicDevices.has(device.deviceId)}<span class="mqtt-icon" title="Has MQTT-published tags"><Signal size="1rem" /></span>{/if}
-              <span class="tc-side-count">{device.atomicCount}</span>
-            </button>
-          {/if}
-          {#if device.atomicCount === 0 && !cache && !device.autoManaged}
-            <div class="tc-side-empty">Click <button class="side-refresh-link" onclick={() => refreshDevice(device.deviceId)}>browse</button> to discover tags</div>
-          {/if}
-        {/each}
+        {/if}
       </nav>
 
       <div class="tc-main">
@@ -1813,6 +1883,13 @@
         <button class="reset-btn" onclick={async () => { await invalidateAll(); needsInit = true; }} disabled={saving}>Discard</button>
       </div>
     {/if}
+
+  {#if deleteTarget}
+    <DeleteDeviceModal
+      deviceId={deleteTarget.deviceId}
+      varCount={deleteTarget.varCount}
+      onClose={() => (deleteTarget = null)}
+    />
   {/if}
 </div>
 
@@ -1830,8 +1907,6 @@
     border: 1px solid var(--color-red-500, #ef4444); margin: 1.5rem 2rem;
     p { margin: 0; font-size: 0.875rem; color: var(--color-red-500, #ef4444); }
   }
-
-  .empty-state { padding: 3rem 2rem; text-align: center; p { color: var(--theme-text-muted); font-size: 0.875rem; } }
 
   // ── Layout ──
   .tc-layout { display: flex; flex: 1; overflow: hidden; }
@@ -1931,9 +2006,46 @@
     padding: 0.5rem 1rem 0.25rem; font-size: 0.625rem; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--theme-text-muted); background: none; border: none; cursor: pointer;
-    &:not(:first-child) { border-top: 1px solid var(--theme-border); margin-top: 0.25rem; padding-top: 0.625rem; }
+    &:not(:first-child):not(.flex-label) { border-top: 1px solid var(--theme-border); margin-top: 0.25rem; padding-top: 0.625rem; }
     &:hover { color: var(--theme-text); }
     .tc-side-count { margin-left: auto; }
+  }
+
+  .tc-side-section-header {
+    display: flex; align-items: stretch;
+    border-top: 1px solid var(--theme-border); margin-top: 0.25rem;
+    .tc-side-section-label {
+      flex: 1; padding-top: 0.625rem;
+      .tc-side-count { margin-left: auto; }
+    }
+  }
+
+  .tc-add-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.75rem; flex-shrink: 0;
+    padding: 0; margin-right: 0.25rem;
+    background: transparent; border: none; line-height: 1;
+    cursor: pointer; color: var(--theme-text-muted); opacity: 0.7;
+    transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+    :global(svg) { flex-shrink: 0; }
+    &:hover { opacity: 1; color: var(--theme-text); background: color-mix(in srgb, var(--theme-text) 5%, transparent); }
+    &[aria-expanded='true'] { opacity: 1; color: var(--theme-primary); }
+  }
+
+  .tc-side-head {
+    .side-row-action {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1.5rem; height: 1.5rem; padding: 0;
+      background: transparent; border: none; cursor: pointer;
+      color: var(--theme-text-muted);
+      opacity: 0; flex-shrink: 0;
+      transition: opacity 0.12s ease, color 0.12s ease;
+      :global(svg) { flex-shrink: 0; }
+      &:hover { color: var(--theme-text); }
+      &.delete:hover { color: var(--theme-danger, #e5484d); }
+    }
+    &:hover .side-row-action,
+    .side-row-action[aria-expanded='true'] { opacity: 1; }
   }
   .section-chevron {
     display: inline-flex; flex-shrink: 0; transition: transform 0.15s ease;
@@ -2106,7 +2218,6 @@
   @media (max-width: 640px) {
     .tc-header { padding: 0.625rem 0.875rem; }
     .tc-tabs { padding: 0 0.875rem; }
-    .tc-tab { font-size: 0.75rem; padding: 0.625rem 0.5rem; }
     .save-bar { margin: 0 0.75rem; }
     .tc-subtitle { display: none; }
   }
