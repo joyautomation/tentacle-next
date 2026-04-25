@@ -1,12 +1,16 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { getServiceName } from '$lib/constants/services';
+  import {
+    getServiceName,
+    getRemoteConfigStatus,
+  } from '$lib/constants/services';
   import { setRemoteTargetContext } from '$lib/contexts/remote-target';
 
   let { children } = $props();
 
   const serviceType = $derived($page.params.serviceType ?? '');
   const serviceName = $derived(getServiceName(serviceType));
+  const remoteConfigStatus = $derived(getRemoteConfigStatus(serviceType));
 
   // Remote-target awareness: when ?target=group/node is present, every
   // configurator on this layout is reading/writing the named edge tentacle's
@@ -23,6 +27,16 @@
     isRemote: target !== null,
     targetSuffix,
   }));
+
+  // When remote, the back-link returns to the per-node fleet landing rather
+  // than the fleet list, so the operator can hop between configurators for
+  // the same edge tentacle without losing their place.
+  const backHref = $derived(() => {
+    if (!target) return '/';
+    const [group, node] = target.split('/', 2);
+    if (!group || !node) return '/fleet';
+    return `/fleet/${encodeURIComponent(group)}/${encodeURIComponent(node)}`;
+  });
 
   const currentTab = $derived(() => {
     const path = $page.url?.pathname ?? '';
@@ -53,7 +67,7 @@
     </div>
   {/if}
   <nav class="service-nav">
-    <a href={target ? '/fleet' : '/'} class="back-link">
+    <a href={backHref()} class="back-link">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M19 12H5M12 19l-7-7 7-7"/>
       </svg>
@@ -260,7 +274,26 @@
     {/if}
   </div>
 
-  {@render children()}
+  {#if target && remoteConfigStatus === 'bus-driven'}
+    <div class="remote-placeholder">
+      <h2>No remote configuration for this module</h2>
+      <p>
+        <strong>{serviceName}</strong> has no standalone configuration — its behavior is driven by other modules over the bus. For example, EtherNet/IP and PROFINET scanners are configured via Gateway sources, not their own settings.
+      </p>
+      <p>
+        Configure this edge tentacle's <a href="/services/gateway{targetSuffix}">Gateway</a> instead.
+      </p>
+    </div>
+  {:else if target && remoteConfigStatus === 'coming-soon'}
+    <div class="remote-placeholder">
+      <h2>Remote config not yet wired</h2>
+      <p>
+        <strong>{serviceName}</strong> owns its own settings, but mantle doesn't yet have target-aware endpoints for it. Backend support is planned — this page will activate when it lands.
+      </p>
+    </div>
+  {:else}
+    {@render children()}
+  {/if}
 </div>
 
 <style lang="scss">
@@ -358,6 +391,39 @@
 
   .service-layout.remote {
     box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--theme-primary) 30%, transparent);
+  }
+
+  .remote-placeholder {
+    margin: 2.5rem auto;
+    padding: 2rem 2.5rem;
+    max-width: 640px;
+    border: 1px solid var(--theme-border);
+    background: var(--theme-surface);
+    border-radius: var(--rounded-md, 0.5rem);
+    text-align: center;
+
+    h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--theme-text);
+    }
+
+    p {
+      margin: 0.5rem 0;
+      color: var(--theme-text-muted);
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    a {
+      color: var(--theme-primary);
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
   }
 
   .service-tabs {

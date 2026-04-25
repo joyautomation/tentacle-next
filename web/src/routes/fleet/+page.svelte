@@ -17,8 +17,8 @@
     return `${Math.floor(secs / 86400)}d ago`;
   }
 
-  function targetParam(groupId: string, nodeId: string): string {
-    return encodeURIComponent(`${groupId}/${nodeId}`);
+  function nodeHref(groupId: string, nodeId: string): string {
+    return `/fleet/${encodeURIComponent(groupId)}/${encodeURIComponent(nodeId)}`;
   }
 
   onMount(() => {
@@ -65,12 +65,12 @@
             <th class="num">Devices</th>
             <th class="num">Metrics</th>
             <th>Last Seen</th>
-            <th>Configure</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           {#each data.nodes as n (n.groupId + '/' + n.nodeId)}
-            <tr>
+            <tr class="row" onclick={() => (window.location.href = nodeHref(n.groupId, n.nodeId))}>
               <td class="mono">{n.groupId}</td>
               <td class="mono">{n.nodeId}</td>
               <td>
@@ -82,8 +82,8 @@
               <td class="num mono">{n.metricCount}</td>
               <td class="muted">{formatRelative(n.lastSeen)}</td>
               <td>
-                <a class="link-btn" href="/services/modbus/tag-config?target={targetParam(n.groupId, n.nodeId)}">
-                  Modbus tags
+                <a class="link-btn" href={nodeHref(n.groupId, n.nodeId)} onclick={(e) => e.stopPropagation()}>
+                  Configure →
                 </a>
               </td>
             </tr>
@@ -184,6 +184,15 @@
 
   .fleet-table tbody tr:last-child td {
     border-bottom: none;
+  }
+
+  .fleet-table tbody tr.row {
+    cursor: pointer;
+    transition: background 120ms;
+
+    &:hover {
+      background: color-mix(in srgb, var(--theme-primary) 6%, transparent);
+    }
   }
 
   .fleet-table .num {
