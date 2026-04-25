@@ -57,12 +57,11 @@ func init() {
 		otypes.ModuleRegistryEntry{
 			Repo:         "tentacle-next",
 			ModuleID:     "fleet",
-			Description:  "Fleet inventory — tracks edge-node births/deaths on MQTT",
+			Description:  "Fleet inventory — consumes sparkplug-host frame events",
 			Category:     "optional",
 			Runtime:      "embedded",
 			Experimental: true,
 			RequiredConfig: []otypes.ConfigField{
-				{EnvVar: "FLEET_BROKER_URL", Description: "MQTT broker URL", Required: true, Default: "tcp://localhost:1883"},
 				{EnvVar: "FLEET_GROUP", Description: "Group filter (+ for all groups)", Default: "+"},
 				{EnvVar: "FLEET_STALE_SECONDS", Description: "Stale threshold in seconds", Default: "90"},
 			},

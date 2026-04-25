@@ -237,6 +237,8 @@ func (m *Module) handleMessage(b bus.Bus, topic string, payload []byte) {
 		return
 	}
 
+	m.publishFrameEvent(b, msgType, group, edgeNode, device, pl)
+
 	deviceKey := encodeDeviceKey(group, edgeNode, device)
 	for i := range pl.Metrics {
 		metric := &pl.Metrics[i]
@@ -244,6 +246,36 @@ func (m *Module) handleMessage(b bus.Bus, topic string, payload []byte) {
 			continue
 		}
 		m.publishMetric(b, deviceKey, metric, msgType)
+	}
+}
+
+// publishFrameEvent emits a sparkplug.FrameEvent on the bus so downstream
+// modules (fleet, etc.) don't need their own MQTT connection.
+func (m *Module) publishFrameEvent(b bus.Bus, msgType, group, edgeNode, device string, pl *sparkplug.Payload) {
+	evt := sparkplug.FrameEvent{
+		Type:        msgType,
+		GroupID:     group,
+		EdgeNode:    edgeNode,
+		Device:      device,
+		Timestamp:   time.Now().UnixMilli(),
+		MetricCount: len(pl.Metrics),
+	}
+	if msgType == "NBIRTH" || msgType == "NDEATH" {
+		for i := range pl.Metrics {
+			if pl.Metrics[i].Name == "bdSeq" {
+				if v, ok := pl.Metrics[i].Value.(uint64); ok {
+					evt.BdSeq = int64(v)
+				}
+				break
+			}
+		}
+	}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		return
+	}
+	if err := b.Publish(sparkplug.SubjectHostFrame, data); err != nil {
+		m.log.Debug("sparkplug-host: frame event publish failed", "error", err)
 	}
 }
 

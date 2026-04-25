@@ -1,28 +1,24 @@
 //go:build fleet || mantle || all
 
 // Package fleet is the Mantle fleet-management module: it subscribes to
-// Sparkplug B NBIRTH/NDEATH/NDATA (and DBIRTH/DDEATH/DDATA) events on the
-// broker to maintain an inventory of edge nodes — who's online, when they
-// last published, how many devices and metrics each one is announcing.
+// FrameEvent values published by sparkplug-host (via the bus) and maintains
+// an inventory of edge nodes — who's online, when they last published,
+// how many devices and metrics each one is announcing.
 //
-// Pairs with sparkplug-host (which handles data) and history (which stores
-// it). Fleet is the "who's alive" view.
+// Fleet does NOT open its own MQTT connection. sparkplug-host already
+// parses every Sparkplug B frame; fleet consumes the resulting events.
 package fleet
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	paho "github.com/eclipse/paho.mqtt.golang"
 
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/config"
@@ -35,16 +31,16 @@ const serviceType = "fleet"
 
 // Node is a single tracked edge node in the fleet.
 type Node struct {
-	GroupID     string            `json:"groupId"`
-	NodeID      string            `json:"nodeId"`
-	Online      bool              `json:"online"`
-	LastSeen    int64             `json:"lastSeen"`    // unix ms
-	FirstSeen   int64             `json:"firstSeen"`   // unix ms
-	BdSeq       int64             `json:"bdSeq"`
+	GroupID     string             `json:"groupId"`
+	NodeID      string             `json:"nodeId"`
+	Online      bool               `json:"online"`
+	LastSeen    int64              `json:"lastSeen"`
+	FirstSeen   int64              `json:"firstSeen"`
+	BdSeq       int64              `json:"bdSeq"`
 	Devices     map[string]*Device `json:"devices"`
-	NbirthTime  int64             `json:"nbirthTime,omitempty"`
-	NdeathTime  int64             `json:"ndeathTime,omitempty"`
-	MetricCount int               `json:"metricCount"`
+	NbirthTime  int64              `json:"nbirthTime,omitempty"`
+	NdeathTime  int64              `json:"ndeathTime,omitempty"`
+	MetricCount int                `json:"metricCount"`
 }
 
 // Device is a single device under an edge node.
@@ -59,11 +55,11 @@ type Module struct {
 	moduleID string
 	log      *slog.Logger
 
-	mu     sync.RWMutex
-	client paho.Client
-	nodes  map[string]*Node // keyed by "group/node"
-	stopHB func()
-	subs   []bus.Subscription
+	mu          sync.RWMutex
+	nodes       map[string]*Node // keyed by "group/node"
+	groupFilter string
+	stopHB      func()
+	subs        []bus.Subscription
 
 	stats struct {
 		nbirth atomic.Int64
@@ -98,6 +94,9 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 	cfg := loadConfig(b, m.moduleID)
 	saveConfig(b, cfg)
+	m.mu.Lock()
+	m.groupFilter = cfg.GroupFilter
+	m.mu.Unlock()
 
 	if schemaSub, err := config.RegisterSchema(b, serviceType, configSchema); err == nil {
 		m.mu.Lock()
@@ -105,42 +104,16 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.mu.Unlock()
 	}
 
-	opts := paho.NewClientOptions().
-		AddBroker(cfg.BrokerURL).
-		SetClientID(cfg.ClientID).
-		SetCleanSession(cfg.CleanSession).
-		SetKeepAlive(time.Duration(cfg.KeepAlive) * time.Second).
-		SetAutoReconnect(true).
-		SetConnectRetry(true).
-		SetConnectRetryInterval(5 * time.Second)
-	if cfg.Username != "" {
-		opts.SetUsername(cfg.Username)
-	}
-	if cfg.Password != "" {
-		opts.SetPassword(cfg.Password)
-	}
-
-	subTopic := "spBv1.0/" + cfg.GroupFilter + "/+/+/#"
-	opts.OnConnect = func(c paho.Client) {
-		m.log.Info("fleet: connected to broker", "broker", cfg.BrokerURL, "filter", subTopic)
-		token := c.Subscribe(subTopic, 0, func(_ paho.Client, msg paho.Message) {
-			m.handleMessage(msg.Topic(), msg.Payload())
-		})
-		if token.Wait() && token.Error() != nil {
-			m.log.Error("fleet: subscribe failed", "error", token.Error())
+	frameSub, err := b.Subscribe(sparkplug.SubjectHostFrame, func(_ string, data []byte, _ bus.ReplyFunc) {
+		var evt sparkplug.FrameEvent
+		if err := json.Unmarshal(data, &evt); err != nil {
+			return
 		}
+		m.handleFrame(evt)
+	})
+	if err != nil {
+		m.log.Error("fleet: subscribe to host frame events failed", "error", err)
 	}
-	opts.OnConnectionLost = func(_ paho.Client, err error) {
-		m.log.Warn("fleet: connection lost", "error", err)
-	}
-
-	client := paho.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		return fmt.Errorf("fleet: connect to %s: %w", cfg.BrokerURL, token.Error())
-	}
-	m.mu.Lock()
-	m.client = client
-	m.mu.Unlock()
 
 	m.stopHB = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
 		m.mu.RLock()
@@ -155,8 +128,8 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 		m.mu.RUnlock()
 		return map[string]interface{}{
-			"broker":     cfg.BrokerURL,
-			"filter":     subTopic,
+			"source":     sparkplug.SubjectHostFrame,
+			"groupFilter": cfg.GroupFilter,
 			"nodes":      total,
 			"online":     online,
 			"nbirth":     m.stats.nbirth.Load(),
@@ -167,7 +140,6 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 	})
 
-	// Bus API: request fleet.nodes to get current inventory snapshot.
 	nodesSub, _ := b.Subscribe(topics.FleetNodes, func(_ string, _ []byte, reply bus.ReplyFunc) {
 		if reply == nil {
 			return
@@ -186,8 +158,13 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	})
 
 	m.mu.Lock()
+	if frameSub != nil {
+		m.subs = append(m.subs, frameSub)
+	}
 	m.subs = append(m.subs, nodesSub, shutdownSub)
 	m.mu.Unlock()
+
+	m.log.Info("fleet: subscribed to host frame events", "subject", sparkplug.SubjectHostFrame, "groupFilter", cfg.GroupFilter)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -200,8 +177,6 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 func (m *Module) Stop() error {
 	m.mu.Lock()
-	client := m.client
-	m.client = nil
 	subs := m.subs
 	m.subs = nil
 	stopHB := m.stopHB
@@ -214,113 +189,87 @@ func (m *Module) Stop() error {
 	if stopHB != nil {
 		stopHB()
 	}
-	if client != nil && client.IsConnected() {
-		client.Disconnect(250)
-	}
 	if m.log != nil {
 		m.log.Info("fleet: stopped")
 	}
 	return nil
 }
 
-// handleMessage updates the inventory based on a Sparkplug B topic/payload.
-func (m *Module) handleMessage(topic string, payload []byte) {
-	parts := strings.Split(topic, "/")
-	if len(parts) < 4 || parts[0] != "spBv1.0" {
-		return
-	}
-	group := parts[1]
-	msgType := parts[2]
-	node := parts[3]
-	device := ""
-	if len(parts) >= 5 {
-		device = parts[4]
-	}
-
-	// Ignore host-application STATE frames.
-	if msgType == "STATE" {
+// handleFrame updates inventory based on a FrameEvent from sparkplug-host.
+func (m *Module) handleFrame(evt sparkplug.FrameEvent) {
+	m.mu.RLock()
+	gf := m.groupFilter
+	m.mu.RUnlock()
+	if gf != "" && gf != "+" && gf != evt.GroupID {
 		return
 	}
 
-	now := time.Now().UnixMilli()
-	n := m.getOrCreateNode(group, node, now)
+	now := evt.Timestamp
+	if now == 0 {
+		now = time.Now().UnixMilli()
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	key := evt.GroupID + "/" + evt.EdgeNode
+	n, ok := m.nodes[key]
+	if !ok {
+		n = &Node{
+			GroupID:   evt.GroupID,
+			NodeID:    evt.EdgeNode,
+			FirstSeen: now,
+			Devices:   make(map[string]*Device),
+		}
+		m.nodes[key] = n
+	}
 	n.LastSeen = now
-	switch msgType {
+
+	switch evt.Type {
 	case "NBIRTH":
 		m.stats.nbirth.Add(1)
 		n.Online = true
 		n.NbirthTime = now
-		if pl, err := sparkplug.DecodePayload(payload); err == nil {
-			n.MetricCount = len(pl.Metrics)
-			for i := range pl.Metrics {
-				if pl.Metrics[i].Name == "bdSeq" {
-					if v, ok := pl.Metrics[i].Value.(uint64); ok {
-						n.BdSeq = int64(v)
-					}
-				}
-			}
-		}
+		n.BdSeq = evt.BdSeq
+		n.MetricCount = evt.MetricCount
 	case "NDEATH":
 		m.stats.ndeath.Add(1)
 		n.Online = false
 		n.NdeathTime = now
-		// Any devices under this node are implicitly offline.
 		for _, d := range n.Devices {
 			d.Online = false
 		}
 	case "DBIRTH":
 		m.stats.dbirth.Add(1)
-		if device != "" {
-			d := m.getOrCreateDevice(n, device)
+		if evt.Device != "" {
+			d := m.getOrCreateDeviceLocked(n, evt.Device)
 			d.Online = true
 			d.LastSeen = now
-			if pl, err := sparkplug.DecodePayload(payload); err == nil {
-				d.MetricCount = len(pl.Metrics)
-			}
+			d.MetricCount = evt.MetricCount
 		}
 	case "DDEATH":
 		m.stats.ddeath.Add(1)
-		if device != "" {
-			if d, ok := n.Devices[device]; ok {
+		if evt.Device != "" {
+			if d, ok := n.Devices[evt.Device]; ok {
 				d.Online = false
 				d.LastSeen = now
 			}
 		}
-	case "NDATA", "DDATA":
+	case "NDATA":
 		m.stats.data.Add(1)
-		if device != "" {
-			d := m.getOrCreateDevice(n, device)
-			d.LastSeen = now
+		n.Online = true
+	case "DDATA":
+		m.stats.data.Add(1)
+		n.Online = true
+		if evt.Device != "" {
+			d := m.getOrCreateDeviceLocked(n, evt.Device)
 			d.Online = true
+			d.LastSeen = now
 		}
 	}
 }
 
-// getOrCreateNode is internal; caller must not hold m.mu yet.
-func (m *Module) getOrCreateNode(group, node string, now int64) *Node {
-	key := group + "/" + node
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if n, ok := m.nodes[key]; ok {
-		return n
-	}
-	n := &Node{
-		GroupID:   group,
-		NodeID:    node,
-		FirstSeen: now,
-		LastSeen:  now,
-		Devices:   make(map[string]*Device),
-	}
-	m.nodes[key] = n
-	return n
-}
-
-// getOrCreateDevice assumes caller holds m.mu.
-func (m *Module) getOrCreateDevice(n *Node, device string) *Device {
+func (m *Module) getOrCreateDeviceLocked(n *Node, device string) *Device {
 	if d, ok := n.Devices[device]; ok {
 		return d
 	}
