@@ -103,7 +103,7 @@
         d.x < Math.PI === !d.children ? 'start' : 'end'
       )
       .attr('paint-order', 'stroke')
-      .style('stroke', 'var(--theme-bg, var(--gray-950, #0a0a0a))')
+      .style('stroke', 'var(--theme-background)')
       .style('fill', 'var(--theme-text)')
       .text((d) => d.data.name);
   });

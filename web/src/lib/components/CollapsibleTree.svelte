@@ -119,7 +119,7 @@
         .text((d: any) => d.data.name)
         .attr('stroke-linejoin', 'round')
         .attr('stroke-width', 3)
-        .style('stroke', 'var(--theme-bg, var(--gray-950, #0a0a0a))')
+        .style('stroke', 'var(--theme-background)')
         .style('fill', 'var(--theme-text)')
         .attr('paint-order', 'stroke');
 
