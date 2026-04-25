@@ -4,6 +4,7 @@ package main
 
 import (
 	"github.com/joyautomation/tentacle/internal/ethernetipserver"
+	"github.com/joyautomation/tentacle/internal/gitserver"
 	"github.com/joyautomation/tentacle/internal/history"
 	"github.com/joyautomation/tentacle/internal/modbus"
 	"github.com/joyautomation/tentacle/internal/modbusserver"
@@ -31,6 +32,7 @@ func experimentalFactories() map[string]orchestrator.ModuleFactory {
 		"plc":                func(id string) module.Module { return plc.New(id) },
 		"mqtt-broker":        func(id string) module.Module { return mqttbroker.New(id) },
 		"sparkplug-host":     func(id string) module.Module { return sparkplughost.New(id) },
+		"gitserver":          func(id string) module.Module { return gitserver.New(id) },
 	}
 }
 
@@ -58,6 +60,8 @@ func experimentalModuleByName(name string) module.Module {
 		return mqttbroker.New("mqtt-broker")
 	case "sparkplug-host":
 		return sparkplughost.New("sparkplug-host")
+	case "gitserver":
+		return gitserver.New("gitserver")
 	default:
 		return nil
 	}

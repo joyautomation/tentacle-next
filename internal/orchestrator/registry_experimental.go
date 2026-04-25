@@ -103,6 +103,14 @@ func init() {
 		},
 		otypes.ModuleRegistryEntry{
 			Repo:         "tentacle-next",
+			ModuleID:     "gitserver",
+			Description:  "Git smart-HTTP server hosting per-edge config repos for fleet remote configuration",
+			Category:     "optional",
+			Runtime:      "embedded",
+			Experimental: true,
+		},
+		otypes.ModuleRegistryEntry{
+			Repo:         "tentacle-next",
 			ModuleID:     "sparkplug-host",
 			Description:  "Sparkplug B Host Application — fleet ingestion to history/bus",
 			Category:     "optional",
