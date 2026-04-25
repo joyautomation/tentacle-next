@@ -411,7 +411,7 @@ export function plcLsp(opts: PlcLspOptions): {
 			if (!hov || !hov.contents) return null;
 			const from = hov.range ? this.posFromLsp(hov.range.start) : pos;
 			const to = hov.range ? this.posFromLsp(hov.range.end) : pos;
-			const value = hov.contents.value;
+			const value = unwrapMarkdownFence(hov.contents.value);
 			return {
 				pos: from,
 				end: to,
@@ -455,6 +455,15 @@ export function plcLsp(opts: PlcLspOptions): {
 		extension: [PluginDef, hoverExt, hoverTheme],
 		completionSource
 	};
+}
+
+// Hover content arrives as LSP MarkupContent (kind: "markdown"). Our server
+// wraps the single type-signature line in a ```lang ... ``` fence for future
+// markdown renderers; the current tooltip is a plain <div>, so unwrap the
+// fence and show the inner text.
+function unwrapMarkdownFence(value: string): string {
+	const m = /^\s*```[a-zA-Z_-]*\n([\s\S]*?)\n```\s*$/.exec(value);
+	return m ? m[1] : value;
 }
 
 function lspKindToCmType(kind: number | undefined): string | undefined {
