@@ -390,31 +390,3 @@ END_PROGRAM`
 	}
 }
 
-// ─── Round-trip through existing Transpile() keeps working ─────────────────
-
-func TestTranspileStillWorksForSimplePrograms(t *testing.T) {
-	// The /transpile endpoint's contract: Name + Datatype come back for each var.
-	// This verifies we didn't break that consumer with the AST changes.
-	src := `
-VAR
-  counter : INT := 0;
-  rate : REAL := 1.5;
-END_VAR
-counter := counter + 1;`
-	starlark, vars, err := Transpile(src)
-	if err != nil {
-		t.Fatalf("Transpile: %v", err)
-	}
-	if starlark == "" {
-		t.Error("Transpile emitted empty Starlark")
-	}
-	if len(vars) != 2 {
-		t.Fatalf("vars = %d, want 2", len(vars))
-	}
-	if vars[0].Name != "counter" || vars[0].Datatype != "INT" {
-		t.Errorf("vars[0] = %+v, want {counter INT}", vars[0])
-	}
-	if vars[1].Name != "rate" || vars[1].Datatype != "REAL" {
-		t.Errorf("vars[1] = %+v, want {rate REAL}", vars[1])
-	}
-}

@@ -574,10 +574,7 @@
 		{:else if error}
 			<div class="status error">{error}</div>
 		{:else if language === 'ladder'}
-			<div class="status">
-				Ladder editing isn't wired into the workspace yet.
-				<a href="/services/plc/programs">Open in the Functions tab</a> to edit visually.
-			</div>
+			<div class="status">Ladder editing isn't wired into the workspace yet.</div>
 		{:else}
 			<div class="diff-wrap" class:diff-active={showDiff}>
 				<div class="diff-pane pending-pane">
