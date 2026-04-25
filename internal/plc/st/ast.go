@@ -2,9 +2,24 @@
 
 package st
 
+// Pos is a 1-based source location captured by the parser. Zero values
+// mean "unknown" (e.g. synthesized nodes); diagnostic emitters fall back
+// to the program's first line in that case.
+type Pos struct {
+	Line int
+	Col  int
+}
+
 // Node is the interface for all AST nodes.
 type Node interface {
 	nodeType() string
+}
+
+// Posed is implemented by AST nodes that carry a source position.
+// Diagnostics extract Pos via this interface so the typechecker can
+// stay agnostic to the concrete node type.
+type Posed interface {
+	NodePos() Pos
 }
 
 // ─── Top-level ──────────────────────────────────────────────────────────────
@@ -39,7 +54,10 @@ type VarDecl struct {
 	Datatype string
 	Type     TypeExpr
 	Initial  Expression
+	Pos      Pos
 }
+
+func (v VarDecl) NodePos() Pos { return v.Pos }
 
 // TypeDecl is a top-level TYPE Name : <typeExpr>; END_TYPE entry.
 // Most commonly used for STRUCT UDTs, but the parser allows aliasing any
@@ -47,9 +65,11 @@ type VarDecl struct {
 type TypeDecl struct {
 	Name string
 	Type TypeExpr
+	Pos  Pos
 }
 
 func (t *TypeDecl) nodeType() string { return "TypeDecl" }
+func (t *TypeDecl) NodePos() Pos     { return t.Pos }
 
 // ─── Type expressions ───────────────────────────────────────────────────────
 
@@ -155,10 +175,12 @@ type AssignStmt struct {
 	Target     string
 	TargetExpr Expression
 	Value      Expression
+	Pos        Pos
 }
 
 func (s *AssignStmt) nodeType() string { return "AssignStmt" }
 func (s *AssignStmt) stmtNode()        {}
+func (s *AssignStmt) NodePos() Pos     { return s.Pos }
 
 // IfStmt is IF ... THEN ... ELSIF ... ELSE ... END_IF.
 type IfStmt struct {
@@ -166,15 +188,18 @@ type IfStmt struct {
 	Then      []Statement
 	ElsIfs    []ElsIfClause
 	Else      []Statement
+	Pos       Pos
 }
 
 type ElsIfClause struct {
 	Condition Expression
 	Body      []Statement
+	Pos       Pos
 }
 
 func (s *IfStmt) nodeType() string { return "IfStmt" }
 func (s *IfStmt) stmtNode()        {}
+func (s *IfStmt) NodePos() Pos     { return s.Pos }
 
 // ForStmt is FOR i := start TO end [BY step] DO ... END_FOR.
 type ForStmt struct {
@@ -183,69 +208,83 @@ type ForStmt struct {
 	End      Expression
 	Step     Expression // nil means step=1
 	Body     []Statement
+	Pos      Pos
 }
 
 func (s *ForStmt) nodeType() string { return "ForStmt" }
 func (s *ForStmt) stmtNode()        {}
+func (s *ForStmt) NodePos() Pos     { return s.Pos }
 
 // WhileStmt is WHILE cond DO ... END_WHILE.
 type WhileStmt struct {
 	Condition Expression
 	Body      []Statement
+	Pos       Pos
 }
 
 func (s *WhileStmt) nodeType() string { return "WhileStmt" }
 func (s *WhileStmt) stmtNode()        {}
+func (s *WhileStmt) NodePos() Pos     { return s.Pos }
 
 // RepeatStmt is REPEAT ... UNTIL cond END_REPEAT.
 type RepeatStmt struct {
 	Body      []Statement
 	Condition Expression
+	Pos       Pos
 }
 
 func (s *RepeatStmt) nodeType() string { return "RepeatStmt" }
 func (s *RepeatStmt) stmtNode()        {}
+func (s *RepeatStmt) NodePos() Pos     { return s.Pos }
 
 // CaseStmt is CASE expr OF ... END_CASE.
 type CaseStmt struct {
 	Expression Expression
 	Cases      []CaseClause
 	Else       []Statement
+	Pos        Pos
 }
 
 type CaseClause struct {
 	Values []Expression
 	Body   []Statement
+	Pos    Pos
 }
 
 func (s *CaseStmt) nodeType() string { return "CaseStmt" }
 func (s *CaseStmt) stmtNode()        {}
+func (s *CaseStmt) NodePos() Pos     { return s.Pos }
 
 // CallStmt is a standalone function or FB-instance call: name(args);
 type CallStmt struct {
 	Call *CallExpr
+	Pos  Pos
 }
 
 func (s *CallStmt) nodeType() string { return "CallStmt" }
 func (s *CallStmt) stmtNode()        {}
+func (s *CallStmt) NodePos() Pos     { return s.Pos }
 
 // ReturnStmt is RETURN;
-type ReturnStmt struct{}
+type ReturnStmt struct{ Pos Pos }
 
 func (s *ReturnStmt) nodeType() string { return "ReturnStmt" }
 func (s *ReturnStmt) stmtNode()        {}
+func (s *ReturnStmt) NodePos() Pos     { return s.Pos }
 
 // ExitStmt is EXIT; (break out of the innermost loop).
-type ExitStmt struct{}
+type ExitStmt struct{ Pos Pos }
 
 func (s *ExitStmt) nodeType() string { return "ExitStmt" }
 func (s *ExitStmt) stmtNode()        {}
+func (s *ExitStmt) NodePos() Pos     { return s.Pos }
 
 // ContinueStmt is CONTINUE; (skip to the next loop iteration).
-type ContinueStmt struct{}
+type ContinueStmt struct{ Pos Pos }
 
 func (s *ContinueStmt) nodeType() string { return "ContinueStmt" }
 func (s *ContinueStmt) stmtNode()        {}
+func (s *ContinueStmt) NodePos() Pos     { return s.Pos }
 
 // ─── Expressions ────────────────────────────────────────────────────────────
 
@@ -260,53 +299,65 @@ type Expression interface {
 type NumberLit struct {
 	Value string
 	Base  int // 10, 16, 2, 8. 10 is the default for conventional literals.
+	Pos   Pos
 }
 
 func (e *NumberLit) nodeType() string { return "NumberLit" }
 func (e *NumberLit) exprNode()        {}
+func (e *NumberLit) NodePos() Pos     { return e.Pos }
 
 // StringLit is a string literal.
 type StringLit struct {
 	Value string
+	Pos   Pos
 }
 
 func (e *StringLit) nodeType() string { return "StringLit" }
 func (e *StringLit) exprNode()        {}
+func (e *StringLit) NodePos() Pos     { return e.Pos }
 
 // BoolLit is TRUE or FALSE.
 type BoolLit struct {
 	Value bool
+	Pos   Pos
 }
 
 func (e *BoolLit) nodeType() string { return "BoolLit" }
 func (e *BoolLit) exprNode()        {}
+func (e *BoolLit) NodePos() Pos     { return e.Pos }
 
 // IdentExpr is a variable reference.
 type IdentExpr struct {
 	Name string
+	Pos  Pos
 }
 
 func (e *IdentExpr) nodeType() string { return "IdentExpr" }
 func (e *IdentExpr) exprNode()        {}
+func (e *IdentExpr) NodePos() Pos     { return e.Pos }
 
 // BinaryExpr is a binary operation: left op right.
 type BinaryExpr struct {
 	Left  Expression
 	Op    string // "+", "-", "*", "/", "=", "<>", "<", "<=", ">", ">=", "AND", "OR", "XOR", "MOD"
 	Right Expression
+	Pos   Pos
 }
 
 func (e *BinaryExpr) nodeType() string { return "BinaryExpr" }
 func (e *BinaryExpr) exprNode()        {}
+func (e *BinaryExpr) NodePos() Pos     { return e.Pos }
 
 // UnaryExpr is a unary operation: NOT expr, -expr.
 type UnaryExpr struct {
 	Op      string // "NOT", "-"
 	Operand Expression
+	Pos     Pos
 }
 
 func (e *UnaryExpr) nodeType() string { return "UnaryExpr" }
 func (e *UnaryExpr) exprNode()        {}
+func (e *UnaryExpr) NodePos() Pos     { return e.Pos }
 
 // CallExpr is a function call: func(arg1, arg2, ...) or func(IN := x, PT := T#5s).
 // Args holds positional arguments in declaration order. NamedArgs holds the
@@ -316,49 +367,60 @@ type CallExpr struct {
 	Name      string
 	Args      []Expression
 	NamedArgs []NamedArg
+	Pos       Pos
 }
 
 // NamedArg is a `name := value` argument in an FB/function call.
 type NamedArg struct {
 	Name  string
 	Value Expression
+	Pos   Pos
 }
 
 func (e *CallExpr) nodeType() string { return "CallExpr" }
 func (e *CallExpr) exprNode()        {}
+func (e *CallExpr) NodePos() Pos     { return e.Pos }
 
 // MemberExpr is a dotted member access: obj.field.
 type MemberExpr struct {
 	Object Expression
 	Member string
+	Pos    Pos
 }
 
 func (e *MemberExpr) nodeType() string { return "MemberExpr" }
 func (e *MemberExpr) exprNode()        {}
+func (e *MemberExpr) NodePos() Pos     { return e.Pos }
 
 // IndexExpr is an array subscript: a[i] or a[i, j].
 type IndexExpr struct {
 	Array   Expression
 	Indices []Expression
+	Pos     Pos
 }
 
 func (e *IndexExpr) nodeType() string { return "IndexExpr" }
 func (e *IndexExpr) exprNode()        {}
+func (e *IndexExpr) NodePos() Pos     { return e.Pos }
 
 // TimeLit is a time literal: T#5s, T#100ms, T#1h30m.
 type TimeLit struct {
 	Raw string // e.g., "5s", "100ms", "1h30m"
+	Pos Pos
 }
 
 func (e *TimeLit) nodeType() string { return "TimeLit" }
 func (e *TimeLit) exprNode()        {}
+func (e *TimeLit) NodePos() Pos     { return e.Pos }
 
 // TypedLit is a type-prefixed literal: INT#42, REAL#3.14, BOOL#TRUE, STRING#'x'.
 // TypeName is the prefix as written (uppercased); Inner is the payload literal.
 type TypedLit struct {
 	TypeName string
 	Inner    Expression
+	Pos      Pos
 }
 
 func (e *TypedLit) nodeType() string { return "TypedLit" }
 func (e *TypedLit) exprNode()        {}
+func (e *TypedLit) NodePos() Pos     { return e.Pos }

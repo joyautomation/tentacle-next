@@ -14,6 +14,14 @@ type Parser struct {
 	pending []VarDecl // carryover from multi-name var declarations ("a, b : INT;")
 }
 
+// tokPos lifts a token's 1-based line/col into an AST Pos. Used by every
+// construction site so diagnostics can map an AST node back to source.
+func tokPos(tok Token) Pos { return Pos{Line: tok.Line, Col: tok.Col} }
+
+// peekPos returns the current token's source position. Statement / expression
+// parsers grab this at entry to tag the node they're about to build.
+func (p *Parser) peekPos() Pos { return tokPos(p.peek()) }
+
 // Parse parses Structured Text source into a Program AST.
 func Parse(source string) (*Program, error) {
 	tokens := Lex(source)
@@ -135,7 +143,7 @@ func (p *Parser) parseTypeBlock(prog *Program) error {
 			return fmt.Errorf("type decl %q: %w", nameTok.Literal, err)
 		}
 		p.match(TokenSemicolon)
-		prog.TypeDecls = append(prog.TypeDecls, TypeDecl{Name: nameTok.Literal, Type: typ})
+		prog.TypeDecls = append(prog.TypeDecls, TypeDecl{Name: nameTok.Literal, Type: typ, Pos: tokPos(nameTok)})
 	}
 	p.match(TokenEndType)
 	p.match(TokenSemicolon)
@@ -195,6 +203,7 @@ func (p *Parser) parseVarDecl() (*VarDecl, error) {
 	if err != nil {
 		return nil, fmt.Errorf("var decl: %w", err)
 	}
+	firstPos := tokPos(nameTok)
 	names = append(names, nameTok.Literal)
 	for p.match(TokenComma) {
 		extra, err := p.expect(TokenIdent)
@@ -226,7 +235,7 @@ func (p *Parser) parseVarDecl() (*VarDecl, error) {
 	// that callers already expect. Multi-name declarations synthesize extra
 	// decls that the caller flattens on its own.
 	if len(names) == 1 {
-		return &VarDecl{Name: names[0], Datatype: typeExpr.String(), Type: typeExpr, Initial: init}, nil
+		return &VarDecl{Name: names[0], Datatype: typeExpr.String(), Type: typeExpr, Initial: init, Pos: firstPos}, nil
 	}
 	// Stash extras back into the token stream is awkward; instead we emit
 	// the first decl here and the parseVarBlock loop picks up the rest via
@@ -239,9 +248,9 @@ func (p *Parser) parseVarDecl() (*VarDecl, error) {
 	// first name gets the initializer, subsequent names share the type;
 	// we return the first and stash the rest onto p.pending for the next
 	// parseVarDecl call.
-	first := &VarDecl{Name: names[0], Datatype: typeExpr.String(), Type: typeExpr, Initial: init}
+	first := &VarDecl{Name: names[0], Datatype: typeExpr.String(), Type: typeExpr, Initial: init, Pos: firstPos}
 	for _, n := range names[1:] {
-		p.pending = append(p.pending, VarDecl{Name: n, Datatype: typeExpr.String(), Type: typeExpr})
+		p.pending = append(p.pending, VarDecl{Name: n, Datatype: typeExpr.String(), Type: typeExpr, Pos: firstPos})
 	}
 	return first, nil
 }
@@ -351,17 +360,20 @@ func (p *Parser) parseStatement() (Statement, error) {
 	case TokenCase:
 		return p.parseCaseStmt()
 	case TokenReturn:
+		pos := p.peekPos()
 		p.advance()
 		p.match(TokenSemicolon)
-		return &ReturnStmt{}, nil
+		return &ReturnStmt{Pos: pos}, nil
 	case TokenExit:
+		pos := p.peekPos()
 		p.advance()
 		p.match(TokenSemicolon)
-		return &ExitStmt{}, nil
+		return &ExitStmt{Pos: pos}, nil
 	case TokenContinue:
+		pos := p.peekPos()
 		p.advance()
 		p.match(TokenSemicolon)
-		return &ContinueStmt{}, nil
+		return &ContinueStmt{Pos: pos}, nil
 	case TokenSemicolon:
 		p.advance()
 		return nil, nil
@@ -379,6 +391,7 @@ func (p *Parser) parseStatement() (Statement, error) {
 // AssignStmt.TargetExpr; the legacy dot-joined string is kept in Target
 // for back-compat with the Starlark codegen.
 func (p *Parser) parseAssignOrCall() (Statement, error) {
+	pos := p.peekPos()
 	lhs, err := p.parsePostfixChain()
 	if err != nil {
 		return nil, err
@@ -387,7 +400,7 @@ func (p *Parser) parseAssignOrCall() (Statement, error) {
 	// Call statement: the postfix chain already consumed the call if it was one.
 	if call, ok := lhs.(*CallExpr); ok {
 		p.match(TokenSemicolon)
-		return &CallStmt{Call: call}, nil
+		return &CallStmt{Call: call, Pos: pos}, nil
 	}
 
 	if p.peek().Type == TokenAssign {
@@ -401,6 +414,7 @@ func (p *Parser) parseAssignOrCall() (Statement, error) {
 			Target:     flattenLValue(lhs),
 			TargetExpr: lhs,
 			Value:      val,
+			Pos:        pos,
 		}, nil
 	}
 
@@ -411,6 +425,7 @@ func (p *Parser) parseAssignOrCall() (Statement, error) {
 		Target:     flattenLValue(lhs),
 		TargetExpr: lhs,
 		Value:      lhs,
+		Pos:        pos,
 	}, nil
 }
 
@@ -430,6 +445,7 @@ func flattenLValue(e Expression) string {
 }
 
 func (p *Parser) parseIfStmt() (Statement, error) {
+	pos := p.peekPos()
 	p.advance() // IF
 	cond, err := p.parseExpression()
 	if err != nil {
@@ -439,13 +455,14 @@ func (p *Parser) parseIfStmt() (Statement, error) {
 		return nil, err
 	}
 
-	stmt := &IfStmt{Condition: cond}
+	stmt := &IfStmt{Condition: cond, Pos: pos}
 	stmt.Then, err = p.parseStatementBlock(TokenElsif, TokenElse, TokenEndIf)
 	if err != nil {
 		return nil, err
 	}
 
 	for p.peek().Type == TokenElsif {
+		ePos := p.peekPos()
 		p.advance()
 		elsifCond, err := p.parseExpression()
 		if err != nil {
@@ -456,7 +473,7 @@ func (p *Parser) parseIfStmt() (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		stmt.ElsIfs = append(stmt.ElsIfs, ElsIfClause{Condition: elsifCond, Body: body})
+		stmt.ElsIfs = append(stmt.ElsIfs, ElsIfClause{Condition: elsifCond, Body: body, Pos: ePos})
 	}
 
 	if p.peek().Type == TokenElse {
@@ -473,6 +490,7 @@ func (p *Parser) parseIfStmt() (Statement, error) {
 }
 
 func (p *Parser) parseForStmt() (Statement, error) {
+	pos := p.peekPos()
 	p.advance() // FOR
 	varTok, err := p.expect(TokenIdent)
 	if err != nil {
@@ -489,7 +507,7 @@ func (p *Parser) parseForStmt() (Statement, error) {
 		return nil, err
 	}
 
-	stmt := &ForStmt{Variable: varTok.Literal, Start: start, End: end}
+	stmt := &ForStmt{Variable: varTok.Literal, Start: start, End: end, Pos: pos}
 
 	if p.peek().Type == TokenBy {
 		p.advance()
@@ -511,6 +529,7 @@ func (p *Parser) parseForStmt() (Statement, error) {
 }
 
 func (p *Parser) parseWhileStmt() (Statement, error) {
+	pos := p.peekPos()
 	p.advance() // WHILE
 	cond, err := p.parseExpression()
 	if err != nil {
@@ -523,10 +542,11 @@ func (p *Parser) parseWhileStmt() (Statement, error) {
 	}
 	p.match(TokenEndWhile)
 	p.match(TokenSemicolon)
-	return &WhileStmt{Condition: cond, Body: body}, nil
+	return &WhileStmt{Condition: cond, Body: body, Pos: pos}, nil
 }
 
 func (p *Parser) parseRepeatStmt() (Statement, error) {
+	pos := p.peekPos()
 	p.advance() // REPEAT
 	body, err := p.parseStatementBlock(TokenUntil)
 	if err != nil {
@@ -539,10 +559,11 @@ func (p *Parser) parseRepeatStmt() (Statement, error) {
 	}
 	p.match(TokenEndRepeat)
 	p.match(TokenSemicolon)
-	return &RepeatStmt{Body: body, Condition: cond}, nil
+	return &RepeatStmt{Body: body, Condition: cond, Pos: pos}, nil
 }
 
 func (p *Parser) parseCaseStmt() (Statement, error) {
+	pos := p.peekPos()
 	p.advance() // CASE
 	expr, err := p.parseExpression()
 	if err != nil {
@@ -550,9 +571,10 @@ func (p *Parser) parseCaseStmt() (Statement, error) {
 	}
 	p.expect(TokenOf)
 
-	stmt := &CaseStmt{Expression: expr}
+	stmt := &CaseStmt{Expression: expr, Pos: pos}
 
 	for p.peek().Type != TokenEndCase && p.peek().Type != TokenElse && p.peek().Type != TokenEOF {
+		clausePos := p.peekPos()
 		var values []Expression
 		for {
 			val, err := p.parseExpression()
@@ -569,7 +591,7 @@ func (p *Parser) parseCaseStmt() (Statement, error) {
 		if err != nil {
 			return nil, err
 		}
-		stmt.Cases = append(stmt.Cases, CaseClause{Values: values, Body: body})
+		stmt.Cases = append(stmt.Cases, CaseClause{Values: values, Body: body, Pos: clausePos})
 
 		if p.peek().Type == TokenEndCase || p.peek().Type == TokenElse || p.peek().Type == TokenEOF {
 			break
@@ -684,7 +706,7 @@ func (p *Parser) parseOr() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = &BinaryExpr{Left: left, Op: "OR", Right: right}
+		left = &BinaryExpr{Left: left, Op: "OR", Right: right, Pos: nodePos(left)}
 	}
 	return left, nil
 }
@@ -700,7 +722,7 @@ func (p *Parser) parseXor() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = &BinaryExpr{Left: left, Op: "XOR", Right: right}
+		left = &BinaryExpr{Left: left, Op: "XOR", Right: right, Pos: nodePos(left)}
 	}
 	return left, nil
 }
@@ -716,7 +738,7 @@ func (p *Parser) parseAnd() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = &BinaryExpr{Left: left, Op: "AND", Right: right}
+		left = &BinaryExpr{Left: left, Op: "AND", Right: right, Pos: nodePos(left)}
 	}
 	return left, nil
 }
@@ -749,7 +771,7 @@ func (p *Parser) parseComparison() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = &BinaryExpr{Left: left, Op: op, Right: right}
+		left = &BinaryExpr{Left: left, Op: op, Right: right, Pos: nodePos(left)}
 	}
 }
 
@@ -764,7 +786,7 @@ func (p *Parser) parseAddition() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = &BinaryExpr{Left: left, Op: op, Right: right}
+		left = &BinaryExpr{Left: left, Op: op, Right: right, Pos: nodePos(left)}
 	}
 	return left, nil
 }
@@ -784,27 +806,29 @@ func (p *Parser) parseMultiplication() (Expression, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = &BinaryExpr{Left: left, Op: op, Right: right}
+		left = &BinaryExpr{Left: left, Op: op, Right: right, Pos: nodePos(left)}
 	}
 	return left, nil
 }
 
 func (p *Parser) parseUnary() (Expression, error) {
 	if p.peek().Type == TokenNot {
+		pos := p.peekPos()
 		p.advance()
 		operand, err := p.parseUnary()
 		if err != nil {
 			return nil, err
 		}
-		return &UnaryExpr{Op: "NOT", Operand: operand}, nil
+		return &UnaryExpr{Op: "NOT", Operand: operand, Pos: pos}, nil
 	}
 	if p.peek().Type == TokenMinus {
+		pos := p.peekPos()
 		p.advance()
 		operand, err := p.parseUnary()
 		if err != nil {
 			return nil, err
 		}
-		return &UnaryExpr{Op: "-", Operand: operand}, nil
+		return &UnaryExpr{Op: "-", Operand: operand, Pos: pos}, nil
 	}
 	return p.parsePrimary()
 }
@@ -812,29 +836,30 @@ func (p *Parser) parseUnary() (Expression, error) {
 // parsePrimary handles atoms and starts a postfix chain (member / index / call).
 func (p *Parser) parsePrimary() (Expression, error) {
 	tok := p.peek()
+	pos := tokPos(tok)
 	switch tok.Type {
 	case TokenNumber:
 		p.advance()
-		return &NumberLit{Value: tok.Literal, Base: 10}, nil
+		return &NumberLit{Value: tok.Literal, Base: 10, Pos: pos}, nil
 	case TokenBasedNumber:
 		p.advance()
 		base, digits := splitBasedLiteral(tok.Literal)
-		return &NumberLit{Value: digits, Base: base}, nil
+		return &NumberLit{Value: digits, Base: base, Pos: pos}, nil
 	case TokenString:
 		p.advance()
-		return &StringLit{Value: tok.Literal}, nil
+		return &StringLit{Value: tok.Literal, Pos: pos}, nil
 	case TokenTrue:
 		p.advance()
-		return &BoolLit{Value: true}, nil
+		return &BoolLit{Value: true, Pos: pos}, nil
 	case TokenFalse:
 		p.advance()
-		return &BoolLit{Value: false}, nil
+		return &BoolLit{Value: false, Pos: pos}, nil
 	case TokenTimeLiteral:
 		p.advance()
-		return &TimeLit{Raw: tok.Literal}, nil
+		return &TimeLit{Raw: tok.Literal, Pos: pos}, nil
 	case TokenTypedLiteral:
 		p.advance()
-		return buildTypedLit(tok.Literal), nil
+		return buildTypedLit(tok.Literal, pos), nil
 	case TokenLParen:
 		p.advance()
 		expr, err := p.parseExpression()
@@ -857,7 +882,7 @@ func (p *Parser) parsePostfixChain() (Expression, error) {
 	if err != nil {
 		return nil, err
 	}
-	var expr Expression = &IdentExpr{Name: head.Literal}
+	var expr Expression = &IdentExpr{Name: head.Literal, Pos: tokPos(head)}
 	return p.continuePostfix(expr)
 }
 
@@ -871,7 +896,7 @@ func (p *Parser) continuePostfix(expr Expression) (Expression, error) {
 			if err != nil {
 				return nil, err
 			}
-			expr = &MemberExpr{Object: expr, Member: memberTok.Literal}
+			expr = &MemberExpr{Object: expr, Member: memberTok.Literal, Pos: nodePos(expr)}
 		case TokenLBracket:
 			p.advance()
 			var indices []Expression
@@ -888,13 +913,13 @@ func (p *Parser) continuePostfix(expr Expression) (Expression, error) {
 			if _, err := p.expect(TokenRBracket); err != nil {
 				return nil, err
 			}
-			expr = &IndexExpr{Array: expr, Indices: indices}
+			expr = &IndexExpr{Array: expr, Indices: indices, Pos: nodePos(expr)}
 		case TokenLParen:
 			// Call-like suffix is only valid when the head is a name path
 			// (ident/member). We still allow it for any expression and let
 			// the lowering pass reject invalid callees.
 			name := flattenCalleeName(expr)
-			call, err := p.parseCallArgs(name)
+			call, err := p.parseCallArgs(name, nodePos(expr))
 			if err != nil {
 				return nil, err
 			}
@@ -920,19 +945,19 @@ func flattenCalleeName(e Expression) string {
 // parseCallArgs reads a call's argument list. Handles both positional and
 // IEC-style named (`NAME := value`) arguments; they may not mix in the same
 // call. Named args are detected by peeking two tokens ahead for `:=`.
-func (p *Parser) parseCallArgs(name string) (*CallExpr, error) {
+func (p *Parser) parseCallArgs(name string, pos Pos) (*CallExpr, error) {
 	p.expect(TokenLParen)
-	call := &CallExpr{Name: name}
+	call := &CallExpr{Name: name, Pos: pos}
 	for p.peek().Type != TokenRParen && p.peek().Type != TokenEOF {
 		// Named arg: IDENT := expr
 		if p.peek().Type == TokenIdent && p.peekAt(1).Type == TokenAssign {
-			argName := p.advance().Literal
+			argTok := p.advance()
 			p.advance() // :=
 			val, err := p.parseExpression()
 			if err != nil {
 				return nil, err
 			}
-			call.NamedArgs = append(call.NamedArgs, NamedArg{Name: argName, Value: val})
+			call.NamedArgs = append(call.NamedArgs, NamedArg{Name: argTok.Literal, Value: val, Pos: tokPos(argTok)})
 		} else {
 			arg, err := p.parseExpression()
 			if err != nil {
@@ -972,10 +997,10 @@ func splitBasedLiteral(lit string) (int, string) {
 // buildTypedLit converts a captured typed literal like "INT#42" or "BOOL#TRUE"
 // into an Expression. The inner payload is re-parsed as the narrowest literal
 // that fits (number / bool / string / time).
-func buildTypedLit(raw string) Expression {
+func buildTypedLit(raw string, pos Pos) Expression {
 	idx := strings.Index(raw, "#")
 	if idx <= 0 || idx == len(raw)-1 {
-		return &NumberLit{Value: raw, Base: 10}
+		return &NumberLit{Value: raw, Base: 10, Pos: pos}
 	}
 	typeName := raw[:idx]
 	payload := raw[idx+1:]
@@ -983,30 +1008,39 @@ func buildTypedLit(raw string) Expression {
 	// Nested based-number inside a typed prefix: INT#16#FF.
 	if inner := strings.Index(payload, "#"); inner > 0 {
 		base, digits := splitBasedLiteral(payload)
-		return &TypedLit{TypeName: typeName, Inner: &NumberLit{Value: digits, Base: base}}
+		return &TypedLit{TypeName: typeName, Inner: &NumberLit{Value: digits, Base: base, Pos: pos}, Pos: pos}
 	}
 
 	upperPayload := strings.ToUpper(payload)
 	switch upperPayload {
 	case "TRUE":
-		return &TypedLit{TypeName: typeName, Inner: &BoolLit{Value: true}}
+		return &TypedLit{TypeName: typeName, Inner: &BoolLit{Value: true, Pos: pos}, Pos: pos}
 	case "FALSE":
-		return &TypedLit{TypeName: typeName, Inner: &BoolLit{Value: false}}
+		return &TypedLit{TypeName: typeName, Inner: &BoolLit{Value: false, Pos: pos}, Pos: pos}
 	}
 
 	// STRING#'hello' → strip the quotes and return a StringLit.
 	if (typeName == "STRING" || typeName == "WSTRING") && len(payload) >= 2 && payload[0] == '\'' && payload[len(payload)-1] == '\'' {
-		return &TypedLit{TypeName: typeName, Inner: &StringLit{Value: payload[1 : len(payload)-1]}}
+		return &TypedLit{TypeName: typeName, Inner: &StringLit{Value: payload[1 : len(payload)-1], Pos: pos}, Pos: pos}
 	}
 
 	// TIME#5s / LTIME#1h30m → TimeLit.
 	if typeName == "TIME" || typeName == "LTIME" {
-		return &TypedLit{TypeName: typeName, Inner: &TimeLit{Raw: payload}}
+		return &TypedLit{TypeName: typeName, Inner: &TimeLit{Raw: payload, Pos: pos}, Pos: pos}
 	}
 
 	// Default: numeric literal. Detect real by presence of '.' or exponent.
 	if strings.ContainsAny(payload, ".eE") {
-		return &TypedLit{TypeName: typeName, Inner: &NumberLit{Value: payload, Base: 10}}
+		return &TypedLit{TypeName: typeName, Inner: &NumberLit{Value: payload, Base: 10, Pos: pos}, Pos: pos}
 	}
-	return &TypedLit{TypeName: typeName, Inner: &NumberLit{Value: payload, Base: 10}}
+	return &TypedLit{TypeName: typeName, Inner: &NumberLit{Value: payload, Base: 10, Pos: pos}, Pos: pos}
+}
+
+// nodePos extracts the source position of an AST node, returning a zero
+// Pos for nodes the parser hasn't tagged.
+func nodePos(n Node) Pos {
+	if p, ok := n.(Posed); ok {
+		return p.NodePos()
+	}
+	return Pos{}
 }

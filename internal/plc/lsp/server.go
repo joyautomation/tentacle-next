@@ -161,9 +161,7 @@ func (s *Server) handleCompletion(tr Transport, msg *rpcMessage) {
 	var list CompletionList
 	switch lang {
 	case "st", "structured-text":
-		// ST completion not implemented yet — return an empty list so the
-		// client doesn't see an error. Add a case when the ST resolver lands.
-		list = CompletionList{IsIncomplete: false, Items: []CompletionItem{}}
+		list = completeST(source)
 	default:
 		list = completeStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI), lang)
 	}
@@ -189,7 +187,13 @@ func (s *Server) handleHover(tr Transport, msg *rpcMessage) {
 		return
 	}
 	if lang == "st" || lang == "structured-text" {
-		s.reply(tr, msg.ID, json.RawMessage(`null`))
+		hov, ok := hoverST(source, params.Position)
+		if !ok {
+			s.reply(tr, msg.ID, json.RawMessage(`null`))
+			return
+		}
+		body, _ := json.Marshal(hov)
+		s.reply(tr, msg.ID, body)
 		return
 	}
 	hov, ok := hoverStarlark(source, params.Position, s.provider, programNameFromURI(params.TextDocument.URI), lang)

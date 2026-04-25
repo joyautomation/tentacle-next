@@ -216,20 +216,38 @@ func analyzeST(source string) []Diagnostic {
 	if source == "" {
 		return nil
 	}
-	_, err := st.Parse(source)
-	if err == nil {
-		return nil
-	}
-	msg := err.Error()
-	line := 1
-	if m := stLineRe.FindStringSubmatch(msg); m != nil {
-		if n, convErr := strconv.Atoi(m[1]); convErr == nil {
-			line = n
-			msg = m[2]
+	prog, err := st.Parse(source)
+	if err != nil {
+		msg := err.Error()
+		line := 1
+		if m := stLineRe.FindStringSubmatch(msg); m != nil {
+			if n, convErr := strconv.Atoi(m[1]); convErr == nil {
+				line = n
+				msg = m[2]
+			}
 		}
+		humanMsg, startCol, endCol := humanize(msg, source, line)
+		return []Diagnostic{rangeDiag(line, startCol, line, endCol, humanMsg)}
 	}
-	humanMsg, startCol, endCol := humanize(msg, source, line)
-	return []Diagnostic{rangeDiag(line, startCol, line, endCol, humanMsg)}
+	// Parse succeeded: run the lowering pass to surface semantic errors
+	// (undeclared identifiers, type mismatches, FB call shape issues, ...).
+	// Lower returns one error at a time; we wrap it with the offending
+	// node's position via st.LowerError so the squiggle lands on the right
+	// statement instead of line 1.
+	if _, lowerErr := st.Lower(prog); lowerErr != nil {
+		line := 1
+		msg := lowerErr.Error()
+		if le, ok := st.AsLowerError(lowerErr); ok && le.Pos.Line > 0 {
+			line = le.Pos.Line
+			// Strip the `line N:` prefix the LowerError formatter adds —
+			// the diagnostic carries the line itself, so the user-facing
+			// message shouldn't repeat it.
+			msg = le.Err.Error()
+		}
+		humanMsg, startCol, endCol := humanize(msg, source, line)
+		return []Diagnostic{rangeDiag(line, startCol, line, endCol, humanMsg)}
+	}
+	return nil
 }
 
 // rangeDiag builds an error Diagnostic covering the given 1-based span.

@@ -65,7 +65,7 @@ func newLowerer(prog *Program) *lowerer {
 func (l *lowerer) collectTypes() error {
 	for _, td := range l.prog.TypeDecls {
 		if _, dup := l.types[td.Name]; dup {
-			return fmt.Errorf("duplicate TYPE declaration %q", td.Name)
+			return errAt(td.Pos, fmt.Errorf("duplicate TYPE declaration %q", td.Name))
 		}
 		l.types[td.Name] = &ir.Type{
 			Kind:   ir.TypeStruct,
@@ -79,7 +79,7 @@ func (l *lowerer) collectTypes() error {
 			for i, f := range body.Fields {
 				ft, err := l.resolveType(f.Type)
 				if err != nil {
-					return fmt.Errorf("TYPE %s field %q: %w", td.Name, f.Name, err)
+					return errAt(f.Pos, fmt.Errorf("TYPE %s field %q: %w", td.Name, f.Name, err))
 				}
 				t.Struct.Fields = append(t.Struct.Fields, ir.StructField{Name: f.Name, Type: ft})
 				t.Struct.FieldIndex[f.Name] = i
@@ -87,7 +87,7 @@ func (l *lowerer) collectTypes() error {
 		default:
 			resolved, err := l.resolveType(td.Type)
 			if err != nil {
-				return fmt.Errorf("TYPE %s: %w", td.Name, err)
+				return errAt(td.Pos, fmt.Errorf("TYPE %s: %w", td.Name, err))
 			}
 			*t = *resolved
 		}
@@ -254,17 +254,17 @@ func (l *lowerer) collectVars() error {
 		kind := varKindFor(vb.Kind)
 		for _, vd := range vb.Variables {
 			if _, dup := l.scope[vd.Name]; dup {
-				return fmt.Errorf("duplicate declaration %q", vd.Name)
+				return errAt(vd.Pos, fmt.Errorf("duplicate declaration %q", vd.Name))
 			}
 			t, err := l.resolveType(vd.Type)
 			if err != nil {
-				return fmt.Errorf("VAR %s: %w", vd.Name, err)
+				return errAt(vd.Pos, fmt.Errorf("VAR %s: %w", vd.Name, err))
 			}
 			var init ir.Value
 			if vd.Initial != nil {
 				init, err = evalConstValue(vd.Initial, t)
 				if err != nil {
-					return fmt.Errorf("VAR %s initial: %w", vd.Name, err)
+					return errAt(vd.Pos, fmt.Errorf("VAR %s initial: %w", vd.Name, err))
 				}
 			}
 			if kind == ir.VarGlobal {
@@ -305,7 +305,7 @@ func (l *lowerer) lowerStmts(stmts []Statement) ([]ir.Stmt, error) {
 	for _, s := range stmts {
 		ls, err := l.lowerStmt(s)
 		if err != nil {
-			return nil, err
+			return nil, errAt(nodePos(s), err)
 		}
 		if ls != nil {
 			out = append(out, ls)
