@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { MqttConfig } from './MqttConfigForm.svelte';
   import type { GitOpsConfig } from './GitOpsConfigForm.svelte';
+  import { mantleRepoName, mantleRepoUrl } from './mantleRepo';
   import type { HistoryConfig } from './HistoryConfigForm.svelte';
   import { goto } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
@@ -50,12 +51,53 @@
     steps[index] = { ...steps[index], status, error };
   }
 
+  async function createMantleRepo(mantleUrl: string, repoName: string): Promise<{ ok: boolean; error?: string }> {
+    const base = mantleUrl.replace(/\/+$/, '');
+    try {
+      const res = await fetch(`${base}/api/v1/gitops/repos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: repoName }),
+      });
+      if (res.ok) return { ok: true };
+      // Already-exists is fine — the bare repo just needs to be there.
+      const text = await res.text().catch(() => res.statusText);
+      if (res.status === 400 && /already exists/i.test(text)) return { ok: true };
+      let msg = text;
+      try {
+        const json = JSON.parse(text);
+        if (json.error) msg = json.error;
+      } catch { /* use raw text */ }
+      return { ok: false, error: `${res.status}: ${msg}` };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'network error' };
+    }
+  }
+
   async function saveGitOpsConfig(): Promise<boolean> {
     if (!selectedAddOns.has('gitops') || !gitopsConfig) return true;
+
+    // Mantle mode: pre-create the bare repo on the mantle, then resolve the
+    // repoUrl from <mantleUrl>/git/<group>--<node>.git so the edge gitops
+    // module talks to it via HTTP. The user only types group/node.
+    let resolvedRepoUrl = gitopsConfig.repoUrl;
+    if (gitopsConfig.source === 'mantle') {
+      const createIdx = steps.length;
+      steps.push({ label: 'Creating bare repo on mantle', status: 'running' });
+      const repoName = mantleRepoName(gitopsConfig.group, gitopsConfig.node);
+      const created = await createMantleRepo(gitopsConfig.mantleUrl, repoName);
+      if (!created.ok) {
+        updateStep(createIdx, 'error', `Failed to create repo on mantle: ${created.error}`);
+        return false;
+      }
+      updateStep(createIdx, 'done');
+      resolvedRepoUrl = mantleRepoUrl(gitopsConfig.mantleUrl, gitopsConfig.group, gitopsConfig.node);
+    }
+
     const idx = steps.length;
     steps.push({ label: 'Writing GitOps configuration', status: 'running' });
     const configs: [string, string][] = [
-      ['GITOPS_REPO_URL', gitopsConfig.repoUrl],
+      ['GITOPS_REPO_URL', resolvedRepoUrl],
       ['GITOPS_BRANCH', gitopsConfig.branch],
       ['GITOPS_PATH', gitopsConfig.configPath],
       ['GITOPS_POLL_INTERVAL_S', gitopsConfig.pollInterval],
@@ -318,15 +360,42 @@
         </div>
       {/if}
 
-      {#if selectedAddOns.has('gitops') && gitopsConfig?.repoUrl}
-        <div class="summary-row">
-          <span class="summary-label">GitOps Repo</span>
-          <span class="summary-value mono">{gitopsConfig.repoUrl}</span>
-        </div>
-        <div class="summary-row">
-          <span class="summary-label">GitOps Branch</span>
-          <span class="summary-value mono">{gitopsConfig.branch}</span>
-        </div>
+      {#if selectedAddOns.has('gitops') && gitopsConfig}
+        {#if gitopsConfig.source === 'mantle' && gitopsConfig.mantleUrl && gitopsConfig.group && gitopsConfig.node}
+          <div class="summary-row">
+            <span class="summary-label">GitOps Source</span>
+            <span class="summary-value">Mantle</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Mantle URL</span>
+            <span class="summary-value mono">{gitopsConfig.mantleUrl}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Group / Node</span>
+            <span class="summary-value mono">{gitopsConfig.group} / {gitopsConfig.node}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Repo URL</span>
+            <span class="summary-value mono">{mantleRepoUrl(gitopsConfig.mantleUrl, gitopsConfig.group, gitopsConfig.node)}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">GitOps Branch</span>
+            <span class="summary-value mono">{gitopsConfig.branch}</span>
+          </div>
+        {:else if gitopsConfig.repoUrl}
+          <div class="summary-row">
+            <span class="summary-label">GitOps Source</span>
+            <span class="summary-value">External</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">GitOps Repo</span>
+            <span class="summary-value mono">{gitopsConfig.repoUrl}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">GitOps Branch</span>
+            <span class="summary-value mono">{gitopsConfig.branch}</span>
+          </div>
+        {/if}
       {/if}
 
       {#if selectedAddOns.has('history') && historyConfig}

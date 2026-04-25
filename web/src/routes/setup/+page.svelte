@@ -111,7 +111,11 @@
 
   function initGitOpsConfig(): GitOpsConfig {
     const config: GitOpsConfig = {
+      source: 'external',
       repoUrl: '',
+      mantleUrl: '',
+      group: '',
+      node: '',
       branch: 'main',
       configPath: 'config',
       pollInterval: '60',
@@ -123,9 +127,17 @@
       if (!field) continue;
       if (field === 'autoPush' || field === 'autoPull') {
         config[field] = entry.value === 'true';
-      } else {
+      } else if (field === 'repoUrl' || field === 'branch' || field === 'configPath' || field === 'pollInterval') {
         config[field] = entry.value;
       }
+    }
+    // Infer mantle source from a previously-saved http(s)://host/git/<group>--<node>.git URL
+    const mantleMatch = config.repoUrl.match(/^(https?:\/\/[^/]+)\/git\/([^/]+?)--([^/]+?)\.git$/);
+    if (mantleMatch) {
+      config.source = 'mantle';
+      config.mantleUrl = mantleMatch[1];
+      config.group = mantleMatch[2];
+      config.node = mantleMatch[3];
     }
     return config;
   }
@@ -213,7 +225,10 @@
                      mqttConfig.MQTT_GROUP_ID.trim() !== '' &&
                      mqttConfig.MQTT_EDGE_NODE.trim() !== '';
       case 'add-ons': return true;
-      case 'gitops-config': return gitopsConfig.repoUrl.trim() !== '';
+      case 'gitops-config':
+        return gitopsConfig.source === 'mantle'
+          ? gitopsConfig.mantleUrl.trim() !== '' && gitopsConfig.group.trim() !== '' && gitopsConfig.node.trim() !== ''
+          : gitopsConfig.repoUrl.trim() !== '';
       case 'history-config': return historyConfig.dbname.trim() !== '' &&
                    (historyConfig.mode === 'local' || historyConfig.host.trim() !== '');
       case 'review': return true;

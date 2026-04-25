@@ -4,8 +4,14 @@
   import { slide } from 'svelte/transition';
   import { CheckCircle, XCircle } from '@joyautomation/salt/icons';
 
+  import { mantleRepoUrl } from './mantleRepo';
+
   export interface GitOpsConfig {
+    source: 'external' | 'mantle';
     repoUrl: string;
+    mantleUrl: string;
+    group: string;
+    node: string;
     branch: string;
     configPath: string;
     pollInterval: string;
@@ -126,6 +132,12 @@
   function update(field: keyof GitOpsConfig, value: string | boolean) {
     onchange({ ...config, [field]: value });
   }
+
+  const computedRepoUrl = $derived(
+    config.source === 'mantle' && config.mantleUrl && config.group && config.node
+      ? mantleRepoUrl(config.mantleUrl, config.group, config.node)
+      : ''
+  );
 </script>
 
 <div class="gitops-form">
@@ -149,6 +161,37 @@
     </div>
   {/if}
 
+  <!-- Source Section -->
+  <section class="form-section source-section">
+    <h3>Source</h3>
+    <p class="section-desc">Where does this device's config repo live?</p>
+    <div class="source-toggle" role="radiogroup">
+      <button
+        type="button"
+        class="source-option"
+        class:active={config.source === 'external'}
+        onclick={() => update('source', 'external')}
+        role="radio"
+        aria-checked={config.source === 'external'}
+      >
+        <span class="source-title">External Git</span>
+        <span class="source-sub">GitHub, GitLab, self-hosted (SSH)</span>
+      </button>
+      <button
+        type="button"
+        class="source-option"
+        class:active={config.source === 'mantle'}
+        onclick={() => update('source', 'mantle')}
+        role="radio"
+        aria-checked={config.source === 'mantle'}
+      >
+        <span class="source-title">Mantle</span>
+        <span class="source-sub">Tentacle mantle git server (HTTP)</span>
+      </button>
+    </div>
+  </section>
+
+{#if config.source === 'external'}
   <!-- SSH Key Section -->
   <section class="form-section">
     <h3>SSH Key</h3>
@@ -221,6 +264,61 @@
       </div>
     {/if}
   </section>
+{:else}
+  <!-- Mantle Section -->
+  <section class="form-section" transition:slide={{ duration: 150 }}>
+    <h3>Mantle Server</h3>
+    <p class="section-desc">
+      Point at the mantle's HTTP API. A bare repo named <code>&lt;group&gt;--&lt;node&gt;.git</code>
+      will be created on the mantle when you click <strong>Apply &amp; Start</strong>.
+    </p>
+
+    <div class="form-field">
+      <label for="gitops-mantle-url">Mantle URL</label>
+      <p class="field-desc">Base URL of the mantle (where the API and git server are exposed)</p>
+      <input
+        id="gitops-mantle-url"
+        type="text"
+        value={config.mantleUrl}
+        oninput={(e) => update('mantleUrl', e.currentTarget.value)}
+        placeholder="http://mantle.local:4000"
+      />
+    </div>
+
+    <div class="mantle-id-row">
+      <div class="form-field">
+        <label for="gitops-group">Group</label>
+        <p class="field-desc">Sparkplug Group ID (or any logical fleet bucket)</p>
+        <input
+          id="gitops-group"
+          type="text"
+          value={config.group}
+          oninput={(e) => update('group', e.currentTarget.value)}
+          placeholder="MyGroup"
+        />
+      </div>
+      <div class="form-field">
+        <label for="gitops-node">Node</label>
+        <p class="field-desc">Edge node name — unique within group</p>
+        <input
+          id="gitops-node"
+          type="text"
+          value={config.node}
+          oninput={(e) => update('node', e.currentTarget.value)}
+          placeholder="EdgeNode1"
+        />
+      </div>
+    </div>
+
+    {#if computedRepoUrl}
+      <div class="repo-preview" transition:slide={{ duration: 150 }}>
+        <span class="preview-label">Will create</span>
+        <code class="preview-url">{computedRepoUrl}</code>
+      </div>
+    {/if}
+  </section>
+
+{/if}
 
   <!-- Settings Section -->
   <section class="form-section">
@@ -270,7 +368,13 @@
 
   {#if onCommit}
     <div class="commit-row">
-      <button class="btn primary" onclick={runCommit} disabled={committing || !config.repoUrl}>
+      <button
+        class="btn primary"
+        onclick={runCommit}
+        disabled={committing || (config.source === 'external'
+          ? !config.repoUrl
+          : !(config.mantleUrl && config.group && config.node))}
+      >
         {committing ? 'Saving...' : 'Save & Start'}
       </button>
     </div>
@@ -548,5 +652,86 @@
     justify-content: flex-end;
     padding-top: 0.5rem;
     border-top: 1px solid color-mix(in srgb, var(--theme-border) 50%, transparent);
+  }
+
+  .source-toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .source-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+    gap: 0.125rem;
+    padding: 0.75rem 1rem;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    cursor: pointer;
+    color: var(--theme-text);
+    font-family: inherit;
+    transition: border-color 0.15s, background 0.15s;
+
+    &:hover { border-color: color-mix(in srgb, var(--theme-primary) 40%, var(--theme-border)); }
+
+    &.active {
+      border-color: var(--theme-primary);
+      background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-surface));
+    }
+  }
+
+  .source-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .source-sub {
+    font-size: 0.75rem;
+    color: var(--theme-text-muted);
+  }
+
+  .mantle-id-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+
+  .repo-preview {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--theme-surface);
+    border: 1px dashed var(--theme-border);
+    border-radius: var(--rounded-md);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  .preview-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--theme-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .preview-url {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8125rem;
+    color: var(--theme-text);
+    word-break: break-all;
+  }
+
+  .section-desc code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    padding: 0.05rem 0.3rem;
+    border-radius: var(--rounded-sm, 0.25rem);
   }
 </style>
