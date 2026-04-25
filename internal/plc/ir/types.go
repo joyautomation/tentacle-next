@@ -75,10 +75,46 @@ type StructField struct {
 	Type *Type
 }
 
-// FBDef describes a function block type. Populated by phase 4.
+// FBDef describes a function block type. Slots are laid out
+// Inputs ‖ Outputs ‖ Internals so call sites can address inputs by
+// SlotIndex and read outputs/internals through MemberRef. Step runs
+// the FB body once per scan with the instance's slot vector and a
+// host-provided context (NowMs etc.).
 type FBDef struct {
+	Name       string
+	Inputs     []FBSlot
+	Outputs    []FBSlot
+	Internals  []FBSlot
+	SlotIndex  map[string]int
+	Step       FBStepFn
+}
+
+// FBSlot is a single named slot on a function block instance.
+type FBSlot struct {
 	Name string
-	// Slots, body, etc. added when FB support lands.
+	Type *Type
+}
+
+// FBStepCtx is the per-cycle context handed to a built-in FB's Step.
+// Kept narrow: FBs only need wall-clock for timers today; growth
+// should stay deliberate to keep FBs cheap to call.
+type FBStepCtx struct {
+	NowMs int64
+}
+
+// FBStepFn runs one cycle of an FB. It mutates inst.Slots in place
+// (outputs + internal state); inputs are written by the caller before
+// invoking Step.
+type FBStepFn func(inst *FBInstance, ctx FBStepCtx) error
+
+// AllSlots returns the FB's slot layout as a single ordered slice
+// matching the runtime FBInstance.Slots layout.
+func (d *FBDef) AllSlots() []FBSlot {
+	out := make([]FBSlot, 0, len(d.Inputs)+len(d.Outputs)+len(d.Internals))
+	out = append(out, d.Inputs...)
+	out = append(out, d.Outputs...)
+	out = append(out, d.Internals...)
+	return out
 }
 
 // String renders the type for diagnostic messages.

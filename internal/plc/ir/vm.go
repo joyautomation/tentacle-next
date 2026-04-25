@@ -181,6 +181,24 @@ func execStmt(ctx *EvalCtx, s Stmt) error {
 	case *Continue:
 		ctx.continueLoop = true
 		return nil
+
+	case *FBCall:
+		inst := ctx.Frame.Slots[n.InstanceSlot].FB
+		if inst == nil {
+			return fmt.Errorf("FB call on uninitialised instance at slot %d", n.InstanceSlot)
+		}
+		for _, in := range n.Inputs {
+			v, err := evalExpr(ctx, in.Value)
+			if err != nil {
+				return err
+			}
+			if in.SlotIdx < 0 || in.SlotIdx >= len(inst.Slots) {
+				return fmt.Errorf("FB input slot %d out of range", in.SlotIdx)
+			}
+			inst.Slots[in.SlotIdx] = coerceValue(v, n.Def.AllSlots()[in.SlotIdx].Type)
+		}
+		stepCtx := FBStepCtx{NowMs: ctx.Host.NowMs()}
+		return n.Def.Step(inst, stepCtx)
 	}
 	return fmt.Errorf("unknown stmt %T", s)
 }
@@ -299,10 +317,29 @@ func evalExpr(ctx *EvalCtx, e Expr) (Value, error) {
 		if err != nil {
 			return Value{}, err
 		}
+		if obj.Kind == TypeFB {
+			if obj.FB == nil || n.FieldIdx < 0 || n.FieldIdx >= len(obj.FB.Slots) {
+				return Value{}, fmt.Errorf("FB member index %d out of bounds", n.FieldIdx)
+			}
+			return obj.FB.Slots[n.FieldIdx], nil
+		}
 		if n.FieldIdx < 0 || n.FieldIdx >= len(obj.Fld) {
 			return Value{}, fmt.Errorf("field index %d out of bounds", n.FieldIdx)
 		}
 		return obj.Fld[n.FieldIdx], nil
+	case *Call:
+		args := make([]Value, len(n.Args))
+		for i, a := range n.Args {
+			v, err := evalExpr(ctx, a)
+			if err != nil {
+				return Value{}, err
+			}
+			args[i] = v
+		}
+		if n.Fn == nil {
+			return Value{}, fmt.Errorf("call %q has no resolved Fn", n.Name)
+		}
+		return n.Fn(args)
 	}
 	return Value{}, fmt.Errorf("unknown expr %T", e)
 }

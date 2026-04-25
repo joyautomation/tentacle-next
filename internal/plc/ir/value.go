@@ -57,6 +57,20 @@ func Zero(t *Type) Value {
 			f[i] = Zero(fld.Type)
 		}
 		return Value{Kind: TypeStruct, Fld: f}
+	case TypeFB:
+		return Value{Kind: TypeFB, FB: NewFBInstance(t.FB)}
 	}
 	return Value{}
+}
+
+// NewFBInstance allocates a fresh FB instance with all slots zero-valued
+// per their declared types. Outputs and internals start at IEC default;
+// inputs are also zero until the first call binds them.
+func NewFBInstance(def *FBDef) *FBInstance {
+	all := def.AllSlots()
+	slots := make([]Value, len(all))
+	for i, s := range all {
+		slots[i] = Zero(s.Type)
+	}
+	return &FBInstance{Def: def, Slots: slots}
 }

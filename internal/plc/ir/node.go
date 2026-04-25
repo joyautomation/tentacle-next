@@ -177,6 +177,38 @@ func (m *MemberRef) ExprType() *Type { return m.T }
 func (m *MemberRef) exprNode()       {}
 func (m *MemberRef) lvalueNode()     {}
 
+// Call invokes a built-in stateless function. Fn is resolved at
+// lowering time (so the VM doesn't pay for a map lookup per scan)
+// and given the evaluated arg values directly.
+type Call struct {
+	Name string
+	Args []Expr
+	Fn   BuiltinFn
+	T    *Type
+}
+
+func (c *Call) ExprType() *Type { return c.T }
+func (c *Call) exprNode()       {}
+
+// FBCall invokes a function block instance. The lowering pass binds
+// each named arg to an input-slot index on the FB type so the VM can
+// evaluate args, write them into the instance's input slots, and run
+// Step in a fixed order.
+type FBCall struct {
+	InstanceSlot int       // slot in Frame.Slots holding the FBInstance
+	Def          *FBDef    // resolved FB type
+	Inputs       []FBInput // bindings for this invocation, in source order
+}
+
+func (*FBCall) stmtNode() {}
+
+// FBInput pairs an input-slot index on the FB with the expression
+// providing its value at the call site.
+type FBInput struct {
+	SlotIdx int
+	Value   Expr
+}
+
 // Exit and Continue — loop control.
 type Exit struct{}
 

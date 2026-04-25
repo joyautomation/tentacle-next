@@ -103,6 +103,14 @@ func (l *lowerer) resolveType(te TypeExpr) (*ir.Type, error) {
 		if udt, ok := l.types[t.Name]; ok {
 			return udt, nil
 		}
+		// Built-in FB types (TON, R_TRIG, CTU, …) live in the IR's
+		// FB registry, not the program's TYPE block. Every VAR
+		// declaration of an FB type gets a fresh *Type wrapping the
+		// shared *FBDef so per-instance Zero allocates a private
+		// FBInstance with its own slot vector.
+		if fbT := ir.LookupFBType(t.Name); fbT != nil {
+			return fbT, nil
+		}
 		return nil, fmt.Errorf("unknown type %q", t.Name)
 	case *ArrayType:
 		elem, err := l.resolveType(t.Elem)
@@ -438,9 +446,47 @@ func (l *lowerer) lowerStmt(s Statement) (ir.Stmt, error) {
 	case *ContinueStmt:
 		return &ir.Continue{}, nil
 	case *CallStmt:
-		return nil, fmt.Errorf("FB/function calls are not yet supported by the IR lowering pass (Phase 4): %s", n.Call.Name)
+		return l.lowerCallStmt(n)
 	}
 	return nil, fmt.Errorf("unsupported statement %T", s)
+}
+
+// lowerCallStmt resolves a `name(...)` statement. Today every callable
+// statement is an FB invocation: stateless built-in functions are
+// expression-only, so a CallStmt whose name doesn't resolve to an FB
+// instance is a programming error.
+func (l *lowerer) lowerCallStmt(n *CallStmt) (ir.Stmt, error) {
+	sym, ok := l.scope[n.Call.Name]
+	if !ok {
+		return nil, fmt.Errorf("call to undeclared name %q", n.Call.Name)
+	}
+	if sym.typ == nil || sym.typ.Kind != ir.TypeFB {
+		return nil, fmt.Errorf("%q is not a function-block instance (declare e.g. `t1 : TON;`)", n.Call.Name)
+	}
+	if sym.kind == ir.VarGlobal {
+		return nil, fmt.Errorf("FB instance %q must be a local variable, not VAR_GLOBAL", n.Call.Name)
+	}
+	def := sym.typ.FB
+	if len(n.Call.Args) > 0 {
+		return nil, fmt.Errorf("FB call %q must use named args (IN := …, PT := …)", n.Call.Name)
+	}
+	bindings := make([]ir.FBInput, 0, len(n.Call.NamedArgs))
+	for _, na := range n.Call.NamedArgs {
+		idx, ok := def.SlotIndex[na.Name]
+		if !ok {
+			return nil, fmt.Errorf("FB %s has no input %q", def.Name, na.Name)
+		}
+		if idx >= len(def.Inputs) {
+			return nil, fmt.Errorf("FB %s field %q is not an input", def.Name, na.Name)
+		}
+		v, err := l.lowerExpr(na.Value)
+		if err != nil {
+			return nil, fmt.Errorf("FB %s arg %q: %w", def.Name, na.Name, err)
+		}
+		v = coerce(v, def.Inputs[idx].Type)
+		bindings = append(bindings, ir.FBInput{SlotIdx: idx, Value: v})
+	}
+	return &ir.FBCall{InstanceSlot: sym.slot, Def: def, Inputs: bindings}, nil
 }
 
 func (l *lowerer) lowerAssign(a *AssignStmt) (ir.Stmt, error) {
@@ -487,9 +533,59 @@ func (l *lowerer) lowerExpr(e Expression) (ir.Expr, error) {
 	case *UnaryExpr:
 		return l.lowerUnary(n)
 	case *CallExpr:
-		return nil, fmt.Errorf("function/FB calls not yet supported by the IR lowering pass (Phase 4): %s", n.Name)
+		return l.lowerCallExpr(n)
 	}
 	return nil, fmt.Errorf("unsupported expression %T", e)
+}
+
+func (l *lowerer) lowerCallExpr(n *CallExpr) (ir.Expr, error) {
+	sig, ok := ir.Builtins[strings.ToUpper(n.Name)]
+	if !ok {
+		// FB instance "calls" inside expressions are illegal — outputs
+		// are read via member access (t1.Q), and bare `t1(...)` produces
+		// no value. Surface a clearer message when this is the case.
+		if sym, defined := l.scope[n.Name]; defined && sym.typ != nil && sym.typ.Kind == ir.TypeFB {
+			return nil, fmt.Errorf("FB instance %q can't be used as an expression — invoke it as a statement and read outputs (e.g. %s.Q)", n.Name, n.Name)
+		}
+		return nil, fmt.Errorf("unknown function %q", n.Name)
+	}
+	if len(n.NamedArgs) > 0 {
+		return nil, fmt.Errorf("function %s does not accept named args", sig.Name)
+	}
+	args := make([]ir.Expr, 0, len(n.Args))
+	argTypes := make([]*ir.Type, 0, len(n.Args))
+	for _, a := range n.Args {
+		la, err := l.lowerExpr(a)
+		if err != nil {
+			return nil, fmt.Errorf("function %s arg: %w", sig.Name, err)
+		}
+		args = append(args, la)
+		argTypes = append(argTypes, la.ExprType())
+	}
+	if !sig.Variadic && len(args) != len(sig.Params) {
+		return nil, fmt.Errorf("function %s expects %d argument(s), got %d", sig.Name, len(sig.Params), len(args))
+	}
+	if sig.Variadic && len(args) < len(sig.Params) {
+		return nil, fmt.Errorf("function %s expects at least %d argument(s), got %d", sig.Name, len(sig.Params), len(args))
+	}
+	resultT := sig.Result
+	if sig.Coerce != nil {
+		t, err := sig.Coerce(argTypes)
+		if err != nil {
+			return nil, err
+		}
+		resultT = t
+	}
+	for i, p := range sig.Params {
+		if p == nil || i >= len(args) {
+			continue
+		}
+		args[i] = coerce(args[i], p)
+		if !assignable(p, args[i].ExprType()) {
+			return nil, fmt.Errorf("function %s arg %d: cannot pass %s as %s", sig.Name, i+1, args[i].ExprType(), p)
+		}
+	}
+	return &ir.Call{Name: sig.Name, Args: args, Fn: sig.Fn, T: resultT}, nil
 }
 
 func lowerNumberLit(n *NumberLit) (ir.Expr, error) {
@@ -528,18 +624,26 @@ func (l *lowerer) lowerMember(m *MemberExpr) (ir.Expr, error) {
 		return nil, err
 	}
 	ot := obj.ExprType()
-	if ot.Kind != ir.TypeStruct {
-		return nil, fmt.Errorf("member access on non-struct type %s", ot)
-	}
-	idx, ok := ot.Struct.FieldIndex[m.Member]
-	if !ok {
-		label := ot.Struct.Name
-		if label == "" {
-			label = "STRUCT"
+	switch ot.Kind {
+	case ir.TypeStruct:
+		idx, ok := ot.Struct.FieldIndex[m.Member]
+		if !ok {
+			label := ot.Struct.Name
+			if label == "" {
+				label = "STRUCT"
+			}
+			return nil, fmt.Errorf("field %q not found on %s", m.Member, label)
 		}
-		return nil, fmt.Errorf("field %q not found on %s", m.Member, label)
+		return &ir.MemberRef{Object: obj, FieldIdx: idx, T: ot.Struct.Fields[idx].Type}, nil
+	case ir.TypeFB:
+		idx, ok := ot.FB.SlotIndex[m.Member]
+		if !ok {
+			return nil, fmt.Errorf("FB %s has no field %q", ot.FB.Name, m.Member)
+		}
+		all := ot.FB.AllSlots()
+		return &ir.MemberRef{Object: obj, FieldIdx: idx, T: all[idx].Type}, nil
 	}
-	return &ir.MemberRef{Object: obj, FieldIdx: idx, T: ot.Struct.Fields[idx].Type}, nil
+	return nil, fmt.Errorf("member access on non-struct type %s", ot)
 }
 
 func (l *lowerer) lowerIndex(n *IndexExpr) (ir.Expr, error) {
