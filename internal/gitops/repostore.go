@@ -16,7 +16,7 @@ import (
 // RepoStore is a thin file-level interface over the bare repos hosted by
 // Server. Each (group, node) edge tentacle gets its own bare repo by default;
 // mantle-side configurator endpoints use this to read and write tracked
-// configuration files (e.g. gateway.json) on behalf of the operator.
+// manifest YAML files (e.g. config/gateways/<id>.yaml) on behalf of the operator.
 //
 // Internally we maintain a server-side working clone next to each bare repo
 // so we can do file operations with plain filesystem reads + git plumbing.
