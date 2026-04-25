@@ -205,6 +205,11 @@ export const SERVICE_TABS: Record<string, ServiceTab[]> = {
     { path: 'tag-config', label: 'Tags', scope: 'config' },
     { path: 'logs', label: 'Logs', scope: 'live' },
   ],
+  gitserver: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'repos', label: 'Repos', scope: 'live' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
 };
 
 const DEFAULT_TABS: ServiceTab[] = [

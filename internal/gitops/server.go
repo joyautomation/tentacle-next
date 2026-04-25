@@ -131,6 +131,33 @@ func (s *Server) ListRepos(_ context.Context) ([]string, error) {
 	return out, nil
 }
 
+// RepoTree returns the list of file paths tracked on the main branch of the
+// named bare repo, in lexical order. Returns an empty slice for an empty
+// repo (no commits yet).
+func (s *Server) RepoTree(_ context.Context, name string) ([]string, error) {
+	if !validRepoName(name) {
+		return nil, errors.New("invalid repo name")
+	}
+	repoPath := filepath.Join(s.rootDir, name+".git")
+	if _, err := os.Stat(repoPath); err != nil {
+		return nil, err
+	}
+	out, err := exec.Command("git", "-C", repoPath, "ls-tree", "-r", "--name-only", "main").CombinedOutput()
+	if err != nil {
+		// An empty bare repo has no `main` ref yet — treat as empty tree.
+		if strings.Contains(string(out), "Not a valid object name") || strings.Contains(string(out), "unknown revision") {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("git ls-tree: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return []string{}, nil
+	}
+	sort.Strings(lines)
+	return lines, nil
+}
+
 // DeleteRepo removes a bare repo. Used by the API for fleet provisioning.
 func (s *Server) DeleteRepo(_ context.Context, name string) error {
 	if !validRepoName(name) {

@@ -36,6 +36,8 @@ func (m *Module) mountGitServerAPI(r chi.Router) {
 	r.Get("/gitops/repos", m.handleListGitopsRepos)
 	r.Post("/gitops/repos", m.handleCreateGitopsRepo)
 	r.Delete("/gitops/repos/{name}", m.handleDeleteGitopsRepo)
+	r.Get("/gitops/repos/{name}/tree", m.handleGitopsRepoTree)
+	r.Get("/gitops/tree", m.handleGitopsAllTrees)
 }
 
 func (m *Module) handleListGitopsRepos(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +75,44 @@ func (m *Module) handleCreateGitopsRepo(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"name": body.Name})
+}
+
+func (m *Module) handleGitopsRepoTree(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	srv := gitserver.Server()
+	if srv == nil {
+		writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+		return
+	}
+	files, err := srv.RepoTree(r.Context(), name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "files": files})
+}
+
+func (m *Module) handleGitopsAllTrees(w http.ResponseWriter, r *http.Request) {
+	srv := gitserver.Server()
+	if srv == nil {
+		writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+		return
+	}
+	repos, err := srv.ListRepos(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make([]map[string]any, 0, len(repos))
+	for _, name := range repos {
+		files, err := srv.RepoTree(r.Context(), name)
+		if err != nil {
+			out = append(out, map[string]any{"name": name, "error": err.Error(), "files": []string{}})
+			continue
+		}
+		out = append(out, map[string]any{"name": name, "files": files})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repos": out})
 }
 
 func (m *Module) handleDeleteGitopsRepo(w http.ResponseWriter, r *http.Request) {
