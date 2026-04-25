@@ -3,7 +3,6 @@
   import type { GitOpsConfig } from './GitOpsConfigForm.svelte';
   import { mantleRepoName, mantleRepoUrl } from './mantleRepo';
   import type { HistoryConfig } from './HistoryConfigForm.svelte';
-  import type { MantleEdgeConfig } from './MantleEdgeConfigForm.svelte';
   import { goto } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { apiPut, api } from '$lib/api/client';
@@ -25,16 +24,16 @@
     mqttConfig: MqttConfig;
     gitopsConfig?: GitOpsConfig;
     historyConfig?: HistoryConfig;
-    mantleEdgeConfig?: MantleEdgeConfig;
+    /** Set to 'mantle' on sparkplug-gateway when the operator chose mantle-managed config. */
+    configSource?: 'local' | 'mantle';
   }
 
-  let { archetype, selectedProtocols, selectedAddOns, mqttConfig, gitopsConfig, historyConfig, mantleEdgeConfig }: Props = $props();
+  let { archetype, selectedProtocols, selectedAddOns, mqttConfig, gitopsConfig, historyConfig, configSource = 'local' }: Props = $props();
 
   const ARCHETYPE_NAMES: Record<string, string> = {
     'sparkplug-gateway': 'Sparkplug Gateway',
     'nat-gateway': 'NAT',
     'mantle-host': 'Mantle Aggregator',
-    'mantle-paired-edge': 'Mantle-Paired Edge',
   };
 
   type StepStatus = 'pending' | 'running' | 'done' | 'error';
@@ -265,71 +264,6 @@
     return await waitForModules(new Set(['sparkplug-host', ...selectedAddOns]));
   }
 
-  async function applyMantleEdge() {
-    if (!mantleEdgeConfig) {
-      hasError = true;
-      return false;
-    }
-    const cfg = mantleEdgeConfig;
-
-    // 1. Pre-create bare repo on the mantle.
-    const createIdx = steps.length;
-    steps.push({ label: 'Creating bare repo on mantle', status: 'running' });
-    const repoName = mantleRepoName(cfg.group, cfg.node);
-    const created = await createMantleRepo(cfg.mantleUrl, repoName);
-    if (!created.ok) {
-      updateStep(createIdx, 'error', `Failed to create repo on mantle: ${created.error}`);
-      return false;
-    }
-    updateStep(createIdx, 'done');
-
-    // 2. Write MQTT config.
-    const mqttIdx = steps.length;
-    steps.push({ label: 'Writing MQTT configuration', status: 'running' });
-    const mqttEntries: [string, string][] = [
-      ['MQTT_BROKER_URL', cfg.mqttBrokerUrl],
-      ['MQTT_GROUP_ID', cfg.group],
-      ['MQTT_EDGE_NODE', cfg.node],
-      ['MQTT_CLIENT_ID', `tentacle-${cfg.node}`],
-      ['MQTT_USERNAME', cfg.mqttUsername],
-      ['MQTT_PASSWORD', cfg.mqttPassword],
-    ];
-    for (const [envVar, value] of mqttEntries) {
-      const result = await apiPut(`/config/mqtt/${envVar}`, { value });
-      if (result.error) {
-        updateStep(mqttIdx, 'error', `Failed to set ${envVar}: ${result.error.error}`);
-        return false;
-      }
-    }
-    updateStep(mqttIdx, 'done');
-
-    // 3. Write GitOps config pointing at the mantle repo.
-    const gitopsIdx = steps.length;
-    steps.push({ label: 'Writing GitOps configuration', status: 'running' });
-    const gitopsEntries: [string, string][] = [
-      ['GITOPS_REPO_URL', mantleRepoUrl(cfg.mantleUrl, cfg.group, cfg.node)],
-      ['GITOPS_BRANCH', 'main'],
-      ['GITOPS_PATH', 'config'],
-      ['GITOPS_POLL_INTERVAL_S', '60'],
-      ['GITOPS_AUTO_PUSH', 'true'],
-      ['GITOPS_AUTO_PULL', 'true'],
-    ];
-    for (const [envVar, value] of gitopsEntries) {
-      const result = await apiPut(`/config/gitops/${envVar}`, { value });
-      if (result.error) {
-        updateStep(gitopsIdx, 'error', `Failed to set ${envVar}: ${result.error.error}`);
-        return false;
-      }
-    }
-    updateStep(gitopsIdx, 'done');
-
-    // 4. Enable mqtt + gitops modules.
-    if (!await enableModule('mqtt', 'Enabling MQTT bridge')) return false;
-    if (!await enableModule('gitops', 'Enabling GitOps')) return false;
-
-    return await waitForModules(new Set(['mqtt', 'gitops']));
-  }
-
   async function applyConfiguration() {
     applying = true;
     done = false;
@@ -346,9 +280,6 @@
         break;
       case 'mantle-host':
         success = await applyMantleHost();
-        break;
-      case 'mantle-paired-edge':
-        success = await applyMantleEdge();
         break;
     }
 
@@ -418,35 +349,12 @@
             <span class="badge">Sparkplug Host</span>
           </span>
         </div>
-      {:else if archetype === 'mantle-paired-edge' && mantleEdgeConfig}
+      {/if}
+
+      {#if archetype === 'sparkplug-gateway' && configSource === 'mantle'}
         <div class="summary-row">
-          <span class="summary-label">Modules</span>
-          <span class="summary-value">
-            <span class="badge">MQTT</span>
-            <span class="badge">GitOps</span>
-          </span>
-        </div>
-        <div class="summary-row">
-          <span class="summary-label">Group / Node</span>
-          <span class="summary-value mono">{mantleEdgeConfig.group} / {mantleEdgeConfig.node}</span>
-        </div>
-        <div class="summary-row">
-          <span class="summary-label">Mantle URL</span>
-          <span class="summary-value mono">{mantleEdgeConfig.mantleUrl}</span>
-        </div>
-        <div class="summary-row">
-          <span class="summary-label">MQTT Broker</span>
-          <span class="summary-value mono">{mantleEdgeConfig.mqttBrokerUrl}</span>
-        </div>
-        {#if mantleEdgeConfig.mqttUsername}
-          <div class="summary-row">
-            <span class="summary-label">Authentication</span>
-            <span class="summary-value">Username: {mantleEdgeConfig.mqttUsername}</span>
-          </div>
-        {/if}
-        <div class="summary-row">
-          <span class="summary-label">Repo URL</span>
-          <span class="summary-value mono">{mantleRepoUrl(mantleEdgeConfig.mantleUrl, mantleEdgeConfig.group, mantleEdgeConfig.node)}</span>
+          <span class="summary-label">Config Source</span>
+          <span class="summary-value">Managed by Mantle</span>
         </div>
       {/if}
 

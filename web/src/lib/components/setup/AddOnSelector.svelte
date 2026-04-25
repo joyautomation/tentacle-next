@@ -13,9 +13,13 @@
     available: Set<string>;
     selected: Set<string>;
     onchange: (selected: Set<string>) => void;
+    /** Add-ons that are forced on by an upstream choice and cannot be toggled. */
+    locked?: Set<string>;
+    /** Optional reason text shown next to a locked add-on. */
+    lockedReason?: Record<string, string>;
   }
 
-  let { available, selected, onchange }: Props = $props();
+  let { available, selected, onchange, locked = new Set(), lockedReason = {} }: Props = $props();
 
   const ALL_ADDONS: AddOn[] = [
     { id: 'caddy', name: 'Caddy', desc: 'HTTPS reverse proxy with automatic TLS', icon: ShieldCheck },
@@ -29,6 +33,7 @@
   const addons = $derived(ALL_ADDONS.filter(a => available.has(a.id)));
 
   function toggle(id: string) {
+    if (locked.has(id)) return;
     const next = new Set(selected);
     if (next.has(id)) {
       next.delete(id);
@@ -44,7 +49,10 @@
     <button
       class="addon-card"
       class:selected={selected.has(addon.id)}
+      class:locked={locked.has(addon.id)}
       onclick={() => toggle(addon.id)}
+      disabled={locked.has(addon.id)}
+      title={locked.has(addon.id) ? (lockedReason[addon.id] ?? 'Required by another selection') : ''}
     >
       <div class="card-check">
         {#if selected.has(addon.id)}
@@ -58,7 +66,12 @@
       </div>
       <div class="card-text">
         <span class="card-name">{addon.name}</span>
-        <span class="card-desc">{addon.desc}</span>
+        <span class="card-desc">
+          {addon.desc}
+          {#if locked.has(addon.id) && lockedReason[addon.id]}
+            <span class="locked-reason">{lockedReason[addon.id]}</span>
+          {/if}
+        </span>
       </div>
     </button>
   {/each}
@@ -92,6 +105,19 @@
       border-color: var(--theme-primary);
       box-shadow: 0 0 0 1px var(--theme-primary);
     }
+
+    &.locked {
+      cursor: not-allowed;
+      &:hover { border-color: var(--theme-primary); }
+    }
+  }
+
+  .locked-reason {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    font-style: italic;
+    color: var(--theme-text-muted);
   }
 
   .card-check {

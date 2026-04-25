@@ -28,9 +28,15 @@
      * writing env vars and enabling the module at its own apply step.
      */
     onCommit?: () => Promise<void>;
+    /**
+     * When true, source is locked to 'mantle' and the source toggle is hidden.
+     * Group/Node inputs are also hidden — they're expected to be supplied by
+     * the wizard from a prior step (typically the MQTT identity step).
+     */
+    lockedToMantle?: boolean;
   }
 
-  let { config, onchange, onCommit }: Props = $props();
+  let { config, onchange, onCommit, lockedToMantle = false }: Props = $props();
 
   let committing = $state(false);
   async function runCommit() {
@@ -161,6 +167,7 @@
     </div>
   {/if}
 
+  {#if !lockedToMantle}
   <!-- Source Section -->
   <section class="form-section source-section">
     <h3>Source</h3>
@@ -190,6 +197,7 @@
       </button>
     </div>
   </section>
+  {/if}
 
 {#if config.source === 'external'}
   <!-- SSH Key Section -->
@@ -271,6 +279,9 @@
     <p class="section-desc">
       Point at the mantle's HTTP API. A bare repo named <code>&lt;group&gt;--&lt;node&gt;.git</code>
       will be created on the mantle when you click <strong>Apply &amp; Start</strong>.
+      {#if lockedToMantle}
+        Group / Node come from the MQTT identity step.
+      {/if}
     </p>
 
     <div class="form-field">
@@ -285,30 +296,37 @@
       />
     </div>
 
-    <div class="mantle-id-row">
-      <div class="form-field">
-        <label for="gitops-group">Group</label>
-        <p class="field-desc">Sparkplug Group ID (or any logical fleet bucket)</p>
-        <input
-          id="gitops-group"
-          type="text"
-          value={config.group}
-          oninput={(e) => update('group', e.currentTarget.value)}
-          placeholder="MyGroup"
-        />
+    {#if !lockedToMantle}
+      <div class="mantle-id-row">
+        <div class="form-field">
+          <label for="gitops-group">Group</label>
+          <p class="field-desc">Sparkplug Group ID (or any logical fleet bucket)</p>
+          <input
+            id="gitops-group"
+            type="text"
+            value={config.group}
+            oninput={(e) => update('group', e.currentTarget.value)}
+            placeholder="MyGroup"
+          />
+        </div>
+        <div class="form-field">
+          <label for="gitops-node">Node</label>
+          <p class="field-desc">Edge node name — unique within group</p>
+          <input
+            id="gitops-node"
+            type="text"
+            value={config.node}
+            oninput={(e) => update('node', e.currentTarget.value)}
+            placeholder="EdgeNode1"
+          />
+        </div>
       </div>
-      <div class="form-field">
-        <label for="gitops-node">Node</label>
-        <p class="field-desc">Edge node name — unique within group</p>
-        <input
-          id="gitops-node"
-          type="text"
-          value={config.node}
-          oninput={(e) => update('node', e.currentTarget.value)}
-          placeholder="EdgeNode1"
-        />
+    {:else}
+      <div class="identity-display">
+        <span class="identity-label">Group / Node</span>
+        <code class="identity-value">{config.group || '—'} / {config.node || '—'}</code>
       </div>
-    </div>
+    {/if}
 
     {#if computedRepoUrl}
       <div class="repo-preview" transition:slide={{ duration: 150 }}>
@@ -697,6 +715,31 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
+  }
+
+  .identity-display {
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md);
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  .identity-label {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--theme-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .identity-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8125rem;
+    color: var(--theme-text);
   }
 
   .repo-preview {

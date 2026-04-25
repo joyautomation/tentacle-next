@@ -3,7 +3,6 @@
   import type { MqttConfig } from '$lib/components/setup/MqttConfigForm.svelte';
   import type { GitOpsConfig } from '$lib/components/setup/GitOpsConfigForm.svelte';
   import type { HistoryConfig } from '$lib/components/setup/HistoryConfigForm.svelte';
-  import type { MantleEdgeConfig } from '$lib/components/setup/MantleEdgeConfigForm.svelte';
   import WizardStepper from '$lib/components/setup/WizardStepper.svelte';
   import ArchitectureCard from '$lib/components/setup/ArchitectureCard.svelte';
   import SparkplugDiagram from '$lib/components/setup/SparkplugDiagram.svelte';
@@ -14,7 +13,6 @@
   import AddOnSelector from '$lib/components/setup/AddOnSelector.svelte';
   import GitOpsConfigForm from '$lib/components/setup/GitOpsConfigForm.svelte';
   import HistoryConfigForm from '$lib/components/setup/HistoryConfigForm.svelte';
-  import MantleEdgeConfigForm from '$lib/components/setup/MantleEdgeConfigForm.svelte';
   import ReviewPanel from '$lib/components/setup/ReviewPanel.svelte';
 
   let { data }: { data: PageData } = $props();
@@ -32,28 +30,26 @@
   });
 
   // Step IDs used by archetypes
-  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'history-config' | 'mantle-edge-config' | 'review';
+  type StepId = 'architecture' | 'config-source' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'history-config' | 'review';
 
   const STEP_LABELS: Record<StepId, string> = {
     'architecture': 'Architecture',
+    'config-source': 'Config Source',
     'protocols': 'Protocols',
     'mqtt-config': 'MQTT Config',
     'add-ons': 'Add-ons',
     'gitops-config': 'GitOps',
     'history-config': 'History',
-    'mantle-edge-config': 'Edge Setup',
     'review': 'Review',
   };
 
   // Base steps per archetype. Addon-specific config steps (gitops-config, history-config)
-  // are inserted dynamically based on add-on selection.
+  // are inserted dynamically based on add-on selection. The 'config-source' step is
+  // injected for sparkplug-gateway when the gitops module is available.
   const ARCHETYPE_STEPS: Record<string, StepId[]> = {
     'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'add-ons', 'review'],
     'nat-gateway': ['architecture', 'add-ons', 'review'],
     'mantle-host': ['architecture', 'add-ons', 'review'],
-    // Mantle-paired edge: identity + mantle URL + MQTT broker all collapse
-    // into one step since group/node feed both Sparkplug and gitops repo.
-    'mantle-paired-edge': ['architecture', 'mantle-edge-config', 'review'],
   };
 
   // Add-on modules that are NOT already core to each archetype
@@ -61,7 +57,6 @@
     'sparkplug-gateway': new Set(['caddy', 'network', 'gitops', 'history']),
     'nat-gateway': new Set(['caddy', 'gitops']),
     'mantle-host': new Set(['caddy', 'gitops', 'history', 'mqtt-broker']),
-    'mantle-paired-edge': new Set(),
   };
 
   // Modules an archetype's wizard depends on. If any are missing from the
@@ -72,9 +67,6 @@
     'sparkplug-gateway': ['gateway', 'mqtt'],
     'nat-gateway': ['network', 'nftables'],
     'mantle-host': ['sparkplug-host'],
-    // 'mqtt' is the edge-side Sparkplug B node module; gitops handles config sync.
-    // No 'gateway' here — protocols are pulled from mantle via gitops.
-    'mantle-paired-edge': ['mqtt', 'gitops'],
   };
 
   const visibleArchetypes = $derived.by(() => {
@@ -160,44 +152,6 @@
     HISTORY_DB_NAME: 'dbname',
   };
 
-  // Mantle-paired edge: a single state shape that drives both the MQTT
-  // and GitOps env-var writes at apply time. Group/Node are entered once
-  // and re-used for the Sparkplug node identity AND the gitops repo name.
-  function initMantleEdgeConfig(): MantleEdgeConfig {
-    const mqttDefaults = MQTT_DEFAULTS;
-    const config: MantleEdgeConfig = {
-      group: mqttDefaults.MQTT_GROUP_ID,
-      node: mqttDefaults.MQTT_EDGE_NODE,
-      mantleUrl: '',
-      mqttBrokerUrl: mqttDefaults.MQTT_BROKER_URL,
-      mqttUsername: '',
-      mqttPassword: '',
-    };
-    // Pre-populate identity from any existing MQTT config (so re-running the
-    // wizard preserves the operator's prior group/node).
-    for (const entry of data.mqttConfig ?? []) {
-      if (entry.envVar === 'MQTT_GROUP_ID') config.group = entry.value;
-      else if (entry.envVar === 'MQTT_EDGE_NODE') config.node = entry.value;
-      else if (entry.envVar === 'MQTT_BROKER_URL') config.mqttBrokerUrl = entry.value;
-      else if (entry.envVar === 'MQTT_USERNAME') config.mqttUsername = entry.value;
-      else if (entry.envVar === 'MQTT_PASSWORD') config.mqttPassword = entry.value;
-    }
-    // Recover mantleUrl from a previously saved GITOPS_REPO_URL of shape
-    // <mantle>/git/<group>--<node>.git so the user doesn't re-enter it.
-    for (const entry of data.gitopsConfig ?? []) {
-      if (entry.envVar === 'GITOPS_REPO_URL') {
-        const m = entry.value.match(/^(https?:\/\/[^/]+)\/git\/([^/]+?)--([^/]+?)\.git$/);
-        if (m) {
-          config.mantleUrl = m[1];
-          // Group/node from the repo URL trump MQTT vars only if MQTT didn't supply them.
-          if (!config.group) config.group = m[2];
-          if (!config.node) config.node = m[3];
-        }
-      }
-    }
-    return config;
-  }
-
   function initHistoryConfig(): HistoryConfig {
     const config: HistoryConfig = {
       mode: 'local',
@@ -245,14 +199,56 @@
   let selectedProtocols = $state<Set<string>>(initProtocols());
   let selectedAddOns = $state<Set<string>>(initAddOns());
   let mqttConfig = $state<MqttConfig>(initMqttConfig());
-  let gitopsConfig = $state<GitOpsConfig>(initGitOpsConfig());
+  const initialGitopsConfig = initGitOpsConfig();
+  let gitopsConfig = $state<GitOpsConfig>(initialGitopsConfig);
   let historyConfig = $state<HistoryConfig>(initHistoryConfig());
-  let mantleEdgeConfig = $state<MantleEdgeConfig>(initMantleEdgeConfig());
+
+  // Config source choice for sparkplug-gateway. Mantle mode locks gitops on
+  // (with mantle preset), and feeds Group/Node from the MQTT identity step
+  // into the gitops repo name (<group>--<node>.git on the mantle).
+  let configSource = $state<'local' | 'mantle'>(initialGitopsConfig.source === 'mantle' ? 'mantle' : 'local');
+
+  // Whether the gitops module is even available in this build. Hides the
+  // mantle-source choice on stable builds where gitops isn't compiled in.
+  const gitopsAvailable = $derived(allModuleIds.has('gitops'));
+
+  // Mantle mode forces gitops on and syncs Group/Node from the MQTT step
+  // into the gitops repo identity, so the user only enters them once.
+  $effect(() => {
+    if (selectedArchetype !== 'sparkplug-gateway') return;
+    if (configSource === 'mantle') {
+      if (!selectedAddOns.has('gitops')) {
+        const next = new Set(selectedAddOns);
+        next.add('gitops');
+        selectedAddOns = next;
+      }
+      const targetGroup = mqttConfig.MQTT_GROUP_ID;
+      const targetNode = mqttConfig.MQTT_EDGE_NODE;
+      if (
+        gitopsConfig.source !== 'mantle' ||
+        gitopsConfig.group !== targetGroup ||
+        gitopsConfig.node !== targetNode
+      ) {
+        gitopsConfig = { ...gitopsConfig, source: 'mantle', group: targetGroup, node: targetNode };
+      }
+    } else if (gitopsConfig.source === 'mantle') {
+      // User flipped back to local — let GitOpsConfigForm's source toggle
+      // surface again with whatever they had previously.
+      gitopsConfig = { ...gitopsConfig, source: 'external' };
+    }
+  });
 
   // Dynamic steps based on selected archetype + add-on selection.
-  // Add-on config steps are inserted before the review step, in a stable order.
+  // - sparkplug-gateway gets a 'config-source' step right after architecture
+  //   when gitops is available, so the operator can choose mantle-managed
+  //   config up front.
+  // - Add-on config steps (gitops, history) are inserted before review.
   const activeSteps = $derived.by<StepId[]>(() => {
-    const base: StepId[] = selectedArchetype ? ARCHETYPE_STEPS[selectedArchetype] : ['architecture'];
+    let base: StepId[] = selectedArchetype ? [...ARCHETYPE_STEPS[selectedArchetype]] : ['architecture'];
+    if (selectedArchetype === 'sparkplug-gateway' && gitopsAvailable) {
+      const archIdx = base.indexOf('architecture');
+      base = [...base.slice(0, archIdx + 1), 'config-source', ...base.slice(archIdx + 1)];
+    }
     const reviewIdx = base.indexOf('review');
     if (reviewIdx === -1) return base;
     const inserts: StepId[] = [];
@@ -269,6 +265,7 @@
   const canProceed = $derived.by(() => {
     switch (currentStepId) {
       case 'architecture': return selectedArchetype !== null;
+      case 'config-source': return true;
       case 'protocols': return selectedProtocols.size > 0;
       case 'mqtt-config': return mqttConfig.MQTT_BROKER_URL.trim() !== '' &&
                      mqttConfig.MQTT_GROUP_ID.trim() !== '' &&
@@ -280,11 +277,6 @@
           : gitopsConfig.repoUrl.trim() !== '';
       case 'history-config': return historyConfig.dbname.trim() !== '' &&
                    (historyConfig.mode === 'local' || historyConfig.host.trim() !== '');
-      case 'mantle-edge-config':
-        return mantleEdgeConfig.group.trim() !== '' &&
-               mantleEdgeConfig.node.trim() !== '' &&
-               mantleEdgeConfig.mantleUrl.trim() !== '' &&
-               mantleEdgeConfig.mqttBrokerUrl.trim() !== '';
       case 'review': return true;
       default: return false;
     }
@@ -375,18 +367,43 @@
           </ArchitectureCard>
         {/if}
 
-        {#if visibleArchetypes.has('mantle-paired-edge')}
-          <ArchitectureCard
-            title="Mantle-Paired Edge"
-            description="Edge tentacle whose configuration is managed centrally by a mantle. Sparkplug B identity (Group/Node) doubles as the per-device git repo on the mantle — enter once, use everywhere."
-            selected={selectedArchetype === 'mantle-paired-edge'}
-            onclick={() => selectArchetype('mantle-paired-edge')}
-          >
-            {#snippet diagram()}
-              <MantleDiagram compact={true} />
-            {/snippet}
-          </ArchitectureCard>
-        {/if}
+      </div>
+
+    {:else if currentStepId === 'config-source'}
+      <div class="step-intro">
+        <h2>Configuration Source</h2>
+        <p>How will this gateway's configuration be managed?</p>
+      </div>
+      <div class="config-source-grid" role="radiogroup">
+        <button
+          type="button"
+          class="config-source-card"
+          class:active={configSource === 'local'}
+          onclick={() => { configSource = 'local'; }}
+          role="radio"
+          aria-checked={configSource === 'local'}
+        >
+          <span class="cs-title">Local</span>
+          <span class="cs-desc">
+            Edit configuration directly on this device. GitOps is optional —
+            you can enable it later for backup or audit.
+          </span>
+        </button>
+        <button
+          type="button"
+          class="config-source-card"
+          class:active={configSource === 'mantle'}
+          onclick={() => { configSource = 'mantle'; }}
+          role="radio"
+          aria-checked={configSource === 'mantle'}
+        >
+          <span class="cs-title">Managed by Mantle</span>
+          <span class="cs-desc">
+            Centralized config from a mantle. Group / Node entered in the next
+            step doubles as the per-device git repo (<code>&lt;group&gt;--&lt;node&gt;.git</code>)
+            on the mantle. GitOps is enabled automatically.
+          </span>
+        </button>
       </div>
 
     {:else if currentStepId === 'protocols'}
@@ -423,6 +440,8 @@
         available={ARCHETYPE_ADDONS[selectedArchetype ?? ''] ?? new Set()}
         selected={selectedAddOns}
         onchange={(s) => { selectedAddOns = s; }}
+        locked={configSource === 'mantle' ? new Set(['gitops']) : new Set()}
+        lockedReason={{ gitops: 'Required by mantle-managed configuration' }}
       />
 
     {:else if currentStepId === 'gitops-config'}
@@ -433,6 +452,7 @@
       <GitOpsConfigForm
         config={gitopsConfig}
         onchange={(c) => { gitopsConfig = c; }}
+        lockedToMantle={configSource === 'mantle'}
       />
 
     {:else if currentStepId === 'history-config'}
@@ -445,16 +465,6 @@
         onchange={(c) => { historyConfig = c; }}
       />
 
-    {:else if currentStepId === 'mantle-edge-config'}
-      <div class="step-intro">
-        <h2>Configure Edge</h2>
-        <p>Identity, mantle, and broker — entered once, applied to both Sparkplug and gitops.</p>
-      </div>
-      <MantleEdgeConfigForm
-        config={mantleEdgeConfig}
-        onchange={(c) => { mantleEdgeConfig = c; }}
-      />
-
     {:else if currentStepId === 'review'}
       <ReviewPanel
         archetype={selectedArchetype ?? 'sparkplug-gateway'}
@@ -463,7 +473,7 @@
         {mqttConfig}
         {gitopsConfig}
         {historyConfig}
-        {mantleEdgeConfig}
+        {configSource}
       />
     {/if}
   </div>
@@ -544,6 +554,55 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 1rem;
+  }
+
+  .config-source-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .config-source-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+    gap: 0.375rem;
+    padding: 1rem;
+    background: var(--theme-surface);
+    border: 2px solid var(--theme-border);
+    border-radius: var(--rounded-lg);
+    cursor: pointer;
+    color: var(--theme-text);
+    font-family: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+
+    &:hover { border-color: var(--theme-primary); }
+
+    &.active {
+      border-color: var(--theme-primary);
+      box-shadow: 0 0 0 1px var(--theme-primary);
+    }
+  }
+
+  .cs-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .cs-desc {
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    line-height: 1.45;
+
+    code {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.75rem;
+      background: var(--theme-bg, var(--theme-surface));
+      border: 1px solid var(--theme-border);
+      padding: 0.05rem 0.3rem;
+      border-radius: var(--rounded-sm, 0.25rem);
+    }
   }
 
   .diagram-preview {
