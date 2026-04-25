@@ -155,7 +155,8 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		opts.SetPassword(cfg.Password)
 	}
 
-	subTopic := buildSubscriptionFilter(cfg)
+	subFilters := buildSubscriptionFilters(cfg)
+	subTopic := strings.Join(subFilters, ",")
 	opts.OnConnect = func(c paho.Client) {
 		m.log.Info("sparkplug-host: connected to broker", "broker", cfg.BrokerURL, "filter", subTopic, "primaryHostId", cfg.PrimaryHostID)
 
@@ -165,7 +166,11 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 			m.log.Warn("sparkplug-host: STATE publish failed", "topic", stateTopic, "error", t.Error())
 		}
 
-		token := c.Subscribe(subTopic, 0, func(_ paho.Client, msg paho.Message) {
+		filterMap := make(map[string]byte, len(subFilters))
+		for _, f := range subFilters {
+			filterMap[f] = 0
+		}
+		token := c.SubscribeMultiple(filterMap, func(_ paho.Client, msg paho.Message) {
 			m.handleMessage(b, msg.Topic(), msg.Payload())
 		})
 		if token.Wait() && token.Error() != nil {
@@ -279,19 +284,28 @@ func (m *Module) Stop() error {
 	return nil
 }
 
-// buildSubscriptionFilter returns the MQTT topic filter to subscribe to.
+// buildSubscriptionFilters returns the MQTT topic filters to subscribe to.
 // Sparkplug B topic shape: spBv1.0/<group>/<messageType>/<edgeNode>/<device>
-// We subscribe to all message types and devices (including node-level which
-// has 4 segments — handled via a second filter).
+// Node-level messages (NBIRTH/NDEATH/NDATA/NCMD) have 4 segments; device-level
+// messages have 5. We subscribe to both shapes explicitly because some brokers
+// (including the embedded mqtt-broker) do not match `#` against zero levels,
+// so a single `+/+/+/#` filter misses 4-segment topics.
 //
 // If SharedGroup is set, wraps each filter as $share/<group>/... for MQTT 5
 // shared subscriptions (HA fan-out).
-func buildSubscriptionFilter(cfg Config) string {
-	base := "spBv1.0/" + cfg.GroupFilter + "/+/+/#"
-	if cfg.SharedGroup != "" {
-		return "$share/" + cfg.SharedGroup + "/" + base
+func buildSubscriptionFilters(cfg Config) []string {
+	bases := []string{
+		"spBv1.0/" + cfg.GroupFilter + "/+/+",
+		"spBv1.0/" + cfg.GroupFilter + "/+/+/#",
 	}
-	return base
+	if cfg.SharedGroup == "" {
+		return bases
+	}
+	out := make([]string, len(bases))
+	for i, b := range bases {
+		out[i] = "$share/" + cfg.SharedGroup + "/" + b
+	}
+	return out
 }
 
 // handleMessage decodes a single Sparkplug message and republishes its
