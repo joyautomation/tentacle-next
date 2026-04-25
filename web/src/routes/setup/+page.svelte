@@ -3,6 +3,7 @@
   import type { MqttConfig } from '$lib/components/setup/MqttConfigForm.svelte';
   import type { GitOpsConfig } from '$lib/components/setup/GitOpsConfigForm.svelte';
   import type { HistoryConfig } from '$lib/components/setup/HistoryConfigForm.svelte';
+  import type { MantleEdgeConfig } from '$lib/components/setup/MantleEdgeConfigForm.svelte';
   import WizardStepper from '$lib/components/setup/WizardStepper.svelte';
   import ArchitectureCard from '$lib/components/setup/ArchitectureCard.svelte';
   import SparkplugDiagram from '$lib/components/setup/SparkplugDiagram.svelte';
@@ -13,6 +14,7 @@
   import AddOnSelector from '$lib/components/setup/AddOnSelector.svelte';
   import GitOpsConfigForm from '$lib/components/setup/GitOpsConfigForm.svelte';
   import HistoryConfigForm from '$lib/components/setup/HistoryConfigForm.svelte';
+  import MantleEdgeConfigForm from '$lib/components/setup/MantleEdgeConfigForm.svelte';
   import ReviewPanel from '$lib/components/setup/ReviewPanel.svelte';
 
   let { data }: { data: PageData } = $props();
@@ -30,7 +32,7 @@
   });
 
   // Step IDs used by archetypes
-  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'history-config' | 'review';
+  type StepId = 'architecture' | 'protocols' | 'mqtt-config' | 'add-ons' | 'gitops-config' | 'history-config' | 'mantle-edge-config' | 'review';
 
   const STEP_LABELS: Record<StepId, string> = {
     'architecture': 'Architecture',
@@ -39,6 +41,7 @@
     'add-ons': 'Add-ons',
     'gitops-config': 'GitOps',
     'history-config': 'History',
+    'mantle-edge-config': 'Edge Setup',
     'review': 'Review',
   };
 
@@ -48,6 +51,9 @@
     'sparkplug-gateway': ['architecture', 'protocols', 'mqtt-config', 'add-ons', 'review'],
     'nat-gateway': ['architecture', 'add-ons', 'review'],
     'mantle-host': ['architecture', 'add-ons', 'review'],
+    // Mantle-paired edge: identity + mantle URL + MQTT broker all collapse
+    // into one step since group/node feed both Sparkplug and gitops repo.
+    'mantle-paired-edge': ['architecture', 'mantle-edge-config', 'review'],
   };
 
   // Add-on modules that are NOT already core to each archetype
@@ -55,6 +61,7 @@
     'sparkplug-gateway': new Set(['caddy', 'network', 'gitops', 'history']),
     'nat-gateway': new Set(['caddy', 'gitops']),
     'mantle-host': new Set(['caddy', 'gitops', 'history', 'mqtt-broker']),
+    'mantle-paired-edge': new Set(),
   };
 
   // Modules an archetype's wizard depends on. If any are missing from the
@@ -65,6 +72,9 @@
     'sparkplug-gateway': ['gateway', 'mqtt'],
     'nat-gateway': ['network', 'nftables'],
     'mantle-host': ['sparkplug-host'],
+    // 'mqtt' is the edge-side Sparkplug B node module; gitops handles config sync.
+    // No 'gateway' here — protocols are pulled from mantle via gitops.
+    'mantle-paired-edge': ['mqtt', 'gitops'],
   };
 
   const visibleArchetypes = $derived.by(() => {
@@ -150,6 +160,44 @@
     HISTORY_DB_NAME: 'dbname',
   };
 
+  // Mantle-paired edge: a single state shape that drives both the MQTT
+  // and GitOps env-var writes at apply time. Group/Node are entered once
+  // and re-used for the Sparkplug node identity AND the gitops repo name.
+  function initMantleEdgeConfig(): MantleEdgeConfig {
+    const mqttDefaults = MQTT_DEFAULTS;
+    const config: MantleEdgeConfig = {
+      group: mqttDefaults.MQTT_GROUP_ID,
+      node: mqttDefaults.MQTT_EDGE_NODE,
+      mantleUrl: '',
+      mqttBrokerUrl: mqttDefaults.MQTT_BROKER_URL,
+      mqttUsername: '',
+      mqttPassword: '',
+    };
+    // Pre-populate identity from any existing MQTT config (so re-running the
+    // wizard preserves the operator's prior group/node).
+    for (const entry of data.mqttConfig ?? []) {
+      if (entry.envVar === 'MQTT_GROUP_ID') config.group = entry.value;
+      else if (entry.envVar === 'MQTT_EDGE_NODE') config.node = entry.value;
+      else if (entry.envVar === 'MQTT_BROKER_URL') config.mqttBrokerUrl = entry.value;
+      else if (entry.envVar === 'MQTT_USERNAME') config.mqttUsername = entry.value;
+      else if (entry.envVar === 'MQTT_PASSWORD') config.mqttPassword = entry.value;
+    }
+    // Recover mantleUrl from a previously saved GITOPS_REPO_URL of shape
+    // <mantle>/git/<group>--<node>.git so the user doesn't re-enter it.
+    for (const entry of data.gitopsConfig ?? []) {
+      if (entry.envVar === 'GITOPS_REPO_URL') {
+        const m = entry.value.match(/^(https?:\/\/[^/]+)\/git\/([^/]+?)--([^/]+?)\.git$/);
+        if (m) {
+          config.mantleUrl = m[1];
+          // Group/node from the repo URL trump MQTT vars only if MQTT didn't supply them.
+          if (!config.group) config.group = m[2];
+          if (!config.node) config.node = m[3];
+        }
+      }
+    }
+    return config;
+  }
+
   function initHistoryConfig(): HistoryConfig {
     const config: HistoryConfig = {
       mode: 'local',
@@ -199,6 +247,7 @@
   let mqttConfig = $state<MqttConfig>(initMqttConfig());
   let gitopsConfig = $state<GitOpsConfig>(initGitOpsConfig());
   let historyConfig = $state<HistoryConfig>(initHistoryConfig());
+  let mantleEdgeConfig = $state<MantleEdgeConfig>(initMantleEdgeConfig());
 
   // Dynamic steps based on selected archetype + add-on selection.
   // Add-on config steps are inserted before the review step, in a stable order.
@@ -231,6 +280,11 @@
           : gitopsConfig.repoUrl.trim() !== '';
       case 'history-config': return historyConfig.dbname.trim() !== '' &&
                    (historyConfig.mode === 'local' || historyConfig.host.trim() !== '');
+      case 'mantle-edge-config':
+        return mantleEdgeConfig.group.trim() !== '' &&
+               mantleEdgeConfig.node.trim() !== '' &&
+               mantleEdgeConfig.mantleUrl.trim() !== '' &&
+               mantleEdgeConfig.mqttBrokerUrl.trim() !== '';
       case 'review': return true;
       default: return false;
     }
@@ -320,6 +374,19 @@
             {/snippet}
           </ArchitectureCard>
         {/if}
+
+        {#if visibleArchetypes.has('mantle-paired-edge')}
+          <ArchitectureCard
+            title="Mantle-Paired Edge"
+            description="Edge tentacle whose configuration is managed centrally by a mantle. Sparkplug B identity (Group/Node) doubles as the per-device git repo on the mantle — enter once, use everywhere."
+            selected={selectedArchetype === 'mantle-paired-edge'}
+            onclick={() => selectArchetype('mantle-paired-edge')}
+          >
+            {#snippet diagram()}
+              <MantleDiagram compact={true} />
+            {/snippet}
+          </ArchitectureCard>
+        {/if}
       </div>
 
     {:else if currentStepId === 'protocols'}
@@ -378,6 +445,16 @@
         onchange={(c) => { historyConfig = c; }}
       />
 
+    {:else if currentStepId === 'mantle-edge-config'}
+      <div class="step-intro">
+        <h2>Configure Edge</h2>
+        <p>Identity, mantle, and broker — entered once, applied to both Sparkplug and gitops.</p>
+      </div>
+      <MantleEdgeConfigForm
+        config={mantleEdgeConfig}
+        onchange={(c) => { mantleEdgeConfig = c; }}
+      />
+
     {:else if currentStepId === 'review'}
       <ReviewPanel
         archetype={selectedArchetype ?? 'sparkplug-gateway'}
@@ -386,6 +463,7 @@
         {mqttConfig}
         {gitopsConfig}
         {historyConfig}
+        {mantleEdgeConfig}
       />
     {/if}
   </div>
