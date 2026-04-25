@@ -38,6 +38,8 @@ func (m *Module) mountGitServerAPI(r chi.Router) {
 	r.Delete("/gitops/repos/{name}", m.handleDeleteGitopsRepo)
 	r.Get("/gitops/repos/{name}/tree", m.handleGitopsRepoTree)
 	r.Get("/gitops/tree", m.handleGitopsAllTrees)
+
+	r.Get("/fleet/nodes", m.handleGetFleetNodes)
 }
 
 func (m *Module) handleListGitopsRepos(w http.ResponseWriter, r *http.Request) {

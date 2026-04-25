@@ -158,6 +158,28 @@ func (s *Server) RepoTree(_ context.Context, name string) ([]string, error) {
 	return lines, nil
 }
 
+// ReadFileFromBare returns the contents of <path> on the main branch of the
+// named bare repo, without touching the work-clone. Returns an error wrapping
+// os.ErrNotExist if the path is not tracked.
+func (s *Server) ReadFileFromBare(name, path string) ([]byte, error) {
+	if !validRepoName(name) {
+		return nil, errors.New("invalid repo name")
+	}
+	repoPath := filepath.Join(s.rootDir, name+".git")
+	if _, err := os.Stat(repoPath); err != nil {
+		return nil, err
+	}
+	out, err := exec.Command("git", "-C", repoPath, "show", "main:"+path).CombinedOutput()
+	if err != nil {
+		txt := string(out)
+		if strings.Contains(txt, "does not exist") || strings.Contains(txt, "exists on disk, but not in") {
+			return nil, fmt.Errorf("%s: %w", path, os.ErrNotExist)
+		}
+		return nil, fmt.Errorf("git show: %w (%s)", err, strings.TrimSpace(txt))
+	}
+	return out, nil
+}
+
 // DeleteRepo removes a bare repo. Used by the API for fleet provisioning.
 func (s *Server) DeleteRepo(_ context.Context, name string) error {
 	if !validRepoName(name) {

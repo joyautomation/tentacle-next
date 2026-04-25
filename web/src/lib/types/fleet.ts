@@ -5,6 +5,12 @@ export interface FleetDevice {
 	metricCount: number;
 }
 
+export interface FleetModule {
+	id: string;
+	version?: string;
+	running: boolean;
+}
+
 export interface FleetNode {
 	groupId: string;
 	nodeId: string;
@@ -15,4 +21,6 @@ export interface FleetNode {
 	devices: Record<string, FleetDevice> | null;
 	metricCount: number;
 	verbs?: string[];
+	modules?: FleetModule[];
+	modulesError?: string;
 }

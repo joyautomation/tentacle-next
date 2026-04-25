@@ -3,7 +3,7 @@ import { api } from '$lib/api/client';
 import type { FleetNode } from '$lib/types/fleet';
 
 export const load: PageLoad = async () => {
-	const result = await api<FleetNode[] | null>('/sparkplug-host/nodes');
+	const result = await api<FleetNode[] | null>('/fleet/nodes');
 
 	if (result.error) {
 		return {

@@ -62,8 +62,8 @@
             <th>Group</th>
             <th>Node</th>
             <th>Status</th>
+            <th>Modules</th>
             <th class="num">Devices</th>
-            <th class="num">Metrics</th>
             <th>Last Seen</th>
             <th></th>
           </tr>
@@ -78,8 +78,22 @@
                   {n.online ? 'Online' : 'Offline'}
                 </span>
               </td>
+              <td>
+                {#if n.modulesError}
+                  <span class="muted module-err" title={n.modulesError}>repo error</span>
+                {:else if !n.modules || n.modules.length === 0}
+                  <span class="muted module-empty">—</span>
+                {:else}
+                  <div class="module-chips">
+                    {#each n.modules as mod (mod.id)}
+                      <span class="module-chip" class:stopped={!mod.running} title={mod.running ? 'running' : 'stopped'}>
+                        {mod.id}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
+              </td>
               <td class="num mono">{Object.keys(n.devices ?? {}).length}</td>
-              <td class="num mono">{n.metricCount}</td>
               <td class="muted">{formatRelative(n.lastSeen)}</td>
               <td>
                 <a class="link-btn" href={nodeHref(n.groupId, n.nodeId)} onclick={(e) => e.stopPropagation()}>
@@ -205,6 +219,38 @@
 
   .muted {
     color: var(--theme-text-muted);
+  }
+
+  .module-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .module-chip {
+    display: inline-block;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.7rem;
+    padding: 0.125rem 0.4rem;
+    border-radius: var(--rounded-sm, 0.25rem);
+    background: var(--badge-muted-bg);
+    color: var(--badge-muted-text);
+    border: 1px solid color-mix(in srgb, var(--theme-border) 50%, transparent);
+
+    &.stopped {
+      opacity: 0.55;
+      text-decoration: line-through;
+    }
+  }
+
+  .module-err {
+    font-size: 0.75rem;
+    font-style: italic;
+  }
+
+  .module-empty {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.875rem;
   }
 
   .badge {
