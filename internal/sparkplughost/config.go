@@ -5,55 +5,102 @@ package sparkplughost
 import (
 	"os"
 	"strconv"
+
+	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/config"
+	"github.com/joyautomation/tentacle/internal/topics"
 )
 
 type Config struct {
-	BrokerURL    string // e.g. tcp://localhost:1883
-	ClientID     string
-	Username     string
-	Password     string
-	HostAppID    string // Primary Host Application ID (used in birth/death certificate topic)
-	GroupFilter  string // "+" matches all groups; specific group otherwise
-	SharedGroup  string // if set, use $share/<group>/spBv1.0/... for HA. Empty = no sharing.
-	KeepAlive    int    // seconds
-	CleanSession bool
+	BrokerURL     string // e.g. tcp://localhost:1883
+	ClientID      string
+	Username      string
+	Password      string
+	PrimaryHostID string // Sparkplug B Host Application ID; published via spBv1.0/STATE/<id>
+	GroupFilter   string // "+" matches all groups; specific group otherwise
+	SharedGroup   string // if set, use $share/<group>/spBv1.0/... for HA. Empty = no sharing.
+	KeepAlive     int    // seconds
+	CleanSession  bool
 }
 
-func loadConfig(moduleID string) Config {
-	return Config{
-		BrokerURL:    envOr("SPARKPLUG_HOST_BROKER_URL", "tcp://localhost:1883"),
-		ClientID:     envOr("SPARKPLUG_HOST_CLIENT_ID", moduleID),
-		Username:     os.Getenv("SPARKPLUG_HOST_USERNAME"),
-		Password:     os.Getenv("SPARKPLUG_HOST_PASSWORD"),
-		HostAppID:    envOr("SPARKPLUG_HOST_APP_ID", "MantleHost"),
-		GroupFilter:  envOr("SPARKPLUG_HOST_GROUP", "+"),
-		SharedGroup:  os.Getenv("SPARKPLUG_HOST_SHARED_GROUP"), // e.g. "mantle" → $share/mantle/...
-		KeepAlive:    envInt("SPARKPLUG_HOST_KEEPALIVE", 30),
-		CleanSession: envBool("SPARKPLUG_HOST_CLEAN_SESSION", true),
+// configSchema defines the sparkplug-host module's configuration fields for the
+// settings UI. Mirrors the structure of the mqtt module's schema.
+var configSchema = []config.FieldDef{
+	// Connection
+	{EnvVar: "SPARKPLUG_HOST_BROKER_URL", Label: "Broker URL", Type: "string", Group: "Connection", GroupOrder: 0, SortOrder: 0, Default: "tcp://localhost:1883"},
+	{EnvVar: "SPARKPLUG_HOST_CLIENT_ID", Label: "Client ID", Type: "string", Group: "Connection", GroupOrder: 0, SortOrder: 1, Description: "Defaults to the module ID if blank."},
+	{EnvVar: "SPARKPLUG_HOST_USERNAME", Label: "Username", Type: "string", Group: "Connection", GroupOrder: 0, SortOrder: 2},
+	{EnvVar: "SPARKPLUG_HOST_PASSWORD", Label: "Password", Type: "password", Group: "Connection", GroupOrder: 0, SortOrder: 3},
+	{EnvVar: "SPARKPLUG_HOST_KEEPALIVE", Label: "Keep Alive (seconds)", Type: "number", Group: "Connection", GroupOrder: 0, SortOrder: 4, Default: "30"},
+	{EnvVar: "SPARKPLUG_HOST_CLEAN_SESSION", Label: "Clean Session", Type: "boolean", Group: "Connection", GroupOrder: 0, SortOrder: 5, Default: "true"},
+
+	// Sparkplug B
+	{EnvVar: "SPARKPLUG_HOST_PRIMARY_HOST_ID", Label: "Primary Host ID", Type: "string", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 0, Default: "MantleHost", Description: "Published as a retained STATE message so EoN nodes can do store-and-forward."},
+	{EnvVar: "SPARKPLUG_HOST_GROUP", Label: "Group Filter", Type: "string", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 1, Default: "+", Description: "Sparkplug group to subscribe to. Use '+' to consume all groups."},
+	{EnvVar: "SPARKPLUG_HOST_SHARED_GROUP", Label: "Shared Subscription Group", Type: "string", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 2, Description: "Optional MQTT 5 shared-subscription name for HA fan-out across multiple hosts."},
+}
+
+// loadConfig resolves config in priority order:
+// KV (sparkplug-host.<ENVVAR>) > env var > default.
+func loadConfig(b bus.Bus, moduleID string) Config {
+	get := func(envVar, def string) string {
+		if b != nil {
+			if data, _, err := b.KVGet(topics.BucketTentacleConfig, "sparkplug-host."+envVar); err == nil && len(data) > 0 {
+				return string(data)
+			}
+		}
+		if v := os.Getenv(envVar); v != "" {
+			return v
+		}
+		return def
 	}
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func envInt(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
+	getInt := func(envVar string, def int) int {
+		s := get(envVar, "")
+		if s == "" {
+			return def
+		}
+		if n, err := strconv.Atoi(s); err == nil {
 			return n
 		}
+		return def
 	}
-	return def
+	getBool := func(envVar string, def bool) bool {
+		s := get(envVar, "")
+		if s == "" {
+			return def
+		}
+		if v, err := strconv.ParseBool(s); err == nil {
+			return v
+		}
+		return def
+	}
+
+	return Config{
+		BrokerURL:     get("SPARKPLUG_HOST_BROKER_URL", "tcp://localhost:1883"),
+		ClientID:      get("SPARKPLUG_HOST_CLIENT_ID", moduleID),
+		Username:      get("SPARKPLUG_HOST_USERNAME", ""),
+		Password:      get("SPARKPLUG_HOST_PASSWORD", ""),
+		PrimaryHostID: get("SPARKPLUG_HOST_PRIMARY_HOST_ID", "MantleHost"),
+		GroupFilter:   get("SPARKPLUG_HOST_GROUP", "+"),
+		SharedGroup:   get("SPARKPLUG_HOST_SHARED_GROUP", ""),
+		KeepAlive:     getInt("SPARKPLUG_HOST_KEEPALIVE", 30),
+		CleanSession:  getBool("SPARKPLUG_HOST_CLEAN_SESSION", true),
+	}
 }
 
-func envBool(k string, def bool) bool {
-	if v := os.Getenv(k); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			return b
-		}
+// saveConfig persists current config to KV under sparkplug-host.<ENVVAR> so the
+// settings UI can read and edit it.
+func saveConfig(b bus.Bus, cfg Config) {
+	put := func(envVar, value string) {
+		_, _ = b.KVPut(topics.BucketTentacleConfig, "sparkplug-host."+envVar, []byte(value))
 	}
-	return def
+	put("SPARKPLUG_HOST_BROKER_URL", cfg.BrokerURL)
+	put("SPARKPLUG_HOST_CLIENT_ID", cfg.ClientID)
+	put("SPARKPLUG_HOST_USERNAME", cfg.Username)
+	put("SPARKPLUG_HOST_PASSWORD", cfg.Password)
+	put("SPARKPLUG_HOST_PRIMARY_HOST_ID", cfg.PrimaryHostID)
+	put("SPARKPLUG_HOST_GROUP", cfg.GroupFilter)
+	put("SPARKPLUG_HOST_SHARED_GROUP", cfg.SharedGroup)
+	put("SPARKPLUG_HOST_KEEPALIVE", strconv.Itoa(cfg.KeepAlive))
+	put("SPARKPLUG_HOST_CLEAN_SESSION", strconv.FormatBool(cfg.CleanSession))
 }

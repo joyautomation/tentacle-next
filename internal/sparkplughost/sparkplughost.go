@@ -26,6 +26,7 @@ import (
 	paho "github.com/eclipse/paho.mqtt.golang"
 
 	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/config"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
 	"github.com/joyautomation/tentacle/internal/sparkplug"
 	"github.com/joyautomation/tentacle/internal/topics"
@@ -38,10 +39,11 @@ type Module struct {
 	moduleID string
 	log      *slog.Logger
 
-	mu     sync.Mutex
-	client paho.Client
-	stopHB func()
-	subs   []bus.Subscription
+	mu         sync.Mutex
+	client     paho.Client
+	stateTopic string
+	stopHB     func()
+	subs       []bus.Subscription
 
 	stats struct {
 		messagesReceived atomic.Int64
@@ -62,7 +64,25 @@ func (m *Module) ServiceType() string { return serviceType }
 
 func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.log = slog.Default().With("serviceType", serviceType, "moduleID", m.moduleID)
-	cfg := loadConfig(m.moduleID)
+
+	// Ensure required KV buckets exist
+	for _, bucket := range []string{topics.BucketTentacleConfig, topics.BucketServiceEnabled, topics.BucketHeartbeats} {
+		if err := b.KVCreate(bucket, topics.BucketConfigs()[bucket]); err != nil {
+			m.log.Warn("sparkplug-host: failed to create bucket", "bucket", bucket, "error", err)
+		}
+	}
+
+	cfg := loadConfig(b, m.moduleID)
+	saveConfig(b, cfg)
+
+	if schemaSub, err := config.RegisterSchema(b, serviceType, configSchema); err == nil {
+		m.mu.Lock()
+		m.subs = append(m.subs, schemaSub)
+		m.mu.Unlock()
+	}
+
+	stateTopic := "spBv1.0/STATE/" + cfg.PrimaryHostID
+	offlinePayload := []byte(`{"online":false,"timestamp":0}`)
 
 	opts := paho.NewClientOptions().
 		AddBroker(cfg.BrokerURL).
@@ -71,7 +91,8 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		SetKeepAlive(time.Duration(cfg.KeepAlive) * time.Second).
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
-		SetConnectRetryInterval(5 * time.Second)
+		SetConnectRetryInterval(5 * time.Second).
+		SetBinaryWill(stateTopic, offlinePayload, 1, true)
 	if cfg.Username != "" {
 		opts.SetUsername(cfg.Username)
 	}
@@ -81,7 +102,14 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 	subTopic := buildSubscriptionFilter(cfg)
 	opts.OnConnect = func(c paho.Client) {
-		m.log.Info("sparkplug-host: connected to broker", "broker", cfg.BrokerURL, "filter", subTopic)
+		m.log.Info("sparkplug-host: connected to broker", "broker", cfg.BrokerURL, "filter", subTopic, "primaryHostId", cfg.PrimaryHostID)
+
+		// Sparkplug B 3.0 Host Application: publish retained STATE ONLINE on connect.
+		online := []byte(fmt.Sprintf(`{"online":true,"timestamp":%d}`, time.Now().UnixMilli()))
+		if t := c.Publish(stateTopic, 1, true, online); t.Wait() && t.Error() != nil {
+			m.log.Warn("sparkplug-host: STATE publish failed", "topic", stateTopic, "error", t.Error())
+		}
+
 		token := c.Subscribe(subTopic, 0, func(_ paho.Client, msg paho.Message) {
 			m.handleMessage(b, msg.Topic(), msg.Payload())
 		})
@@ -99,6 +127,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	}
 	m.mu.Lock()
 	m.client = client
+	m.stateTopic = stateTopic
 	m.mu.Unlock()
 
 	m.stopHB = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
@@ -133,6 +162,8 @@ func (m *Module) Stop() error {
 	m.mu.Lock()
 	client := m.client
 	m.client = nil
+	stateTopic := m.stateTopic
+	m.stateTopic = ""
 	subs := m.subs
 	m.subs = nil
 	stopHB := m.stopHB
@@ -146,6 +177,14 @@ func (m *Module) Stop() error {
 		stopHB()
 	}
 	if client != nil && client.IsConnected() {
+		if stateTopic != "" {
+			offline := []byte(fmt.Sprintf(`{"online":false,"timestamp":%d}`, time.Now().UnixMilli()))
+			if t := client.Publish(stateTopic, 1, true, offline); t.WaitTimeout(500*time.Millisecond) && t.Error() != nil {
+				if m.log != nil {
+					m.log.Warn("sparkplug-host: STATE OFFLINE publish failed", "error", t.Error())
+				}
+			}
+		}
 		client.Disconnect(250)
 	}
 	if m.log != nil {
