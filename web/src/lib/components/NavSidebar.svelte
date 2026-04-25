@@ -312,6 +312,20 @@
       </a>
     </li>
 
+    {#if services.some((s) => s.serviceType === 'sparkplug-host')}
+      <li>
+        <a
+          href="/fleet"
+          class="sidebar-item"
+          class:active={$page.url.pathname === '/fleet' || $page.url.pathname.startsWith('/fleet/')}
+          onclick={close}
+        >
+          <ServerStack size="1.25rem" />
+          <span>Fleet</span>
+        </a>
+      </li>
+    {/if}
+
     {#if uniqueServices.length > 0}
       <li class="sidebar-section-label">Services</li>
       {#each uniqueServices as service}
