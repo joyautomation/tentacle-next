@@ -49,9 +49,22 @@ func init() {
 				{EnvVar: "SPARKPLUG_HOST_CLIENT_ID", Description: "MQTT client ID base"},
 				{EnvVar: "SPARKPLUG_HOST_USERNAME", Description: "Broker username"},
 				{EnvVar: "SPARKPLUG_HOST_PASSWORD", Description: "Broker password"},
-				{EnvVar: "SPARKPLUG_HOST_APP_ID", Description: "Primary Host Application ID", Default: "MantleHost"},
+				{EnvVar: "SPARKPLUG_HOST_PRIMARY_HOST_ID", Description: "Primary Host Application ID", Default: "MantleHost"},
 				{EnvVar: "SPARKPLUG_HOST_GROUP", Description: "Group filter (+ for all groups)", Default: "+"},
 				{EnvVar: "SPARKPLUG_HOST_SHARED_GROUP", Description: "MQTT5 shared subscription group for HA (empty = no sharing)"},
+			},
+		},
+		otypes.ModuleRegistryEntry{
+			Repo:         "tentacle-next",
+			ModuleID:     "fleet",
+			Description:  "Fleet inventory — tracks edge-node births/deaths on MQTT",
+			Category:     "optional",
+			Runtime:      "embedded",
+			Experimental: true,
+			RequiredConfig: []otypes.ConfigField{
+				{EnvVar: "FLEET_BROKER_URL", Description: "MQTT broker URL", Required: true, Default: "tcp://localhost:1883"},
+				{EnvVar: "FLEET_GROUP", Description: "Group filter (+ for all groups)", Default: "+"},
+				{EnvVar: "FLEET_STALE_SECONDS", Description: "Stale threshold in seconds", Default: "90"},
 			},
 		},
 	)

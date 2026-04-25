@@ -38,6 +38,9 @@ const (
 	MqttStoreForward = "mqtt.store-forward"
 )
 
+// Fleet.
+const FleetNodes = "fleet.nodes"
+
 // SNMP specific.
 const SnmpSet = "snmp.set"
 func SnmpTrap(deviceID string) string { return "snmp.trap." + deviceID }

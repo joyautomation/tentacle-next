@@ -4,6 +4,7 @@
   import { apiPut } from '$lib/api/client';
   import { state as saltState } from '@joyautomation/salt';
   import StoreForwardStatus from '$lib/components/StoreForwardStatus.svelte';
+  import FleetNodes from '$lib/components/FleetNodes.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -177,6 +178,10 @@
 
   {#if data.serviceType === 'mqtt'}
     <StoreForwardStatus initialStatus={data.storeForwardStatus} />
+  {/if}
+
+  {#if data.serviceType === 'fleet'}
+    <FleetNodes />
   {/if}
 </div>
 
