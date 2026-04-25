@@ -3,19 +3,25 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"time"
 
+	"github.com/joyautomation/tentacle/internal/manifest"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 )
 
-// gatewayConfigPath is the file inside each target's repo that holds the
-// full GatewayConfigKV blob. Mantle reads/writes this through gitops.RepoStore
-// for fleet-mode configurator endpoints.
-const gatewayConfigPath = "gateway.json"
+// gatewayConfigDir is the directory inside each target's repo that holds
+// gateway manifest YAML files, one per gateway. This matches the layout
+// the edge gitops module produces and consumes (config/gateways/*.yaml),
+// so the same repo round-trips through both writers.
+const gatewayConfigDir = "config/gateways"
+
+func gatewayManifestPath(gatewayID string) string {
+	return path.Join(gatewayConfigDir, gatewayID+".yaml")
+}
 
 // loadGatewayConfigForTarget reads the gateway config for a remote tentacle
 // out of its git repo on mantle. If the file doesn't exist yet, returns an
@@ -26,21 +32,35 @@ func (m *Module) loadGatewayConfigForTarget(t Target, gatewayID string) (*itypes
 		return nil, errors.New("loadGatewayConfigForTarget called without target")
 	}
 	rs := ensureRepoStore()
-	data, err := rs.ReadFile(t.Group, t.Node, gatewayConfigPath)
+	data, err := rs.ReadFile(t.Group, t.Node, gatewayManifestPath(gatewayID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &itypes.GatewayConfigKV{GatewayID: gatewayID}, nil
 		}
-		return nil, fmt.Errorf("read %s: %w", gatewayConfigPath, err)
+		return nil, fmt.Errorf("read %s: %w", gatewayManifestPath(gatewayID), err)
 	}
-	var cfg itypes.GatewayConfigKV
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal %s: %w", gatewayConfigPath, err)
+	resources, err := manifest.ParseBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", gatewayManifestPath(gatewayID), err)
 	}
-	if cfg.GatewayID == "" {
-		cfg.GatewayID = gatewayID
+	for _, res := range resources {
+		gw, ok := res.(*manifest.GatewayResource)
+		if !ok {
+			continue
+		}
+		cfg := &itypes.GatewayConfigKV{
+			GatewayID:    gw.Metadata.Name,
+			Devices:      gw.Spec.Devices,
+			Variables:    gw.Spec.Variables,
+			UdtTemplates: gw.Spec.UdtTemplates,
+			UdtVariables: gw.Spec.UdtVariables,
+		}
+		if cfg.GatewayID == "" {
+			cfg.GatewayID = gatewayID
+		}
+		return cfg, nil
 	}
-	return &cfg, nil
+	return &itypes.GatewayConfigKV{GatewayID: gatewayID}, nil
 }
 
 // saveGatewayConfigForTarget writes the gateway config back to the target's
@@ -51,13 +71,31 @@ func (m *Module) saveGatewayConfigForTarget(t Target, cfg *itypes.GatewayConfigK
 		return errors.New("saveGatewayConfigForTarget called without target")
 	}
 	cfg.UpdatedAt = time.Now().UnixMilli()
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
+
+	res := &manifest.GatewayResource{
+		ResourceHeader: manifest.NewHeader(manifest.KindGateway, cfg.GatewayID),
+		Spec: manifest.GatewaySpec{
+			Devices:      cfg.Devices,
+			Variables:    cfg.Variables,
+			UdtTemplates: cfg.UdtTemplates,
+			UdtVariables: cfg.UdtVariables,
+		},
 	}
+	if res.Spec.Devices == nil {
+		res.Spec.Devices = map[string]itypes.GatewayDeviceConfig{}
+	}
+	if res.Spec.Variables == nil {
+		res.Spec.Variables = map[string]itypes.GatewayVariableConfig{}
+	}
+
+	data, err := manifest.Serialize([]any{res})
+	if err != nil {
+		return fmt.Errorf("serialize gateway manifest: %w", err)
+	}
+
 	rs := ensureRepoStore()
 	if msg == "" {
 		msg = "update gateway config"
 	}
-	return rs.WriteFile(t.Group, t.Node, gatewayConfigPath, data, msg)
+	return rs.WriteFile(t.Group, t.Node, gatewayManifestPath(cfg.GatewayID), data, msg)
 }
