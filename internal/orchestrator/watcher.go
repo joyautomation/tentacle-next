@@ -108,12 +108,18 @@ func reconcileModuleMonolith(desired otypes.DesiredServiceKV, rctx *reconcilerCo
 
 		rctx.log.Info("reconcile: starting in-process module", "moduleId", desired.ModuleID)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					rctx.log.Error("reconcile: in-process module panicked", "moduleId", desired.ModuleID, "recover", r)
+				}
+				cancel()
+				rctx.mod.mu.Lock()
+				delete(rctx.mod.running, desired.ModuleID)
+				rctx.mod.mu.Unlock()
+			}()
 			if err := mod.Start(ctx, rctx.b); err != nil {
 				rctx.log.Error("reconcile: in-process module failed", "moduleId", desired.ModuleID, "error", err)
 			}
-			rctx.mod.mu.Lock()
-			delete(rctx.mod.running, desired.ModuleID)
-			rctx.mod.mu.Unlock()
 		}()
 
 		reportStatus(rctx.b, entry, statusOpts{
