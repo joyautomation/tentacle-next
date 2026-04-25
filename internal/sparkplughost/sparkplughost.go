@@ -35,6 +35,28 @@ import (
 
 const serviceType = "sparkplug-host"
 
+// Node is a single tracked Sparkplug B edge node.
+type Node struct {
+	GroupID     string             `json:"groupId"`
+	NodeID      string             `json:"nodeId"`
+	Online      bool               `json:"online"`
+	LastSeen    int64              `json:"lastSeen"`
+	FirstSeen   int64              `json:"firstSeen"`
+	BdSeq       int64              `json:"bdSeq"`
+	Devices     map[string]*Device `json:"devices"`
+	NbirthTime  int64              `json:"nbirthTime,omitempty"`
+	NdeathTime  int64              `json:"ndeathTime,omitempty"`
+	MetricCount int                `json:"metricCount"`
+}
+
+// Device is a single device under an edge node.
+type Device struct {
+	DeviceID    string `json:"deviceId"`
+	Online      bool   `json:"online"`
+	LastSeen    int64  `json:"lastSeen"`
+	MetricCount int    `json:"metricCount"`
+}
+
 type Module struct {
 	moduleID string
 	log      *slog.Logger
@@ -45,10 +67,17 @@ type Module struct {
 	stopHB     func()
 	subs       []bus.Subscription
 
+	invMu sync.RWMutex
+	nodes map[string]*Node // keyed by "group/node"
+
 	stats struct {
 		messagesReceived atomic.Int64
 		metricsPublished atomic.Int64
 		decodeErrors     atomic.Int64
+		nbirth           atomic.Int64
+		ndeath           atomic.Int64
+		dbirth           atomic.Int64
+		ddeath           atomic.Int64
 	}
 }
 
@@ -56,7 +85,10 @@ func New(moduleID string) *Module {
 	if moduleID == "" {
 		moduleID = "sparkplug-host"
 	}
-	return &Module{moduleID: moduleID}
+	return &Module{
+		moduleID: moduleID,
+		nodes:    make(map[string]*Node),
+	}
 }
 
 func (m *Module) ModuleID() string    { return m.moduleID }
@@ -131,13 +163,41 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.mu.Unlock()
 
 	m.stopHB = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
+		m.invMu.RLock()
+		total := len(m.nodes)
+		online := 0
+		staleMs := int64(cfg.StaleSeconds) * 1000
+		now := time.Now().UnixMilli()
+		for _, n := range m.nodes {
+			if n.Online && now-n.LastSeen < staleMs {
+				online++
+			}
+		}
+		m.invMu.RUnlock()
 		return map[string]interface{}{
 			"broker":           cfg.BrokerURL,
 			"filter":           subTopic,
 			"messagesReceived": m.stats.messagesReceived.Load(),
 			"metricsPublished": m.stats.metricsPublished.Load(),
 			"decodeErrors":     m.stats.decodeErrors.Load(),
+			"nodes":            total,
+			"online":           online,
+			"nbirth":           m.stats.nbirth.Load(),
+			"ndeath":           m.stats.ndeath.Load(),
+			"dbirth":           m.stats.dbirth.Load(),
+			"ddeath":           m.stats.ddeath.Load(),
 		}
+	})
+
+	nodesSub, _ := b.Subscribe(sparkplug.SubjectHostNodes, func(_ string, _ []byte, reply bus.ReplyFunc) {
+		if reply == nil {
+			return
+		}
+		data, err := json.Marshal(m.snapshot())
+		if err != nil {
+			return
+		}
+		_ = reply(data)
 	})
 
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
@@ -146,6 +206,9 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		os.Exit(0)
 	})
 	m.mu.Lock()
+	if nodesSub != nil {
+		m.subs = append(m.subs, nodesSub)
+	}
 	m.subs = append(m.subs, shutdownSub)
 	m.mu.Unlock()
 
@@ -238,6 +301,7 @@ func (m *Module) handleMessage(b bus.Bus, topic string, payload []byte) {
 	}
 
 	m.publishFrameEvent(b, msgType, group, edgeNode, device, pl)
+	m.updateInventory(msgType, group, edgeNode, device, len(pl.Metrics), pl)
 
 	deviceKey := encodeDeviceKey(group, edgeNode, device)
 	for i := range pl.Metrics {
@@ -327,6 +391,103 @@ func (m *Module) publishMetric(b bus.Bus, deviceKey string, metric *sparkplug.Me
 	}
 	m.stats.metricsPublished.Add(1)
 	_ = msgType // reserved for future per-message-type routing
+}
+
+// updateInventory tracks edge nodes/devices observed via Sparkplug B frames.
+// It runs after publishFrameEvent so the bus event still fires for downstream
+// consumers, while the inventory map serves the local /api/v1/sparkplug-host/nodes view.
+func (m *Module) updateInventory(msgType, group, edgeNode, device string, metricCount int, pl *sparkplug.Payload) {
+	now := time.Now().UnixMilli()
+
+	m.invMu.Lock()
+	defer m.invMu.Unlock()
+
+	key := group + "/" + edgeNode
+	n, ok := m.nodes[key]
+	if !ok {
+		n = &Node{
+			GroupID:   group,
+			NodeID:    edgeNode,
+			FirstSeen: now,
+			Devices:   make(map[string]*Device),
+		}
+		m.nodes[key] = n
+	}
+	n.LastSeen = now
+
+	switch msgType {
+	case "NBIRTH":
+		m.stats.nbirth.Add(1)
+		n.Online = true
+		n.NbirthTime = now
+		n.MetricCount = metricCount
+		for i := range pl.Metrics {
+			if pl.Metrics[i].Name == "bdSeq" {
+				if v, ok := pl.Metrics[i].Value.(uint64); ok {
+					n.BdSeq = int64(v)
+				}
+				break
+			}
+		}
+	case "NDEATH":
+		m.stats.ndeath.Add(1)
+		n.Online = false
+		n.NdeathTime = now
+		for _, d := range n.Devices {
+			d.Online = false
+		}
+	case "DBIRTH":
+		m.stats.dbirth.Add(1)
+		if device != "" {
+			d := getOrCreateDevice(n, device)
+			d.Online = true
+			d.LastSeen = now
+			d.MetricCount = metricCount
+		}
+	case "DDEATH":
+		m.stats.ddeath.Add(1)
+		if device != "" {
+			if d, ok := n.Devices[device]; ok {
+				d.Online = false
+				d.LastSeen = now
+			}
+		}
+	case "NDATA":
+		n.Online = true
+	case "DDATA":
+		n.Online = true
+		if device != "" {
+			d := getOrCreateDevice(n, device)
+			d.Online = true
+			d.LastSeen = now
+		}
+	}
+}
+
+func getOrCreateDevice(n *Node, device string) *Device {
+	if d, ok := n.Devices[device]; ok {
+		return d
+	}
+	d := &Device{DeviceID: device}
+	n.Devices[device] = d
+	return d
+}
+
+// snapshot returns a deep-ish copy of the current inventory safe to marshal.
+func (m *Module) snapshot() []*Node {
+	m.invMu.RLock()
+	defer m.invMu.RUnlock()
+	out := make([]*Node, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		cp := *n
+		cp.Devices = make(map[string]*Device, len(n.Devices))
+		for k, d := range n.Devices {
+			dCopy := *d
+			cp.Devices[k] = &dCopy
+		}
+		out = append(out, &cp)
+	}
+	return out
 }
 
 // datatypeName maps a Sparkplug datatype id to history's datatype string.

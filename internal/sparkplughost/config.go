@@ -21,6 +21,7 @@ type Config struct {
 	SharedGroup   string // if set, use $share/<group>/spBv1.0/... for HA. Empty = no sharing.
 	KeepAlive     int    // seconds
 	CleanSession  bool
+	StaleSeconds  int    // node considered stale if LastSeen older than this
 }
 
 // configSchema defines the sparkplug-host module's configuration fields for the
@@ -38,6 +39,9 @@ var configSchema = []config.FieldDef{
 	{EnvVar: "SPARKPLUG_HOST_PRIMARY_HOST_ID", Label: "Primary Host ID", Type: "string", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 0, Default: "MantleHost", Description: "Published as a retained STATE message so EoN nodes can do store-and-forward."},
 	{EnvVar: "SPARKPLUG_HOST_GROUP", Label: "Group Filter", Type: "string", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 1, Default: "+", Description: "Sparkplug group to subscribe to. Use '+' to consume all groups."},
 	{EnvVar: "SPARKPLUG_HOST_SHARED_GROUP", Label: "Shared Subscription Group", Type: "string", Group: "Sparkplug B", GroupOrder: 1, SortOrder: 2, Description: "Optional MQTT 5 shared-subscription name for HA fan-out across multiple hosts."},
+
+	// Inventory
+	{EnvVar: "SPARKPLUG_HOST_STALE_SECONDS", Label: "Stale Threshold (seconds)", Type: "number", Group: "Inventory", GroupOrder: 2, SortOrder: 0, Default: "90", Description: "Nodes with no activity for this long are reported as stale in heartbeat metadata."},
 }
 
 // loadConfig resolves config in priority order:
@@ -85,6 +89,7 @@ func loadConfig(b bus.Bus, moduleID string) Config {
 		SharedGroup:   get("SPARKPLUG_HOST_SHARED_GROUP", ""),
 		KeepAlive:     getInt("SPARKPLUG_HOST_KEEPALIVE", 30),
 		CleanSession:  getBool("SPARKPLUG_HOST_CLEAN_SESSION", true),
+		StaleSeconds:  getInt("SPARKPLUG_HOST_STALE_SECONDS", 90),
 	}
 }
 
@@ -103,4 +108,5 @@ func saveConfig(b bus.Bus, cfg Config) {
 	put("SPARKPLUG_HOST_SHARED_GROUP", cfg.SharedGroup)
 	put("SPARKPLUG_HOST_KEEPALIVE", strconv.Itoa(cfg.KeepAlive))
 	put("SPARKPLUG_HOST_CLEAN_SESSION", strconv.FormatBool(cfg.CleanSession))
+	put("SPARKPLUG_HOST_STALE_SECONDS", strconv.Itoa(cfg.StaleSeconds))
 }

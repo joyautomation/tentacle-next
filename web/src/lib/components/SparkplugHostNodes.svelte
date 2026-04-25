@@ -26,7 +26,7 @@
   let errMsg = $state<string | null>(null);
 
   async function poll() {
-    const result = await api<Node[] | null>('/fleet/nodes');
+    const result = await api<Node[] | null>('/sparkplug-host/nodes');
     if (result.error) {
       errMsg = result.error.error;
       return;
@@ -56,7 +56,7 @@
   });
 </script>
 
-<div class="fleet-nodes">
+<div class="sparkplug-host-nodes">
   <h2>Edge Nodes</h2>
   {#if errMsg}
     <div class="error">{errMsg}</div>
@@ -99,7 +99,7 @@
 </div>
 
 <style lang="scss">
-  .fleet-nodes {
+  .sparkplug-host-nodes {
     margin-top: 1.5rem;
   }
   h2 {

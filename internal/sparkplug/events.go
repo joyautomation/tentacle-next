@@ -16,3 +16,7 @@ type FrameEvent struct {
 
 // SubjectHostFrame is the bus subject sparkplug-host publishes FrameEvent values to.
 const SubjectHostFrame = "sparkplug.host.frame"
+
+// SubjectHostNodes is the bus subject sparkplug-host serves node inventory snapshots on.
+// Reply with a JSON array of Node entries.
+const SubjectHostNodes = "sparkplug.host.nodes"

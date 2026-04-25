@@ -30,14 +30,12 @@
       { id: 'broker', label: 'MQTT Broker', abbr: 'BRK', layer: 0, row: 1, color: 'var(--sky-500, #0ea5e9)' },
       { id: 'sparkplug', label: 'Sparkplug Host', abbr: 'SPB', layer: 1, row: 1, color: 'var(--purple-500, #a855f7)' },
       { id: 'history', label: 'History', abbr: 'HIST', layer: 2, row: 0, color: 'var(--teal-500, #14b8a6)' },
-      { id: 'fleet', label: 'Fleet', abbr: 'FLT', layer: 2, row: 1, color: 'var(--teal-500, #14b8a6)' },
       { id: 'git', label: 'Git VC', abbr: 'GIT', layer: 2, row: 2, color: 'var(--teal-500, #14b8a6)' },
     ];
 
     const links: DiagramLink[] = [
       { source: 'broker', target: 'sparkplug' },
       { source: 'sparkplug', target: 'history' },
-      { source: 'sparkplug', target: 'fleet' },
       { source: 'sparkplug', target: 'git' },
     ];
 

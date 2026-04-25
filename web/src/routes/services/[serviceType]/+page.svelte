@@ -4,7 +4,7 @@
   import { apiPut } from '$lib/api/client';
   import { state as saltState } from '@joyautomation/salt';
   import StoreForwardStatus from '$lib/components/StoreForwardStatus.svelte';
-  import FleetNodes from '$lib/components/FleetNodes.svelte';
+  import SparkplugHostNodes from '$lib/components/SparkplugHostNodes.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -180,8 +180,8 @@
     <StoreForwardStatus initialStatus={data.storeForwardStatus} />
   {/if}
 
-  {#if data.serviceType === 'fleet'}
-    <FleetNodes />
+  {#if data.serviceType === 'sparkplug-host'}
+    <SparkplugHostNodes />
   {/if}
 </div>
 
