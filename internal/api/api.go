@@ -280,6 +280,9 @@ func (m *Module) routes() http.Handler {
 		r.Get("/gitops/history", m.handleGetGitopsHistory)
 		r.Get("/gitops/history/diff", m.handleGetGitopsHistoryDiff)
 
+		// GitOps server (mantle-only): repo management API.
+		m.mountGitServerAPI(r)
+
 		// System
 		r.Get("/system/hostname", m.handleGetHostname)
 		r.Get("/system/version", m.handleGetVersion)
@@ -319,6 +322,9 @@ func (m *Module) routes() http.Handler {
 		r.Get("/orchestrator/modules/{moduleId}/versions", m.handleGetModuleVersions)
 		r.Get("/orchestrator/internet", m.handleCheckInternet)
 	})
+
+	// GitOps server (mantle-only): smart-HTTP git protocol under /git/.
+	m.mountGitServer(r)
 
 	// Serve embedded web UI (SPA with fallback to index.html).
 	r.Handle("/*", web.Handler())
