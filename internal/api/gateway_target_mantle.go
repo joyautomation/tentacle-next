@@ -9,6 +9,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/joyautomation/tentacle/internal/gitserver"
 	"github.com/joyautomation/tentacle/internal/manifest"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 )
@@ -31,7 +32,10 @@ func (m *Module) loadGatewayConfigForTarget(t Target, gatewayID string) (*itypes
 	if !t.IsRemote() {
 		return nil, errors.New("loadGatewayConfigForTarget called without target")
 	}
-	rs := ensureRepoStore()
+	rs := gitserver.Store()
+	if rs == nil {
+		return nil, errors.New("git server module not enabled")
+	}
 	data, err := rs.ReadFile(t.Group, t.Node, gatewayManifestPath(gatewayID))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -93,7 +97,10 @@ func (m *Module) saveGatewayConfigForTarget(t Target, cfg *itypes.GatewayConfigK
 		return fmt.Errorf("serialize gateway manifest: %w", err)
 	}
 
-	rs := ensureRepoStore()
+	rs := gitserver.Store()
+	if rs == nil {
+		return errors.New("git server module not enabled")
+	}
 	if msg == "" {
 		msg = "update gateway config"
 	}

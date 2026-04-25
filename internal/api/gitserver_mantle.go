@@ -6,43 +6,28 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/joyautomation/tentacle/internal/gitops"
-	"github.com/joyautomation/tentacle/internal/paths"
+	"github.com/joyautomation/tentacle/internal/gitserver"
 )
 
-// gitServer is a single mantle-process Server, lazily constructed on first
-// use. RootDir lives under <DataDir>/gitops/server.
-var (
-	gitServerInst *gitops.Server
-	repoStoreInst *gitops.RepoStore
-)
+// The git server is owned by the gitserver orchestrator module. These
+// routes look it up at request time; if the module isn't enabled they
+// return 503 so the operator gets a clear "module disabled" error rather
+// than a partially-working page.
 
-func gitServerRootDir() string {
-	return filepath.Join(paths.DataDir(), "gitops", "server")
-}
-
-func ensureGitServer() *gitops.Server {
-	if gitServerInst == nil {
-		gitServerInst = gitops.NewServer(gitServerRootDir())
-	}
-	return gitServerInst
-}
-
-func ensureRepoStore() *gitops.RepoStore {
-	if repoStoreInst == nil {
-		repoStoreInst = gitops.NewRepoStore(ensureGitServer())
-	}
-	return repoStoreInst
-}
-
-// mountGitServer wires the smart-HTTP git protocol under /git/ and the repo
-// management REST endpoints under /api/v1/gitops/repos.
+// mountGitServer wires the smart-HTTP git protocol under /git/. The
+// underlying handler is fetched per-request so enable/disable through the
+// orchestrator takes effect without restarting the API listener.
 func (m *Module) mountGitServer(r chi.Router) {
-	srv := ensureGitServer()
-	r.Mount("/git", http.StripPrefix("/git", srv.Handler()))
+	r.Mount("/git", http.StripPrefix("/git", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		srv := gitserver.Server()
+		if srv == nil {
+			writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+			return
+		}
+		srv.Handler().ServeHTTP(w, req)
+	})))
 }
 
 // mountGitServerAPI is called inside the /api/v1 sub-route to add the
@@ -54,7 +39,11 @@ func (m *Module) mountGitServerAPI(r chi.Router) {
 }
 
 func (m *Module) handleListGitopsRepos(w http.ResponseWriter, r *http.Request) {
-	srv := ensureGitServer()
+	srv := gitserver.Server()
+	if srv == nil {
+		writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+		return
+	}
 	repos, err := srv.ListRepos(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -74,7 +63,11 @@ func (m *Module) handleCreateGitopsRepo(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	srv := ensureGitServer()
+	srv := gitserver.Server()
+	if srv == nil {
+		writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+		return
+	}
 	if err := srv.CreateRepo(context.Background(), body.Name); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -84,7 +77,11 @@ func (m *Module) handleCreateGitopsRepo(w http.ResponseWriter, r *http.Request) 
 
 func (m *Module) handleDeleteGitopsRepo(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	srv := ensureGitServer()
+	srv := gitserver.Server()
+	if srv == nil {
+		writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+		return
+	}
 	if err := srv.DeleteRepo(r.Context(), name); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

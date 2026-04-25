@@ -21,7 +21,7 @@
 
   let { services, apiConnected, monolith = false }: Props = $props();
 
-  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'history' | 'database' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
+  type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'gitserver' | 'history' | 'database' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
 
   type NodeDatum = {
     id: string;

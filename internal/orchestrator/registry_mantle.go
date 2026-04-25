@@ -10,6 +10,14 @@ func init() {
 	moduleRegistry = append(moduleRegistry,
 		otypes.ModuleRegistryEntry{
 			Repo:         "tentacle-next",
+			ModuleID:     "gitserver",
+			Description:  "Git smart-HTTP server hosting per-edge config repos for fleet remote configuration",
+			Category:     "optional",
+			Runtime:      "embedded",
+			Experimental: true,
+		},
+		otypes.ModuleRegistryEntry{
+			Repo:         "tentacle-next",
 			ModuleID:     "history",
 			Description:  "Centralized historian (TimescaleDB) — fleet aggregation",
 			Category:     "optional",

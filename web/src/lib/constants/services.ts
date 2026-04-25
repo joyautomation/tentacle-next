@@ -6,6 +6,7 @@ export const SERVICE_NAMES: Record<string, string> = {
   'ethernetip-server': 'EtherNet/IP Server',
   gateway: 'Gateway',
   gitops: 'GitOps',
+  gitserver: 'Git Server',
   graphql: 'GraphQL',
   history: 'History',
   mqtt: 'MQTT',
@@ -29,6 +30,7 @@ export const MODULE_NAMES: Record<string, string> = {
   caddy: 'Caddy',
   gateway: 'Gateway',
   gitops: 'GitOps',
+  gitserver: 'Git Server',
   plc: 'PLC',
   'tentacle-ethernetip': 'EtherNet/IP',
   'tentacle-ethernetip-server': 'EtherNet/IP Server',
@@ -69,6 +71,7 @@ export type RemoteConfigStatus = 'configurable' | 'coming-soon' | 'bus-driven';
 export const REMOTE_CONFIG_STATUS: Record<string, RemoteConfigStatus> = {
   gateway: 'configurable',
   modbus: 'configurable', // tag-config is part of the gateway resource
+  gitserver: 'bus-driven', // mantle infra; not configured per-edge
   orchestrator: 'coming-soon',
   telemetry: 'coming-soon',
   gitops: 'coming-soon',
