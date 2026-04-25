@@ -96,6 +96,123 @@ export function getRemoteConfigStatus(serviceType: string): RemoteConfigStatus {
   return REMOTE_CONFIG_STATUS[serviceType.toLowerCase()] ?? 'bus-driven';
 }
 
+/**
+ * Per-service tab definition driving the configurator layout. Each tab is
+ * either `live` (reads runtime state from a local module — has no meaning in
+ * remote mode) or `config` (reads/writes gitops-managed config — works the
+ * same way locally and remotely). When a configurator is opened with
+ * ?target=..., the layout filters out `live` tabs.
+ */
+export type TabScope = 'live' | 'config';
+
+export interface ServiceTab {
+  /** path segment after /services/<serviceType>; empty string = default route */
+  path: string;
+  label: string;
+  scope: TabScope;
+}
+
+export const SERVICE_TABS: Record<string, ServiceTab[]> = {
+  plc: [
+    { path: '', label: 'Config', scope: 'config' },
+    { path: 'info', label: 'Variables', scope: 'live' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  network: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'status', label: 'Status', scope: 'live' },
+    { path: 'config', label: 'Config', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  nftables: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'status', label: 'Status', scope: 'live' },
+    { path: 'config', label: 'Config', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  nats: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'traffic', label: 'Traffic', scope: 'live' },
+  ],
+  mqtt: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'metrics', label: 'Metrics', scope: 'live' },
+    { path: 'settings', label: 'Settings', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  ethernetip: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'devices', label: 'Devices', scope: 'live' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  profinetcontroller: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'devices', label: 'Devices', scope: 'live' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  profinet: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'config', label: 'Config', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  gateway: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'devices', label: 'Sources', scope: 'config' },
+    { path: 'tag-config', label: 'Variables', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  snmp: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'oids', label: 'OIDs', scope: 'live' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  orchestrator: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'modules', label: 'Modules', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  caddy: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'settings', label: 'Settings', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  gitops: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'history', label: 'History', scope: 'live' },
+    { path: 'settings', label: 'Settings', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  telemetry: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'settings', label: 'Settings', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  history: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'trends', label: 'Trends', scope: 'live' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  'sparkplug-host': [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'settings', label: 'Settings', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+  modbus: [
+    { path: '', label: 'Overview', scope: 'live' },
+    { path: 'tag-config', label: 'Tags', scope: 'config' },
+    { path: 'logs', label: 'Logs', scope: 'live' },
+  ],
+};
+
+const DEFAULT_TABS: ServiceTab[] = [
+  { path: '', label: 'Overview', scope: 'live' },
+  { path: 'logs', label: 'Logs', scope: 'live' },
+];
+
+export function getServiceTabs(serviceType: string): ServiceTab[] {
+  return SERVICE_TABS[serviceType.toLowerCase()] ?? DEFAULT_TABS;
+}
+
 /** Get a display name for a moduleId, falling back to a cleaned-up version */
 export function getModuleName(moduleId: string): string {
   return MODULE_NAMES[moduleId] ?? MODULE_NAMES[`tentacle-${moduleId}`] ?? moduleId.replace('tentacle-', '');

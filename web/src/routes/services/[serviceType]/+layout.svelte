@@ -3,6 +3,7 @@
   import {
     getServiceName,
     getRemoteConfigStatus,
+    getServiceTabs,
   } from '$lib/constants/services';
   import { setRemoteTargetContext } from '$lib/contexts/remote-target';
 
@@ -38,23 +39,38 @@
     return `/fleet/${encodeURIComponent(group)}/${encodeURIComponent(node)}`;
   });
 
-  const currentTab = $derived(() => {
+  const allTabs = $derived(getServiceTabs(serviceType));
+
+  // Tabs visible in the current mode. In remote mode we filter to config-only
+  // because the live tabs read runtime state from the *local* tentacle and
+  // would be misleading (or empty) when configuring a remote one.
+  const visibleTabs = $derived(
+    target ? allTabs.filter((t) => t.scope === 'config') : allTabs,
+  );
+
+  // Match the current pathname to a tab, so we can both highlight it and
+  // know whether the active page is live- or config-scoped.
+  const currentTab = $derived.by(() => {
     const path = $page.url?.pathname ?? '';
-    if (path.endsWith('/logs')) return 'logs';
-    if (path.endsWith('/traffic')) return 'traffic';
-    if (path.endsWith('/info')) return 'info';
-    if (path.endsWith('/tag-config')) return 'tag-config';
-    if (path.endsWith('/status')) return 'status';
-    if (path.endsWith('/config')) return 'config';
-    if (path.endsWith('/settings')) return 'settings';
-    if (path.endsWith('/metrics')) return 'metrics';
-    if (path.endsWith('/devices')) return 'devices';
-    if (path.endsWith('/oids')) return 'oids';
-    if (path.endsWith('/modules')) return 'modules';
-    if (path.endsWith('/history')) return 'history';
-    if (path.endsWith('/trends')) return 'trends';
-    return 'default';
+    const segment = path.replace(`/services/${serviceType}`, '').replace(/^\//, '');
+    return allTabs.find((t) => t.path === segment) ?? null;
   });
+
+  // In remote mode, if the user lands on a live-scoped page we show a
+  // placeholder rather than the page content (which would either be empty
+  // or, worse, reflect the local mantle's state).
+  const showLivePlaceholder = $derived(
+    target !== null && currentTab !== null && currentTab.scope === 'live',
+  );
+
+  // First config tab on this module — used as the redirect target from the
+  // live placeholder so the operator gets to something useful in one click.
+  const firstConfigTab = $derived(allTabs.find((t) => t.scope === 'config') ?? null);
+  const firstConfigHref = $derived(
+    firstConfigTab
+      ? `/services/${serviceType}${firstConfigTab.path ? '/' + firstConfigTab.path : ''}${targetSuffix}`
+      : null,
+  );
 </script>
 
 <div class="service-layout" class:remote={target}>
@@ -82,196 +98,15 @@
   </nav>
 
   <div class="service-tabs">
-    {#if serviceType === 'plc'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Config
+    {#each visibleTabs as tab (tab.path)}
+      <a
+        href="/services/{serviceType}{tab.path ? '/' + tab.path : ''}{targetSuffix}"
+        class="tab"
+        class:active={currentTab?.path === tab.path}
+      >
+        {tab.label}
       </a>
-      <a href="/services/{serviceType}/info{targetSuffix}" class="tab" class:active={currentTab() === 'info'}>
-        Variables
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'network'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/status{targetSuffix}" class="tab" class:active={currentTab() === 'status'}>
-        Status
-      </a>
-      <a href="/services/{serviceType}/config{targetSuffix}" class="tab" class:active={currentTab() === 'config'}>
-        Config
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'nftables'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/status{targetSuffix}" class="tab" class:active={currentTab() === 'status'}>
-        Status
-      </a>
-      <a href="/services/{serviceType}/config{targetSuffix}" class="tab" class:active={currentTab() === 'config'}>
-        Config
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'nats'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/traffic{targetSuffix}" class="tab" class:active={currentTab() === 'traffic'}>
-        Traffic
-      </a>
-    {:else if serviceType === 'mqtt'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/metrics{targetSuffix}" class="tab" class:active={currentTab() === 'metrics'}>
-        Metrics
-      </a>
-      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'ethernetip'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/devices{targetSuffix}" class="tab" class:active={currentTab() === 'devices'}>
-        Devices
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'profinetcontroller'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/devices{targetSuffix}" class="tab" class:active={currentTab() === 'devices'}>
-        Devices
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'profinet'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/config{targetSuffix}" class="tab" class:active={currentTab() === 'config'}>
-        Config
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'gateway'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/devices{targetSuffix}" class="tab" class:active={currentTab() === 'devices'}>
-        Sources
-      </a>
-      <a href="/services/{serviceType}/tag-config{targetSuffix}" class="tab" class:active={currentTab() === 'tag-config'}>
-        Variables
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'snmp'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/oids{targetSuffix}" class="tab" class:active={currentTab() === 'oids'}>
-        OIDs
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'orchestrator'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/modules{targetSuffix}" class="tab" class:active={currentTab() === 'modules'}>
-        Modules
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'caddy'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'gitops'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/history{targetSuffix}" class="tab" class:active={currentTab() === 'history'}>
-        History
-      </a>
-      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'telemetry'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'history'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/trends{targetSuffix}" class="tab" class:active={currentTab() === 'trends'}>
-        Trends
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'sparkplug-host'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
-        Settings
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else if serviceType === 'modbus'}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/tag-config{targetSuffix}" class="tab" class:active={currentTab() === 'tag-config'}>
-        Tags
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {:else}
-      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
-        Overview
-      </a>
-      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
-        Logs
-      </a>
-    {/if}
+    {/each}
   </div>
 
   {#if target && remoteConfigStatus === 'bus-driven'}
@@ -290,6 +125,18 @@
       <p>
         <strong>{serviceName}</strong> owns its own settings, but mantle doesn't yet have target-aware endpoints for it. Backend support is planned — this page will activate when it lands.
       </p>
+    </div>
+  {:else if showLivePlaceholder}
+    <div class="remote-placeholder">
+      <h2>Live data not available remotely</h2>
+      <p>
+        The <strong>{currentTab?.label ?? 'this'}</strong> tab reads runtime state from a local module. Streaming live data from the remote tentacle (logs, status, metrics) is planned for a later phase.
+      </p>
+      {#if firstConfigTab && firstConfigHref}
+        <p>
+          <a href={firstConfigHref}>Open {firstConfigTab.label} →</a>
+        </p>
+      {/if}
     </div>
   {:else}
     {@render children()}
