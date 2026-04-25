@@ -7,7 +7,7 @@ STABLE_TAGS = stable,api,orchestrator,gateway,ethernetip,snmp,mqtt,network,gitop
 # Mantle build: stable infrastructure plus mantle-only modules
 # (mqtt-broker, sparkplug-host, history). Excludes edge protocol scanners
 # that aren't useful on a central server.
-MANTLE_TAGS = stable,mantle,api,orchestrator,mqtt,network,gitops,caddy,telemetry
+MANTLE_TAGS = stable,mantle,api,orchestrator,mqtt,network,gitops,gitopsserver,caddy,telemetry
 
 # Version injection via ldflags.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)

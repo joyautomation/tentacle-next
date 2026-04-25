@@ -5,10 +5,37 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/joyautomation/tentacle/internal/topics"
 	ttypes "github.com/joyautomation/tentacle/types"
 )
+
+// Target identifies a remote tentacle for fleet-mode configurator endpoints.
+// Local-mode requests omit ?target=...; remote-mode requests pass
+// ?target=<groupId>/<nodeId> and the API dispatches to git+sparkplug-host.
+type Target struct {
+	Group string
+	Node  string
+}
+
+// IsRemote reports whether the request is targeting a remote tentacle.
+func (t Target) IsRemote() bool { return t.Group != "" && t.Node != "" }
+
+// parseTarget extracts ?target=<group>/<node> from the request. Returns a
+// zero Target (IsRemote() == false) when absent or malformed; the caller
+// then falls through to the existing local-KV path.
+func parseTarget(r *http.Request) Target {
+	raw := strings.TrimSpace(r.URL.Query().Get("target"))
+	if raw == "" {
+		return Target{}
+	}
+	parts := strings.SplitN(raw, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return Target{}
+	}
+	return Target{Group: parts[0], Node: parts[1]}
+}
 
 // writeJSON writes a JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

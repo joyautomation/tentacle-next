@@ -47,6 +47,29 @@ type Node struct {
 	NbirthTime  int64              `json:"nbirthTime,omitempty"`
 	NdeathTime  int64              `json:"ndeathTime,omitempty"`
 	MetricCount int                `json:"metricCount"`
+
+	// Verbs lists the Node Control/* command metric names this node
+	// advertised in its NBIRTH. Mantle UI uses this for capability discovery.
+	Verbs []string `json:"verbs,omitempty"`
+
+	// BrowseCaches holds the most-recent browse result per device, populated
+	// by responses to Node Control/Browse RPC commands. Keyed by deviceId.
+	// Stored as raw JSON so the wire shape matches the local browse-cache API.
+	BrowseCaches map[string]json.RawMessage `json:"-"`
+
+	// rpcInflight maps requestId → reply channel for outstanding RPC calls
+	// targeting this node. Populated when mantle issues NCMD; drained by
+	// the Node Status/<Verb> NDATA handler. Not serialized.
+	rpcInflight map[string]chan rpcResponse `json:"-"`
+}
+
+// rpcResponse carries the decoded JSON envelope of an NDATA Node Status reply.
+// Phase 3 will move this into internal/sparkplug alongside the request shape.
+type rpcResponse struct {
+	RequestID string          `json:"requestId"`
+	OK        bool            `json:"ok"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	Error     string          `json:"error,omitempty"`
 }
 
 // Device is a single device under an edge node.
@@ -406,10 +429,12 @@ func (m *Module) updateInventory(msgType, group, edgeNode, device string, metric
 	n, ok := m.nodes[key]
 	if !ok {
 		n = &Node{
-			GroupID:   group,
-			NodeID:    edgeNode,
-			FirstSeen: now,
-			Devices:   make(map[string]*Device),
+			GroupID:      group,
+			NodeID:       edgeNode,
+			FirstSeen:    now,
+			Devices:      make(map[string]*Device),
+			BrowseCaches: make(map[string]json.RawMessage),
+			rpcInflight:  make(map[string]chan rpcResponse),
 		}
 		m.nodes[key] = n
 	}
@@ -485,6 +510,11 @@ func (m *Module) snapshot() []*Node {
 			dCopy := *d
 			cp.Devices[k] = &dCopy
 		}
+		if len(n.Verbs) > 0 {
+			cp.Verbs = append([]string(nil), n.Verbs...)
+		}
+		cp.BrowseCaches = nil
+		cp.rpcInflight = nil
 		out = append(out, &cp)
 	}
 	return out
