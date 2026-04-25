@@ -7,6 +7,14 @@
   const serviceType = $derived($page.params.serviceType ?? '');
   const serviceName = $derived(getServiceName(serviceType));
 
+  // Remote-target awareness: when ?target=group/node is present, every
+  // configurator on this layout is reading/writing the named edge tentacle's
+  // git repo via mantle, not the local KV. We surface that prominently so an
+  // operator can never confuse "configuring this tentacle" with "configuring
+  // a remote one", and we keep the param sticky on tab links.
+  const target = $derived($page.url?.searchParams.get('target') ?? null);
+  const targetSuffix = $derived(target ? `?target=${encodeURIComponent(target)}` : '');
+
   const currentTab = $derived(() => {
     const path = $page.url?.pathname ?? '';
     if (path.endsWith('/logs')) return 'logs';
@@ -26,206 +34,218 @@
   });
 </script>
 
-<div class="service-layout">
+<div class="service-layout" class:remote={target}>
+  {#if target}
+    <div class="remote-banner" role="status">
+      <span class="remote-dot" aria-hidden="true"></span>
+      <span class="remote-label">Configuring remote tentacle</span>
+      <span class="remote-target mono">{target}</span>
+      <span class="remote-hint">Changes are committed to mantle's git repo for this edge node.</span>
+    </div>
+  {/if}
   <nav class="service-nav">
-    <a href="/" class="back-link">
+    <a href={target ? '/fleet' : '/'} class="back-link">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M19 12H5M12 19l-7-7 7-7"/>
       </svg>
-      Topology
+      {target ? 'Fleet' : 'Topology'}
     </a>
     <span class="separator">/</span>
+    {#if target}
+      <span class="target-chip mono" title="Remote tentacle target">{target}</span>
+      <span class="separator">/</span>
+    {/if}
     <span class="current">{serviceName}</span>
   </nav>
 
   <div class="service-tabs">
     {#if serviceType === 'plc'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Config
       </a>
-      <a href="/services/{serviceType}/info" class="tab" class:active={currentTab() === 'info'}>
+      <a href="/services/{serviceType}/info{targetSuffix}" class="tab" class:active={currentTab() === 'info'}>
         Variables
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'network'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/status" class="tab" class:active={currentTab() === 'status'}>
+      <a href="/services/{serviceType}/status{targetSuffix}" class="tab" class:active={currentTab() === 'status'}>
         Status
       </a>
-      <a href="/services/{serviceType}/config" class="tab" class:active={currentTab() === 'config'}>
+      <a href="/services/{serviceType}/config{targetSuffix}" class="tab" class:active={currentTab() === 'config'}>
         Config
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'nftables'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/status" class="tab" class:active={currentTab() === 'status'}>
+      <a href="/services/{serviceType}/status{targetSuffix}" class="tab" class:active={currentTab() === 'status'}>
         Status
       </a>
-      <a href="/services/{serviceType}/config" class="tab" class:active={currentTab() === 'config'}>
+      <a href="/services/{serviceType}/config{targetSuffix}" class="tab" class:active={currentTab() === 'config'}>
         Config
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'nats'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/traffic" class="tab" class:active={currentTab() === 'traffic'}>
+      <a href="/services/{serviceType}/traffic{targetSuffix}" class="tab" class:active={currentTab() === 'traffic'}>
         Traffic
       </a>
     {:else if serviceType === 'mqtt'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/metrics" class="tab" class:active={currentTab() === 'metrics'}>
+      <a href="/services/{serviceType}/metrics{targetSuffix}" class="tab" class:active={currentTab() === 'metrics'}>
         Metrics
       </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
+      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
         Settings
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'ethernetip'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
+      <a href="/services/{serviceType}/devices{targetSuffix}" class="tab" class:active={currentTab() === 'devices'}>
         Devices
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'profinetcontroller'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
+      <a href="/services/{serviceType}/devices{targetSuffix}" class="tab" class:active={currentTab() === 'devices'}>
         Devices
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'profinet'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/config" class="tab" class:active={currentTab() === 'config'}>
+      <a href="/services/{serviceType}/config{targetSuffix}" class="tab" class:active={currentTab() === 'config'}>
         Config
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'gateway'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/devices" class="tab" class:active={currentTab() === 'devices'}>
+      <a href="/services/{serviceType}/devices{targetSuffix}" class="tab" class:active={currentTab() === 'devices'}>
         Sources
       </a>
-      <a href="/services/{serviceType}/tag-config" class="tab" class:active={currentTab() === 'tag-config'}>
+      <a href="/services/{serviceType}/tag-config{targetSuffix}" class="tab" class:active={currentTab() === 'tag-config'}>
         Variables
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'snmp'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/oids" class="tab" class:active={currentTab() === 'oids'}>
+      <a href="/services/{serviceType}/oids{targetSuffix}" class="tab" class:active={currentTab() === 'oids'}>
         OIDs
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'orchestrator'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/modules" class="tab" class:active={currentTab() === 'modules'}>
+      <a href="/services/{serviceType}/modules{targetSuffix}" class="tab" class:active={currentTab() === 'modules'}>
         Modules
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'caddy'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
+      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
         Settings
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'gitops'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/history" class="tab" class:active={currentTab() === 'history'}>
+      <a href="/services/{serviceType}/history{targetSuffix}" class="tab" class:active={currentTab() === 'history'}>
         History
       </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
+      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
         Settings
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'telemetry'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
+      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
         Settings
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'history'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/trends" class="tab" class:active={currentTab() === 'trends'}>
+      <a href="/services/{serviceType}/trends{targetSuffix}" class="tab" class:active={currentTab() === 'trends'}>
         Trends
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'sparkplug-host'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/settings" class="tab" class:active={currentTab() === 'settings'}>
+      <a href="/services/{serviceType}/settings{targetSuffix}" class="tab" class:active={currentTab() === 'settings'}>
         Settings
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else if serviceType === 'modbus'}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/tag-config" class="tab" class:active={currentTab() === 'tag-config'}>
+      <a href="/services/{serviceType}/tag-config{targetSuffix}" class="tab" class:active={currentTab() === 'tag-config'}>
         Tags
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {:else}
-      <a href="/services/{serviceType}" class="tab" class:active={currentTab() === 'default'}>
+      <a href="/services/{serviceType}{targetSuffix}" class="tab" class:active={currentTab() === 'default'}>
         Overview
       </a>
-      <a href="/services/{serviceType}/logs" class="tab" class:active={currentTab() === 'logs'}>
+      <a href="/services/{serviceType}/logs{targetSuffix}" class="tab" class:active={currentTab() === 'logs'}>
         Logs
       </a>
     {/if}
@@ -269,6 +289,66 @@
   .current {
     color: var(--theme-text);
     font-weight: 500;
+  }
+
+  .mono {
+    font-family: var(--font-mono, monospace);
+  }
+
+  .target-chip {
+    padding: 0.125rem 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--theme-primary);
+    background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-primary) 35%, transparent);
+    border-radius: var(--rounded-md, 0.375rem);
+  }
+
+  .remote-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.625rem 2rem;
+    font-size: 0.8125rem;
+    color: var(--theme-text);
+    background: color-mix(in srgb, var(--theme-primary) 14%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-primary) 40%, transparent);
+  }
+
+  .remote-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--theme-primary);
+    box-shadow: 0 0 0 0.25rem color-mix(in srgb, var(--theme-primary) 25%, transparent);
+    flex-shrink: 0;
+  }
+
+  .remote-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    color: var(--theme-primary);
+  }
+
+  .remote-target {
+    padding: 0.125rem 0.5rem;
+    font-weight: 500;
+    color: var(--theme-text);
+    background: var(--theme-surface);
+    border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
+    border-radius: var(--rounded-md, 0.375rem);
+  }
+
+  .remote-hint {
+    color: var(--theme-text-muted);
+    font-size: 0.75rem;
+  }
+
+  .service-layout.remote {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--theme-primary) 30%, transparent);
   }
 
   .service-tabs {
