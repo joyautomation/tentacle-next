@@ -1,5 +1,5 @@
 import type { PageLoad } from './$types';
-import { api } from '$lib/api/client';
+import { api, withTarget } from '$lib/api/client';
 import type { Variable, ActiveDevice, GatewayConfig } from '$lib/types/gateway';
 import type { ControllerSubscription, NetworkState } from '$lib/types/profinet';
 
@@ -9,8 +9,9 @@ interface Service {
   metadata: Record<string, unknown> | null;
 }
 
-export const load: PageLoad = async ({ params }) => {
+export const load: PageLoad = async ({ params, url }) => {
   const { serviceType } = params;
+  const target = url.searchParams.get('target') || null;
 
   // PROFINET Controller: load subscriptions and network interfaces
   if (serviceType === 'profinetcontroller') {
@@ -45,11 +46,12 @@ export const load: PageLoad = async ({ params }) => {
   // Gateway: load gateway config (includes availableProtocols from active services)
   if (serviceType === 'gateway') {
     try {
-      const result = await api<GatewayConfig>('/gateways/gateway');
+      const result = await api<GatewayConfig>(withTarget('/gateways/gateway', target));
 
       if (result.error) {
         return {
           serviceType,
+          target,
           variables: [],
           deviceInfo: {} as Record<string, ActiveDevice>,
           gatewayConfig: null,
@@ -59,6 +61,7 @@ export const load: PageLoad = async ({ params }) => {
 
       return {
         serviceType,
+        target,
         variables: [],
         deviceInfo: {} as Record<string, ActiveDevice>,
         gatewayConfig: result.data ?? null,
@@ -67,6 +70,7 @@ export const load: PageLoad = async ({ params }) => {
     } catch (e) {
       return {
         serviceType,
+        target,
         variables: [],
         deviceInfo: {} as Record<string, ActiveDevice>,
         gatewayConfig: null,

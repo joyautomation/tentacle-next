@@ -42,6 +42,21 @@ export const load: PageLoad = async ({ params, url }) => {
 
     const config = result.data ?? null;
 
+    // Browse cache + states are live runtime data on the local module.
+    // In remote mode there's no per-target browse engine — skip the fetch
+    // so the page still loads and the operator can see the gitops-managed
+    // device list / variable selections without a stream of 404s.
+    if (target) {
+      return {
+        serviceType,
+        target,
+        gatewayConfig: config,
+        browseCaches: [] as BrowseCache[],
+        browseStates: [] as GatewayBrowseState[],
+        error: null,
+      };
+    }
+
     // Fetch browse caches and browse states in parallel
     const [browseCaches, browseStates] = await Promise.all([
       (async () => {

@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { GatewayConfig, BrowseCache, BrowseCacheUdt, GatewayBrowseState, DeadBandConfig } from '$lib/types/gateway';
-  import { apiPost } from '$lib/api/client';
+  import { apiPost, withTarget } from '$lib/api/client';
   import { subscribe } from '$lib/api/subscribe';
   import { invalidateAll } from '$app/navigation';
   import { slide } from 'svelte/transition';
   import { state as saltState } from '@joyautomation/salt';
   import { ChevronRight, PencilSquare } from '@joyautomation/salt/icons';
+  import { getRemoteTarget } from '$lib/contexts/remote-target';
 
   let { gatewayConfig, browseCaches, browseStates, error }: {
     gatewayConfig: GatewayConfig | null;
@@ -13,6 +14,8 @@
     browseStates: GatewayBrowseState[];
     error: string | null;
   } = $props();
+
+  const remote = getRemoteTarget();
 
   // Build sets of what's currently published (from config)
   const publishedAtomicTags = $derived(new Set(
@@ -433,7 +436,7 @@
           udtVariables.push({ id: tag, deviceId, tag, templateName: udtName, memberTags, memberCipTypes });
         }
 
-        const result = await apiPost(`/gateways/gateway/devices/${deviceId}/sync`, { atomicVariables, udtTemplates, udtVariables });
+        const result = await apiPost(withTarget(`/gateways/gateway/devices/${deviceId}/sync`, remote().target), { atomicVariables, udtTemplates, udtVariables });
 
         if (result.error) {
           saltState.addNotification({ message: result.error.error, type: 'error' });
@@ -461,7 +464,7 @@
       if (device.version) input.version = device.version;
       if (device.community) input.community = device.community;
 
-      const result = await apiPost<{ browseId: string; deviceId: string }>('/gateways/gateway/browse', input);
+      const result = await apiPost<{ browseId: string; deviceId: string }>(withTarget('/gateways/gateway/browse', remote().target), input);
 
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });

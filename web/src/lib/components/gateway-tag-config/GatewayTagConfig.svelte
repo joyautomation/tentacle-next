@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { GatewayConfig, GatewayUdtTemplate, GatewayUdtVariable, BrowseCache, GatewayBrowseState, DeadBandConfig } from '$lib/types/gateway';
-  import { apiPut, apiPost } from '$lib/api/client';
+  import { apiPut, apiPost, withTarget } from '$lib/api/client';
   import { subscribe } from '$lib/api/subscribe';
+  import { getRemoteTarget } from '$lib/contexts/remote-target';
   import { invalidateAll } from '$app/navigation';
   import { fly, slide } from 'svelte/transition';
   import { untrack } from 'svelte';
@@ -18,6 +19,8 @@
     browseStates: GatewayBrowseState[];
     error: string | null;
   } = $props();
+
+  const remote = getRemoteTarget();
 
   let activeSection: ActiveSection | null = $state<ActiveSection | null>(null);
   let activeTab: 'template' | 'instances' = $state('instances');
@@ -789,7 +792,7 @@
     // Persist overrides to server immediately so they survive navigation
     for (const { deviceId } of deviceOriginalNames) {
       const overrides = overridesNext.get(deviceId) ?? {};
-      const result = await apiPut(`/gateways/gateway/devices/${deviceId}/template-overrides`, { overrides });
+      const result = await apiPut(withTarget(`/gateways/gateway/devices/${deviceId}/template-overrides`, remote().target), { overrides });
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
         return;
@@ -1203,7 +1206,7 @@
         input.rootOid = rootOid;
       }
 
-      const result = await apiPost<{ browseId: string; deviceId: string }>('/gateways/gateway/browse', input);
+      const result = await apiPost<{ browseId: string; deviceId: string }>(withTarget('/gateways/gateway/browse', remote().target), input);
 
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
@@ -1230,7 +1233,7 @@
     const info = localBrowseSubs.get(deviceId);
     if (!info) return;
     try {
-      await apiPost(`/gateways/gateway/browse/${info.browseId}/cancel`);
+      await apiPost(withTarget(`/gateways/gateway/browse/${info.browseId}/cancel`, remote().target));
     } catch {
       // Cancellation is best-effort
     }
@@ -1322,7 +1325,7 @@
           udtVariables.push({ id: tag, deviceId, tag, templateName: resolved, memberTags, memberCipTypes, ...(checkedHistoryUdtInstances.has(`${deviceId}::${tag}`) ? { historyEnabled: true } : {}) });
         }
 
-        const syncResult = await apiPost(`/gateways/gateway/devices/${deviceId}/sync`, { atomicVariables, udtTemplates, udtVariables });
+        const syncResult = await apiPost(withTarget(`/gateways/gateway/devices/${deviceId}/sync`, remote().target), { atomicVariables, udtTemplates, udtVariables });
 
         if (syncResult.error) {
           saltState.addNotification({ message: syncResult.error.error, type: 'error' });
@@ -1350,7 +1353,7 @@
         }
 
         if (Object.keys(memberUpdates).length > 0 || Object.keys(instanceUpdates).length > 0) {
-          const udtResult = await apiPut(`/gateways/gateway/udt-config/${tmplName}`, { memberUpdates, instanceUpdates });
+          const udtResult = await apiPut(withTarget(`/gateways/gateway/udt-config/${tmplName}`, remote().target), { memberUpdates, instanceUpdates });
 
           if (udtResult.error) {
             saltState.addNotification({ message: udtResult.error.error, type: 'error' });
@@ -1365,7 +1368,7 @@
         const currentOverrides = device.templateNameOverrides ?? {};
         // Only save if overrides changed
         if (JSON.stringify(overrides) !== JSON.stringify(currentOverrides)) {
-          const overrideResult = await apiPut(`/gateways/gateway/devices/${device.deviceId}/template-overrides`, { overrides });
+          const overrideResult = await apiPut(withTarget(`/gateways/gateway/devices/${device.deviceId}/template-overrides`, remote().target), { overrides });
 
           if (overrideResult.error) {
             saltState.addNotification({ message: overrideResult.error.error, type: 'error' });

@@ -1,15 +1,20 @@
 <script lang="ts">
   import type { GatewayConfig, GatewayDevice } from '$lib/types/gateway';
-  import { apiPut, apiDelete } from '$lib/api/client';
+  import { apiPut, apiDelete, withTarget } from '$lib/api/client';
   import { invalidateAll } from '$app/navigation';
   import { state as saltState } from '@joyautomation/salt';
   import { slide } from 'svelte/transition';
   import { ChevronRight } from '@joyautomation/salt/icons';
+  import { getRemoteTarget } from '$lib/contexts/remote-target';
 
   let { gatewayConfig, error }: {
     gatewayConfig: GatewayConfig | null;
     error: string | null;
   } = $props();
+
+  // Read target from layout context so writes route to the same edge
+  // tentacle's git repo via mantle, matching what the page loader read.
+  const remote = getRemoteTarget();
 
   let showAddDevice = $state(false);
   let saving = $state(false);
@@ -141,7 +146,7 @@
         };
       }
 
-      const result = await apiPut('/gateways/gateway/devices', input);
+      const result = await apiPut(withTarget('/gateways/gateway/devices', remote().target), input);
 
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
@@ -170,7 +175,7 @@
         ...(newDevice.protocol === 'snmp' ? { version: newDevice.version, community: newDevice.community } : {}),
         ...(newDevice.protocol === 'modbus' && newDevice.unitId ? { unitId: parseInt(newDevice.unitId) } : {}),
       };
-      const result = await apiPut('/gateways/gateway/devices', deviceBody);
+      const result = await apiPut(withTarget('/gateways/gateway/devices', remote().target), deviceBody);
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
@@ -189,7 +194,7 @@
   async function removeDevice(deviceId: string) {
     saving = true;
     try {
-      const result = await apiDelete(`/gateways/gateway/devices/${deviceId}`);
+      const result = await apiDelete(withTarget(`/gateways/gateway/devices/${deviceId}`, remote().target));
       if (result.error) {
         saltState.addNotification({ message: result.error.error, type: 'error' });
       } else {
