@@ -12,17 +12,22 @@ usage() {
 Usage: worktree-dev.sh <command> [args]
 
 Commands:
-  init-image          Create/refresh golden image from tentacle-next-dev-1
-  create <name>       Create worktree + dev container for a module/feature
-  destroy <name>      Remove worktree + dev container
-  finish <name>       Merge to main, destroy worktree + container, delete branch
-  list                Show all worktrees and container status
-  sync <name|all>     Merge main into worktree branch(es)
-  deploy <name>       Build and deploy to a specific worktree's container
-  shell <name>        Open a shell in the container
-  logs <name> [svc]   Show logs (default: tentacle service)
-  start <name>        Start a stopped container
-  stop <name>         Stop a running container
+  init-image            Create/refresh golden image from tentacle-next-dev-1
+  create <name>         Create worktree + dev container for a module/feature
+  destroy <name>        Remove worktree + dev container (and peer if any)
+  finish <name>         Merge to main, destroy worktree + container, delete branch
+  list                  Show all worktrees and container status
+  sync <name|all>       Merge main into worktree branch(es)
+  deploy <name>         Build and deploy to the worktree's container (and peer if any)
+  shell <name> [edge]   Open a shell in the container (or peer with 'edge')
+  logs <name> [svc]     Show logs (default: tentacle service)
+  start <name>          Start a stopped container (and peer if any)
+  stop <name>           Stop a running container (and peer if any)
+  peer-create <name>    Create a paired '-edge' container off the same worktree
+                        (for testing mantle ↔ edge interactions from one branch)
+  peer-destroy <name>   Remove just the paired edge container
+  peer-shell <name>     Open a shell in the edge container
+  peer-logs <name> [s]  Show logs from the edge container
 
 Examples:
   worktree-dev.sh create plc
@@ -32,10 +37,13 @@ Examples:
   worktree-dev.sh deploy profinet
   worktree-dev.sh shell modbus
   worktree-dev.sh logs opcua tentacle-web-dev
+  worktree-dev.sh peer-create mantle  # spin up tentacle-next-dev-mantle-edge
+  worktree-dev.sh deploy mantle       # builds once, pushes to both containers
 EOF
 }
 
 container_name() { echo "${CONTAINER_PREFIX}-${1}"; }
+peer_container_name() { echo "${CONTAINER_PREFIX}-${1}-edge"; }
 worktree_path() { echo "${WORKTREE_BASE}/tentacle-next-${1}"; }
 branch_name() { echo "feature/${1}"; }
 
@@ -182,10 +190,19 @@ cmd_destroy() {
   wt_path=$(worktree_path "$name")
   local ct_name
   ct_name=$(container_name "$name")
+  local peer_name
+  peer_name=$(peer_container_name "$name")
   local branch
   branch=$(branch_name "$name")
 
   echo "==> Destroying worktree '$name'..."
+
+  # Stop and delete peer container first (it bind-mounts the same worktree)
+  if incus info "$peer_name" &>/dev/null; then
+    echo "    Deleting peer container $peer_name..."
+    incus delete "$peer_name" --force
+    echo "    Peer container deleted."
+  fi
 
   # Stop and delete container
   if incus info "$ct_name" &>/dev/null; then
@@ -290,23 +307,42 @@ cmd_deploy() {
     CGO_LDFLAGS="-L/tmp/libplctag-check/build/bin_dist" \
     go build -tags all -o bin/tentacle ./cmd/tentacle)
 
-  echo "==> Stopping tentacle service..."
-  incus exec "$ct_name" -- systemctl stop tentacle
+  push_binary_to_container "$ct_name" "$wt_path/bin/tentacle"
 
-  echo "==> Pushing binary..."
-  incus file push "$wt_path/bin/tentacle" "${ct_name}/usr/local/bin/tentacle"
+  # If a paired edge container exists, push to it too — they share the worktree
+  # so a single build serves both. This keeps mantle ↔ edge in lockstep when
+  # iterating on protocol changes between the two sides.
+  local peer_name
+  peer_name=$(peer_container_name "$name")
+  if incus info "$peer_name" &>/dev/null; then
+    echo ""
+    echo "==> Peer container $peer_name detected — deploying there too..."
+    push_binary_to_container "$peer_name" "$wt_path/bin/tentacle"
+  fi
+}
 
-  echo "==> Starting tentacle service..."
-  incus exec "$ct_name" -- systemctl start tentacle
+# Helper used by cmd_deploy and cmd_peer_create. Stops the tentacle service,
+# pushes the new binary, restarts the service, and reports status.
+push_binary_to_container() {
+  local ct="$1"
+  local binary="$2"
 
-  echo "==> Verifying..."
+  echo "==> [$ct] Stopping tentacle service..."
+  incus exec "$ct" -- systemctl stop tentacle
+
+  echo "==> [$ct] Pushing binary..."
+  incus file push "$binary" "${ct}/usr/local/bin/tentacle"
+
+  echo "==> [$ct] Starting tentacle service..."
+  incus exec "$ct" -- systemctl start tentacle
+
   local status
-  status=$(incus exec "$ct_name" -- systemctl is-active tentacle)
+  status=$(incus exec "$ct" -- systemctl is-active tentacle)
   if [ "$status" = "active" ]; then
-    echo "==> Deploy successful. tentacle is running on $ct_name."
+    echo "==> [$ct] Deploy successful — tentacle is running."
   else
-    echo "==> ERROR: tentacle service status is '$status'"
-    incus exec "$ct_name" -- journalctl -u tentacle -n 20 --no-pager
+    echo "==> [$ct] ERROR: tentacle service status is '$status'"
+    incus exec "$ct" -- journalctl -u tentacle -n 20 --no-pager
     exit 1
   fi
 }
@@ -387,31 +423,149 @@ cmd_sync() {
 }
 
 cmd_start() {
-  local ct_name
+  local ct_name peer_name
   ct_name=$(container_name "$1")
+  peer_name=$(peer_container_name "$1")
   incus start "$ct_name"
   echo "==> $ct_name started."
+  if incus info "$peer_name" &>/dev/null; then
+    incus start "$peer_name"
+    echo "==> $peer_name started."
+  fi
 }
 
 cmd_stop() {
-  local ct_name
+  local ct_name peer_name
   ct_name=$(container_name "$1")
+  peer_name=$(peer_container_name "$1")
+  if incus info "$peer_name" &>/dev/null; then
+    incus stop "$peer_name"
+    echo "==> $peer_name stopped."
+  fi
   incus stop "$ct_name"
   echo "==> $ct_name stopped."
 }
 
+# A "peer" container shares the worktree with its primary and bind-mounts the
+# same source. Used to spin up a second tentacle off one branch — e.g. mantle
+# (gitserver host) and edge (gitops client) talking to each other from the
+# same code. Bind-mount means one `deploy <name>` builds once and the peer
+# picks up the same binary automatically (see cmd_deploy).
+cmd_peer_create() {
+  local name="$1"
+  local wt_path
+  wt_path=$(worktree_path "$name")
+  local peer_name
+  peer_name=$(peer_container_name "$name")
+
+  if [ ! -d "$wt_path" ]; then
+    echo "ERROR: Worktree not found at $wt_path. Run 'create $name' first."
+    exit 1
+  fi
+
+  if incus info "$peer_name" &>/dev/null; then
+    echo "==> Peer container $peer_name already exists."
+    return
+  fi
+
+  echo "==> Creating peer edge container '$peer_name' off worktree '$name'..."
+
+  if ! incus image show "$IMAGE_ALIAS" &>/dev/null; then
+    echo "==> Golden image not found. Creating from tentacle-next-dev-1..."
+    cmd_init_image
+  fi
+
+  echo "==> Launching $peer_name from golden image..."
+  incus launch "$IMAGE_ALIAS" "$peer_name" \
+    -c raw.idmap="both 1000 0" \
+    -c security.nesting=true
+
+  # Same bind-mount as the primary — both containers run the same code.
+  incus config device add "$peer_name" tentacle-next-src disk \
+    source="$wt_path" path=/root/tentacle-next shift=true
+
+  incus config device add "$peer_name" eno1 nic network=ne1-net1
+  incus config device add "$peer_name" eno2 nic network=ne1-net2
+
+  echo "    Waiting for container networking..."
+  sleep 5
+
+  # Web deps live on the worktree filesystem, already installed by 'create'.
+  # Clear stale runtime state from the golden image so this peer starts fresh.
+  incus exec "$peer_name" -- bash -c 'rm -rf /var/lib/tentacle/*' 2>/dev/null || true
+
+  incus exec "$peer_name" -- systemctl daemon-reload
+  incus exec "$peer_name" -- systemctl enable tentacle tentacle-web-dev caddy
+  incus exec "$peer_name" -- systemctl restart tentacle || true
+  incus exec "$peer_name" -- systemctl restart tentacle-web-dev || true
+  incus exec "$peer_name" -- systemctl restart caddy || true
+
+  if [ -f "$TS_KEY_FILE" ]; then
+    echo "==> Registering Tailscale as $peer_name..."
+    incus exec "$peer_name" -- bash -c 'rm -rf /var/lib/tailscale/*' 2>/dev/null || true
+    incus exec "$peer_name" -- systemctl restart tailscaled
+    sleep 2
+    incus exec "$peer_name" -- tailscale up --auth-key="$(cat "$TS_KEY_FILE")" --hostname="$peer_name"
+    echo "    Tailscale registered."
+  fi
+
+  local ip ts_ip
+  ip=$(incus list "$peer_name" -f csv -c 4 | grep -oP '[\d.]+(?=.*eth0)' | head -1) || true
+  ts_ip=$(incus exec "$peer_name" -- tailscale ip -4 2>/dev/null) || true
+
+  echo ""
+  echo "==> Peer edge container '$peer_name' is ready (paired with worktree '$name')!"
+  echo "    Source:    $wt_path (shared with $(container_name "$name"))"
+  echo "    LAN:       http://${ip:-<pending>}"
+  echo "    Tailscale: http://${ts_ip:-<not configured>}"
+  echo ""
+  echo "    Deploy:  scripts/worktree-dev.sh deploy $name   (pushes to both)"
+  echo "    Shell:   scripts/worktree-dev.sh peer-shell $name"
+  echo "    Logs:    scripts/worktree-dev.sh peer-logs $name"
+}
+
+cmd_peer_destroy() {
+  local name="$1"
+  local peer_name
+  peer_name=$(peer_container_name "$name")
+
+  if incus info "$peer_name" &>/dev/null; then
+    incus delete "$peer_name" --force
+    echo "==> Peer container $peer_name deleted."
+  else
+    echo "==> Peer container $peer_name not found."
+  fi
+}
+
+cmd_peer_shell() {
+  local peer_name
+  peer_name=$(peer_container_name "$1")
+  exec incus exec "$peer_name" -- bash
+}
+
+cmd_peer_logs() {
+  local peer_name
+  peer_name=$(peer_container_name "$1")
+  local service="${2:-tentacle}"
+  exec incus exec "$peer_name" -- journalctl -u "$service" -n 100 -f
+}
+
 # --- Main ---
 case "${1:-}" in
-  init-image) cmd_init_image ;;
-  create)     cmd_create "${2:?Usage: worktree-dev.sh create <name>}" ;;
-  destroy)    cmd_destroy "${2:?Usage: worktree-dev.sh destroy <name>}" ;;
-  finish)     cmd_finish "${2:?Usage: worktree-dev.sh finish <name>}" ;;
-  list)       cmd_list ;;
-  sync)       cmd_sync "${2:?Usage: worktree-dev.sh sync <name|all>}" ;;
-  deploy)     cmd_deploy "${2:?Usage: worktree-dev.sh deploy <name>}" ;;
-  shell)      cmd_shell "${2:?Usage: worktree-dev.sh shell <name>}" ;;
-  logs)       cmd_logs "${2:?Usage: worktree-dev.sh logs <name>}" "${3:-}" ;;
-  start)      cmd_start "${2:?Usage: worktree-dev.sh start <name>}" ;;
-  stop)       cmd_stop "${2:?Usage: worktree-dev.sh stop <name>}" ;;
-  *)          usage ;;
+  init-image)    cmd_init_image ;;
+  create)        cmd_create "${2:?Usage: worktree-dev.sh create <name>}" ;;
+  destroy)       cmd_destroy "${2:?Usage: worktree-dev.sh destroy <name>}" ;;
+  finish)        cmd_finish "${2:?Usage: worktree-dev.sh finish <name>}" ;;
+  list)          cmd_list ;;
+  sync)          cmd_sync "${2:?Usage: worktree-dev.sh sync <name|all>}" ;;
+  deploy)        cmd_deploy "${2:?Usage: worktree-dev.sh deploy <name>}" ;;
+  shell)         cmd_shell "${2:?Usage: worktree-dev.sh shell <name>}" ;;
+  logs)          cmd_logs "${2:?Usage: worktree-dev.sh logs <name>}" "${3:-}" ;;
+  start)         cmd_start "${2:?Usage: worktree-dev.sh start <name>}" ;;
+  stop)          cmd_stop "${2:?Usage: worktree-dev.sh stop <name>}" ;;
+  peer-create)   cmd_peer_create "${2:?Usage: worktree-dev.sh peer-create <name>}" ;;
+  peer-destroy)  cmd_peer_destroy "${2:?Usage: worktree-dev.sh peer-destroy <name>}" ;;
+  peer-shell)    cmd_peer_shell "${2:?Usage: worktree-dev.sh peer-shell <name>}" ;;
+  peer-logs)     cmd_peer_logs "${2:?Usage: worktree-dev.sh peer-logs <name>}" "${3:-}" ;;
+  *)             usage ;;
 esac
