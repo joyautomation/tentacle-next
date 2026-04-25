@@ -50,3 +50,12 @@ export function apiPost<T>(path: string, body?: unknown): Promise<ApiResult<T>> 
 export function apiDelete<T>(path: string, body?: unknown): Promise<ApiResult<T>> {
   return request<T>(path, { method: 'DELETE', body: body != null ? JSON.stringify(body) : undefined });
 }
+
+// withTarget appends ?target=group/node onto an API path so a configurator
+// request gets dispatched to a remote tentacle on mantle. Pass undefined or
+// empty to fall through to the local-tentacle path.
+export function withTarget(path: string, target?: string | null): string {
+  if (!target) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}target=${encodeURIComponent(target)}`;
+}

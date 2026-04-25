@@ -17,6 +17,7 @@ import (
 // use. RootDir lives under <DataDir>/gitops/server.
 var (
 	gitServerInst *gitops.Server
+	repoStoreInst *gitops.RepoStore
 )
 
 func gitServerRootDir() string {
@@ -28,6 +29,13 @@ func ensureGitServer() *gitops.Server {
 		gitServerInst = gitops.NewServer(gitServerRootDir())
 	}
 	return gitServerInst
+}
+
+func ensureRepoStore() *gitops.RepoStore {
+	if repoStoreInst == nil {
+		repoStoreInst = gitops.NewRepoStore(ensureGitServer())
+	}
+	return repoStoreInst
 }
 
 // mountGitServer wires the smart-HTTP git protocol under /git/ and the repo

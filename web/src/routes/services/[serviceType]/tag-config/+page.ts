@@ -1,15 +1,17 @@
 import type { PageLoad } from './$types';
-import { api } from '$lib/api/client';
+import { api, withTarget } from '$lib/api/client';
 import type { GatewayConfig, BrowseCache, GatewayBrowseState } from '$lib/types/gateway';
 
-export const load: PageLoad = async ({ params }) => {
+export const load: PageLoad = async ({ params, url }) => {
   const { serviceType } = params;
+  const target = url.searchParams.get('target') || null;
 
   if (serviceType === 'modbus') {
     try {
-      const result = await api<GatewayConfig>('/gateways/gateway');
+      const result = await api<GatewayConfig>(withTarget('/gateways/gateway', target));
       return {
         serviceType,
+        target,
         gatewayConfig: result.data ?? null,
         browseCaches: [] as BrowseCache[],
         browseStates: [] as GatewayBrowseState[],
@@ -18,6 +20,7 @@ export const load: PageLoad = async ({ params }) => {
     } catch (e) {
       return {
         serviceType,
+        target,
         gatewayConfig: null,
         browseCaches: [] as BrowseCache[],
         browseStates: [] as GatewayBrowseState[],
@@ -27,14 +30,14 @@ export const load: PageLoad = async ({ params }) => {
   }
 
   if (serviceType !== 'gateway') {
-    return { serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], error: null };
+    return { serviceType, target, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], error: null };
   }
 
   try {
-    const result = await api<GatewayConfig>('/gateways/gateway');
+    const result = await api<GatewayConfig>(withTarget('/gateways/gateway', target));
 
     if (result.error) {
-      return { serviceType, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], error: result.error.error };
+      return { serviceType, target, gatewayConfig: null, browseCaches: [] as BrowseCache[], browseStates: [] as GatewayBrowseState[], error: result.error.error };
     }
 
     const config = result.data ?? null;
@@ -70,6 +73,7 @@ export const load: PageLoad = async ({ params }) => {
 
     return {
       serviceType,
+      target,
       gatewayConfig: config,
       browseCaches,
       browseStates,
@@ -78,6 +82,7 @@ export const load: PageLoad = async ({ params }) => {
   } catch (e) {
     return {
       serviceType,
+      target,
       gatewayConfig: null,
       browseCaches: [] as BrowseCache[],
       browseStates: [] as GatewayBrowseState[],

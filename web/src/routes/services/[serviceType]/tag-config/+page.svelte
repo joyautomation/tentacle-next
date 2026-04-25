@@ -16,6 +16,7 @@
   <ModbusTagConfig
     gatewayConfig={data.gatewayConfig}
     error={data.error}
+    target={data.target}
   />
 {:else}
   <div style="padding: 2rem;">

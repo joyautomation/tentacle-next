@@ -20,7 +20,10 @@ var _ *ttypes.DeadBandConfig
 
 // ─── Gateway Config Helpers ─────────────────────────────────────────────────
 
-func (m *Module) getGatewayConfig(gatewayID string) (*itypes.GatewayConfigKV, error) {
+func (m *Module) getGatewayConfig(t Target, gatewayID string) (*itypes.GatewayConfigKV, error) {
+	if t.IsRemote() {
+		return m.loadGatewayConfigForTarget(t, gatewayID)
+	}
 	data, _, err := m.bus.KVGet(topics.BucketGatewayConfig, gatewayID)
 	if err != nil {
 		return nil, err
@@ -32,7 +35,13 @@ func (m *Module) getGatewayConfig(gatewayID string) (*itypes.GatewayConfigKV, er
 	return &cfg, nil
 }
 
-func (m *Module) putGatewayConfig(cfg *itypes.GatewayConfigKV) error {
+// putGatewayConfig persists the gateway config either to local KV or, when
+// targeting a remote tentacle, to that tentacle's git repo on mantle. msg is
+// the commit message used in remote mode and ignored in local mode.
+func (m *Module) putGatewayConfig(t Target, cfg *itypes.GatewayConfigKV, msg string) error {
+	if t.IsRemote() {
+		return m.saveGatewayConfigForTarget(t, cfg, msg)
+	}
 	cfg.UpdatedAt = time.Now().UnixMilli()
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -82,7 +91,7 @@ func (m *Module) handleListGateways(w http.ResponseWriter, r *http.Request) {
 	}
 	gateways := make([]*itypes.GatewayConfigKV, 0, len(keys))
 	for _, key := range keys {
-		cfg, err := m.getGatewayConfig(key)
+		cfg, err := m.getGatewayConfig(Target{}, key)
 		if err != nil {
 			m.log.Warn("skipping gateway", "key", key, "err", err)
 			continue
@@ -129,7 +138,8 @@ type gatewayResponse struct {
 
 func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
-	cfg, err := m.getGatewayConfig(gatewayID)
+	target := parseTarget(r)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -137,33 +147,37 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 
 	// Auto-sync module sources: discover interfaces and module status
 	// variables so they appear automatically in the Variables page.
-	// Run syncs concurrently — each makes a NATS request that blocks
-	// until the target module replies or the timeout expires.
-	type syncResult struct {
-		changed bool
-	}
-	var syncWg sync.WaitGroup
-	syncResults := make([]syncResult, 3)
+	// Skip auto-sync when targeting a remote tentacle — the modules whose
+	// status we'd be probing aren't running on this mantle process, so the
+	// NATS requests would only timeout. Phase 3's Sparkplug RPC can replace
+	// this with a remote browse if needed.
+	if !target.IsRemote() {
+		type syncResult struct {
+			changed bool
+		}
+		var syncWg sync.WaitGroup
+		syncResults := make([]syncResult, 3)
 
-	syncWg.Add(3)
-	go func() {
-		defer syncWg.Done()
-		syncResults[0].changed = m.syncNetworkInterfaces(cfg)
-	}()
-	go func() {
-		defer syncWg.Done()
-		syncResults[1].changed = m.syncModuleStatus(cfg, gatewayID, "gateway")
-	}()
-	go func() {
-		defer syncWg.Done()
-		syncResults[2].changed = m.syncModuleStatus(cfg, gatewayID, "mqtt")
-	}()
-	syncWg.Wait()
+		syncWg.Add(3)
+		go func() {
+			defer syncWg.Done()
+			syncResults[0].changed = m.syncNetworkInterfaces(cfg)
+		}()
+		go func() {
+			defer syncWg.Done()
+			syncResults[1].changed = m.syncModuleStatus(cfg, gatewayID, "gateway")
+		}()
+		go func() {
+			defer syncWg.Done()
+			syncResults[2].changed = m.syncModuleStatus(cfg, gatewayID, "mqtt")
+		}()
+		syncWg.Wait()
 
-	configChanged := syncResults[0].changed || syncResults[1].changed || syncResults[2].changed
-	if configChanged {
-		if err := m.putGatewayConfig(cfg); err != nil {
-			m.log.Warn("api: failed to persist auto-sync", "error", err)
+		configChanged := syncResults[0].changed || syncResults[1].changed || syncResults[2].changed
+		if configChanged {
+			if err := m.putGatewayConfig(target, cfg, ""); err != nil {
+				m.log.Warn("api: failed to persist auto-sync", "error", err)
+			}
 		}
 	}
 
@@ -192,22 +206,29 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine which protocol modules are running by checking heartbeats.
+	// For remote targets we don't yet know which protocols the edge has;
+	// list the common ones so the configurator UI lets the operator pick.
+	// Phase 3 will replace this with the target's NBIRTH module advert.
 	protocolTypes := []string{"ethernetip", "opcua", "snmp", "modbus", "network", "plc"}
 	var available []string
-	keys, _ := m.bus.KVKeys(topics.BucketHeartbeats)
-	for _, key := range keys {
-		data, _, err := m.bus.KVGet(topics.BucketHeartbeats, key)
-		if err != nil {
-			continue
-		}
-		var hb ttypes.ServiceHeartbeat
-		if err := json.Unmarshal(data, &hb); err != nil {
-			continue
-		}
-		for _, pt := range protocolTypes {
-			if hb.ServiceType == pt {
-				available = append(available, pt)
-				break
+	if target.IsRemote() {
+		available = []string{"modbus", "ethernetip", "snmp", "opcua"}
+	} else {
+		keys, _ := m.bus.KVKeys(topics.BucketHeartbeats)
+		for _, key := range keys {
+			data, _, err := m.bus.KVGet(topics.BucketHeartbeats, key)
+			if err != nil {
+				continue
+			}
+			var hb ttypes.ServiceHeartbeat
+			if err := json.Unmarshal(data, &hb); err != nil {
+				continue
+			}
+			for _, pt := range protocolTypes {
+				if hb.ServiceType == pt {
+					available = append(available, pt)
+					break
+				}
 			}
 		}
 	}
@@ -228,6 +249,7 @@ func (m *Module) handleGetGateway(w http.ResponseWriter, r *http.Request) {
 
 func (m *Module) handleSetGatewayDevice(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 
 	var body struct {
 		DeviceID string `json:"deviceId"`
@@ -242,7 +264,7 @@ func (m *Module) handleSetGatewayDevice(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		// Config doesn't exist yet — create a new one.
 		cfg = &itypes.GatewayConfigKV{
@@ -257,7 +279,7 @@ func (m *Module) handleSetGatewayDevice(w http.ResponseWriter, r *http.Request) 
 
 	cfg.Devices[body.DeviceID] = body.GatewayDeviceConfig
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -268,9 +290,10 @@ func (m *Module) handleSetGatewayDevice(w http.ResponseWriter, r *http.Request) 
 
 func (m *Module) handleDeleteGatewayDevice(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 	deviceID := chi.URLParam(r, "deviceId")
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -296,7 +319,7 @@ func (m *Module) handleDeleteGatewayDevice(w http.ResponseWriter, r *http.Reques
 	// Clean up orphaned templates.
 	removeOrphanedTemplates(cfg)
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -307,6 +330,7 @@ func (m *Module) handleDeleteGatewayDevice(w http.ResponseWriter, r *http.Reques
 
 func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 	deviceID := chi.URLParam(r, "deviceId")
 
 	var body struct {
@@ -317,7 +341,7 @@ func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -332,7 +356,7 @@ func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Reque
 	dev.TemplateNameOverrides = body.Overrides
 	cfg.Devices[deviceID] = dev
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -343,6 +367,7 @@ func (m *Module) handleSetTemplateOverrides(w http.ResponseWriter, r *http.Reque
 
 func (m *Module) handleSetGatewayVariable(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 	variableID := chi.URLParam(r, "variableId")
 
 	var v itypes.GatewayVariableConfig
@@ -352,7 +377,7 @@ func (m *Module) handleSetGatewayVariable(w http.ResponseWriter, r *http.Request
 	}
 	v.ID = variableID
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -361,7 +386,7 @@ func (m *Module) handleSetGatewayVariable(w http.ResponseWriter, r *http.Request
 
 	cfg.Variables[variableID] = v
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -372,6 +397,7 @@ func (m *Module) handleSetGatewayVariable(w http.ResponseWriter, r *http.Request
 
 func (m *Module) handleSetGatewayVariables(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 
 	var vars []itypes.GatewayVariableConfig
 	if err := readJSON(r, &vars); err != nil {
@@ -379,7 +405,7 @@ func (m *Module) handleSetGatewayVariables(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -390,7 +416,7 @@ func (m *Module) handleSetGatewayVariables(w http.ResponseWriter, r *http.Reques
 		cfg.Variables[v.ID] = v
 	}
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -401,9 +427,10 @@ func (m *Module) handleSetGatewayVariables(w http.ResponseWriter, r *http.Reques
 
 func (m *Module) handleDeleteGatewayVariable(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 	variableID := chi.URLParam(r, "variableId")
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -412,7 +439,7 @@ func (m *Module) handleDeleteGatewayVariable(w http.ResponseWriter, r *http.Requ
 
 	delete(cfg.Variables, variableID)
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -423,6 +450,7 @@ func (m *Module) handleDeleteGatewayVariable(w http.ResponseWriter, r *http.Requ
 
 func (m *Module) handleDeleteGatewayVariables(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 
 	var body struct {
 		VariableIDs []string `json:"variableIds"`
@@ -432,7 +460,7 @@ func (m *Module) handleDeleteGatewayVariables(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -443,7 +471,7 @@ func (m *Module) handleDeleteGatewayVariables(w http.ResponseWriter, r *http.Req
 		delete(cfg.Variables, id)
 	}
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -454,9 +482,10 @@ func (m *Module) handleDeleteGatewayVariables(w http.ResponseWriter, r *http.Req
 
 func (m *Module) handleDeleteGatewayUdtVariable(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 	udtVariableID := chi.URLParam(r, "udtVariableId")
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -466,7 +495,7 @@ func (m *Module) handleDeleteGatewayUdtVariable(w http.ResponseWriter, r *http.R
 	delete(cfg.UdtVariables, udtVariableID)
 	removeOrphanedTemplates(cfg)
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -477,6 +506,7 @@ func (m *Module) handleDeleteGatewayUdtVariable(w http.ResponseWriter, r *http.R
 
 func (m *Module) handleDeleteGatewayUdtVariables(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 
 	var body struct {
 		UdtVariableIDs []string `json:"udtVariableIds"`
@@ -486,7 +516,7 @@ func (m *Module) handleDeleteGatewayUdtVariables(w http.ResponseWriter, r *http.
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -498,7 +528,7 @@ func (m *Module) handleDeleteGatewayUdtVariables(w http.ResponseWriter, r *http.
 	}
 	removeOrphanedTemplates(cfg)
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -509,6 +539,7 @@ func (m *Module) handleDeleteGatewayUdtVariables(w http.ResponseWriter, r *http.
 
 func (m *Module) handleSyncGatewayDeviceVariables(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 	deviceID := chi.URLParam(r, "deviceId")
 
 	var body struct {
@@ -521,7 +552,7 @@ func (m *Module) handleSyncGatewayDeviceVariables(w http.ResponseWriter, r *http
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		cfg = &itypes.GatewayConfigKV{
 			GatewayID:    gatewayID,
@@ -565,7 +596,7 @@ func (m *Module) handleSyncGatewayDeviceVariables(w http.ResponseWriter, r *http
 	// Clean up orphaned templates (from other devices that may have been removed).
 	removeOrphanedTemplates(cfg)
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -576,6 +607,7 @@ func (m *Module) handleSyncGatewayDeviceVariables(w http.ResponseWriter, r *http
 
 func (m *Module) handleImportGatewayBrowse(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 
 	var body struct {
 		AtomicVariables []itypes.GatewayVariableConfig    `json:"atomicVariables"`
@@ -587,7 +619,7 @@ func (m *Module) handleImportGatewayBrowse(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		cfg = &itypes.GatewayConfigKV{
 			GatewayID:    gatewayID,
@@ -610,7 +642,7 @@ func (m *Module) handleImportGatewayBrowse(w http.ResponseWriter, r *http.Reques
 		cfg.UdtVariables[uv.ID] = uv
 	}
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}
@@ -621,6 +653,7 @@ func (m *Module) handleImportGatewayBrowse(w http.ResponseWriter, r *http.Reques
 
 func (m *Module) handleUpdateGatewayUdtConfig(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
+	target := parseTarget(r)
 	templateName := chi.URLParam(r, "templateName")
 
 	var body struct {
@@ -634,7 +667,7 @@ func (m *Module) handleUpdateGatewayUdtConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	cfg, err := m.getGatewayConfig(gatewayID)
+	cfg, err := m.getGatewayConfig(target, gatewayID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("gateway %q not found: %v", gatewayID, err))
 		return
@@ -663,7 +696,7 @@ func (m *Module) handleUpdateGatewayUdtConfig(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if err := m.putGatewayConfig(cfg); err != nil {
+	if err := m.putGatewayConfig(target, cfg, ""); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("put gateway config: %v", err))
 		return
 	}

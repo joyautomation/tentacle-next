@@ -2,7 +2,7 @@
   import { invalidateAll } from '$app/navigation';
   import { fly, slide } from 'svelte/transition';
   import { state as saltState } from '@joyautomation/salt';
-  import { apiPost, apiPut } from '$lib/api/client';
+  import { apiPost, apiPut, withTarget } from '$lib/api/client';
   import type {
     GatewayConfig,
     GatewayDevice,
@@ -26,9 +26,11 @@
   let {
     gatewayConfig = null,
     error = null,
+    target = null,
   }: {
     gatewayConfig: GatewayConfig | null;
     error: string | null;
+    target?: string | null;
   } = $props();
 
   // ── Derived data from config ──
@@ -423,7 +425,7 @@
             })),
           }));
 
-        const result = await apiPost(`/gateways/gateway/devices/${deviceId}/sync`, {
+        const result = await apiPost(withTarget(`/gateways/gateway/devices/${deviceId}/sync`, target), {
           atomicVariables: deviceAtomics,
           udtTemplates,
           udtVariables,
@@ -460,7 +462,7 @@
     const host = newDeviceHost.trim();
     if (!deviceId || !host) return;
 
-    const result = await apiPut('/gateways/gateway/devices', {
+    const result = await apiPut(withTarget('/gateways/gateway/devices', target), {
       deviceId,
       protocol: 'modbus',
       host,
