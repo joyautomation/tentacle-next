@@ -24,7 +24,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<ApiResul
       } catch { /* use raw text */ }
       return { error: { error: errorMessage, status: response.status } };
     }
-    const data = await response.json();
+    if (response.status === 204) {
+      return { data: undefined as T };
+    }
+    const text = await response.text();
+    if (!text) {
+      return { data: undefined as T };
+    }
+    const data = JSON.parse(text) as T;
     return { data };
   } catch (e) {
     return { error: { error: e instanceof Error ? e.message : 'Network error', status: 0 } };
