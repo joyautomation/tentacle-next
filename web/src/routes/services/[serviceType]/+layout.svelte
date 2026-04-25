@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { getServiceName } from '$lib/constants/services';
+  import { setRemoteTargetContext } from '$lib/contexts/remote-target';
 
   let { children } = $props();
 
@@ -14,6 +15,14 @@
   // a remote one", and we keep the param sticky on tab links.
   const target = $derived($page.url?.searchParams.get('target') ?? null);
   const targetSuffix = $derived(target ? `?target=${encodeURIComponent(target)}` : '');
+
+  // Expose target state to every child page via context so they can route API
+  // calls through ?target=... and disable live-only UI when remote.
+  setRemoteTargetContext(() => ({
+    target,
+    isRemote: target !== null,
+    targetSuffix,
+  }));
 
   const currentTab = $derived(() => {
     const path = $page.url?.pathname ?? '';
