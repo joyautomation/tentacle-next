@@ -201,6 +201,7 @@ func (m *Module) routes() http.Handler {
 		r.Delete("/plcs/{plcId}/variables/{variableId}", m.handleDeletePlcConfigVariable)
 		r.Get("/plcs/{plcId}/programs", m.handleListPlcPrograms)
 		r.Post("/plcs/{plcId}/programs/validate", m.handleValidatePlcProgram)
+		r.Post("/plcs/{plcId}/lad/parse-rung", m.handleParseLadRung)
 		r.Get("/plcs/{plcId}/lsp", m.handlePlcLSP)
 		r.Get("/plcs/{plcId}/programs/{name}", m.handleGetPlcProgram)
 		r.Put("/plcs/{plcId}/programs/{name}", m.handlePutPlcProgram)

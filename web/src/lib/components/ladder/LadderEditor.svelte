@@ -24,6 +24,8 @@
     wrapInParallel,
     appendContactInSeries,
   } from './mutations.js';
+  import { printRung } from './printer.js';
+  import { apiPost } from '$lib/api/client';
 
   interface Props {
     diagram: Diagram;
@@ -31,6 +33,8 @@
     monitoring?: boolean;
     /** Names available for operand autocomplete + drag-drop targets. */
     variableNames?: string[];
+    /** PLC ID for the parse-rung endpoint. Defaults to "plc" (single-PLC builds). */
+    plcId?: string;
     onChange?: (next: Diagram) => void;
   }
 
@@ -39,8 +43,23 @@
     tagValues = {},
     monitoring = false,
     variableNames = [],
+    plcId = 'plc',
     onChange,
   }: Props = $props();
+
+  type ParseRungResp = {
+    rung?: Rung;
+    diagnostics: { severity: string; message: string; line: number; col: number }[];
+  };
+
+  // Per-rung text editor state. When non-null the panel is visible and
+  // covers the inspector; the rung index is fixed at open time so the
+  // user always edits the rung they double-clicked, even if selection
+  // changes underneath.
+  let editingRungIdx = $state<number | null>(null);
+  let editingText = $state('');
+  let editingError = $state<string | null>(null);
+  let editingBusy = $state(false);
 
   // Stable id so the inspector input can reference its own <datalist>
   // even if multiple LadderEditor instances mount on the page.
@@ -149,6 +168,51 @@
     return { kind: 'logic', rung: diagram.rungs.length - 1, logic: [] };
   }
 
+  function openRungTextEditor() {
+    if (!selection) return;
+    const idx = selection.rung;
+    if (idx < 0 || idx >= diagram.rungs.length) return;
+    editingRungIdx = idx;
+    editingText = printRung(diagram.rungs[idx]);
+    editingError = null;
+  }
+
+  function closeRungTextEditor() {
+    editingRungIdx = null;
+    editingError = null;
+    editingBusy = false;
+  }
+
+  async function applyRungTextEdit() {
+    if (editingRungIdx === null || editingBusy) return;
+    editingBusy = true;
+    editingError = null;
+    const idx = editingRungIdx;
+    const result = await apiPost<ParseRungResp>(
+      `/plcs/${encodeURIComponent(plcId)}/lad/parse-rung`,
+      { source: editingText },
+    );
+    editingBusy = false;
+    if (result.error) {
+      editingError = result.error.error;
+      return;
+    }
+    const data = result.data;
+    if (!data || !data.rung) {
+      const diag = data?.diagnostics?.[0];
+      editingError = diag
+        ? `line ${diag.line}: ${diag.message}`
+        : 'Failed to parse rung';
+      return;
+    }
+    const next: Diagram = {
+      ...diagram,
+      rungs: diagram.rungs.map((r, i) => (i === idx ? data.rung! : r)),
+    };
+    closeRungTextEditor();
+    emit(next);
+  }
+
   // Keyboard shortcuts: Delete/Backspace removes the selected node;
   // Escape clears selection. Inputs are excluded so typing in the
   // operand field doesn't fire shortcuts.
@@ -200,6 +264,7 @@
     onAddCoil={addCoil}
     onWrapParallel={wrapSelectionInParallel}
     onDelete={deleteSelected}
+    onEditRungText={openRungTextEditor}
   />
 
   <div class="ladder-body">
@@ -260,7 +325,33 @@
       {/if}
     </div>
 
-    {#if selection && selectedElement}
+    {#if editingRungIdx !== null}
+      <aside class="inspector rung-text-editor">
+        <h4>Rung {editingRungIdx + 1} — Text</h4>
+        <textarea
+          bind:value={editingText}
+          spellcheck="false"
+          rows={6}
+          aria-label="Rung text DSL"
+          placeholder="rung NO(start) -> OTE(motor)"
+        ></textarea>
+        {#if editingError}
+          <p class="error">{editingError}</p>
+        {/if}
+        <div class="rung-text-actions">
+          <button type="button" onclick={closeRungTextEditor} disabled={editingBusy}>
+            Cancel
+          </button>
+          <button type="button" class="primary" onclick={applyRungTextEdit} disabled={editingBusy}>
+            {editingBusy ? 'Parsing…' : 'Apply'}
+          </button>
+        </div>
+        <p class="muted">
+          Use <code>&amp;</code> for series, <code>|</code> for parallel,
+          <code>NO(x)</code>/<code>NC(x)</code> for contacts, <code>OTE/OTL/OTU(y)</code> for coils.
+        </p>
+      </aside>
+    {:else if selection && selectedElement}
       <aside class="inspector">
         <h4>Selection</h4>
         {#if selectedElement.kind === 'contact' || selectedElement.kind === 'coil'}
@@ -416,6 +507,72 @@
       color: var(--theme-text-muted, #888);
       font-size: 11px;
       margin: 0;
+    }
+  }
+
+  .rung-text-editor {
+    width: 320px;
+
+    textarea {
+      background: var(--theme-background, #111);
+      border: 1px solid var(--theme-border, #333);
+      color: var(--theme-text, #ddd);
+      padding: 8px;
+      border-radius: 4px;
+      font-family: var(--theme-font-mono, ui-monospace, monospace);
+      font-size: 12px;
+      line-height: 1.5;
+      resize: vertical;
+
+      &:focus {
+        outline: none;
+        border-color: var(--theme-primary, #3b82f6);
+      }
+    }
+
+    .error {
+      color: var(--theme-warning, #d97706);
+      font-size: 11px;
+      margin: 0;
+      white-space: pre-wrap;
+    }
+
+    .rung-text-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+
+      button {
+        background: var(--theme-background, #111);
+        border: 1px solid var(--theme-border, #333);
+        color: var(--theme-text, #ddd);
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: var(--theme-font-basic, sans-serif);
+        cursor: pointer;
+
+        &:hover:not(:disabled) {
+          border-color: var(--theme-primary, #3b82f6);
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        &.primary {
+          border-color: var(--theme-primary, #3b82f6);
+          color: var(--theme-primary, #3b82f6);
+        }
+      }
+    }
+
+    code {
+      font-family: var(--theme-font-mono, ui-monospace, monospace);
+      background: var(--theme-background, #111);
+      padding: 0 4px;
+      border-radius: 2px;
     }
   }
 </style>

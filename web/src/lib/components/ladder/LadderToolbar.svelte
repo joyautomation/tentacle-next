@@ -8,6 +8,7 @@
     onAddCoil: (form: 'OTE' | 'OTL' | 'OTU') => void;
     onWrapParallel: () => void;
     onDelete: () => void;
+    onEditRungText: () => void;
   }
 
   let {
@@ -17,10 +18,12 @@
     onAddCoil,
     onWrapParallel,
     onDelete,
+    onEditRungText,
   }: Props = $props();
 
   const canWrapParallel = $derived(selection !== null && selection.kind === 'logic');
   const canDelete = $derived(selection !== null);
+  const canEditText = $derived(selection !== null);
 </script>
 
 <div class="toolbar">
@@ -55,6 +58,17 @@
   </button>
   <button type="button" onclick={() => onAddCoil('OTU')} title="Add unlatch coil (clear on rising power)">
     OTU
+  </button>
+
+  <span class="sep" aria-hidden="true"></span>
+
+  <button
+    type="button"
+    onclick={onEditRungText}
+    disabled={!canEditText}
+    title="Edit selected rung as text DSL"
+  >
+    Edit text
   </button>
 
   <span class="spacer"></span>
