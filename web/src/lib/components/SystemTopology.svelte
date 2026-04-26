@@ -754,7 +754,7 @@
   });
 </script>
 
-<div class="topology-container" bind:this={container}></div>
+<div class="topology-container" class:compact bind:this={container}></div>
 
 <style lang="scss">
   .topology-container {
@@ -762,6 +762,13 @@
     height: calc(100vh - var(--header-height) - 4rem);
     min-height: 400px;
     overflow: hidden;
+
+    /* In compact mode the parent decides the size — fill it instead of
+       trying to claim the viewport. Used by embeds (e.g. fleet detail). */
+    &.compact {
+      height: 100%;
+      min-height: 0;
+    }
 
     :global(svg) {
       display: block;
