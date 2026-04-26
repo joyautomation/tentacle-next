@@ -41,6 +41,9 @@ func (m *Module) mountGitServerAPI(r chi.Router) {
 
 	r.Get("/fleet/nodes", m.handleGetFleetNodes)
 	r.Delete("/fleet/nodes/{group}/{node}", m.handleDeleteFleetNode)
+	r.Get("/fleet/nodes/{group}/{node}/services", m.handleGetFleetNodeServices)
+	r.Put("/fleet/nodes/{group}/{node}/services/{name}", m.handlePutFleetNodeService)
+	r.Delete("/fleet/nodes/{group}/{node}/services/{name}", m.handleDeleteFleetNodeService)
 }
 
 func (m *Module) handleListGitopsRepos(w http.ResponseWriter, r *http.Request) {

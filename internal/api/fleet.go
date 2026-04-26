@@ -5,6 +5,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path"
@@ -15,6 +16,7 @@ import (
 	"github.com/joyautomation/tentacle/internal/gitserver"
 	"github.com/joyautomation/tentacle/internal/manifest"
 	"github.com/joyautomation/tentacle/internal/sparkplug"
+	"gopkg.in/yaml.v3"
 )
 
 // fleetModule is the desired-state view of a module, sourced from the edge's
@@ -118,6 +120,151 @@ func readNodeModules(group, node string) ([]fleetModule, error) {
 // exporting it just for this caller.
 func repoNameForFleet(group, node string) string {
 	return sanitizeRepoSegment(group) + "--" + sanitizeRepoSegment(node)
+}
+
+// handleGetFleetNodeServices returns the parsed Service manifests in a node's
+// gitops repo. This is the same data the list endpoint includes inline, but
+// scoped to a single node so the detail page doesn't have to filter the whole
+// fleet array.
+//
+// GET /api/v1/fleet/nodes/{group}/{node}/services
+func (m *Module) handleGetFleetNodeServices(w http.ResponseWriter, r *http.Request) {
+	group := chi.URLParam(r, "group")
+	node := chi.URLParam(r, "node")
+	if group == "" || node == "" {
+		writeError(w, http.StatusBadRequest, "group and node are required")
+		return
+	}
+	mods, err := readNodeModules(group, node)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"services": mods})
+}
+
+// handlePutFleetNodeService upserts a Service manifest at
+// config/services/{name}.yaml in the node's gitops repo. The body may set any
+// subset of {running, version}; missing fields preserve existing values when
+// the file already exists, or take sensible defaults when creating.
+//
+// PUT /api/v1/fleet/nodes/{group}/{node}/services/{name}
+func (m *Module) handlePutFleetNodeService(w http.ResponseWriter, r *http.Request) {
+	group := chi.URLParam(r, "group")
+	node := chi.URLParam(r, "node")
+	name := chi.URLParam(r, "name")
+	if group == "" || node == "" || name == "" {
+		writeError(w, http.StatusBadRequest, "group, node and name are required")
+		return
+	}
+	if !validServiceName(name) {
+		writeError(w, http.StatusBadRequest, "invalid service name (use a-z 0-9 - _)")
+		return
+	}
+
+	var body struct {
+		Running *bool   `json:"running,omitempty"`
+		Version *string `json:"version,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid body: "+err.Error())
+		return
+	}
+
+	store := gitserver.Store()
+	if store == nil {
+		writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+		return
+	}
+
+	relPath := "config/services/" + name + ".yaml"
+	res := manifest.ServiceResource{
+		ResourceHeader: manifest.ResourceHeader{
+			APIVersion: manifest.APIVersion,
+			Kind:       manifest.KindService,
+			Metadata:   manifest.Metadata{Name: name},
+		},
+		Spec: manifest.ServiceSpec{Version: "latest", Running: true},
+	}
+
+	existing, err := store.ReadFile(group, node, relPath)
+	if err == nil {
+		var prev manifest.ServiceResource
+		if uerr := yaml.Unmarshal(existing, &prev); uerr == nil {
+			res.Spec = prev.Spec
+		}
+	} else if !os.IsNotExist(err) && !strings.Contains(err.Error(), "no such file") {
+		writeError(w, http.StatusInternalServerError, "read existing: "+err.Error())
+		return
+	}
+
+	if body.Running != nil {
+		res.Spec.Running = *body.Running
+	}
+	if body.Version != nil {
+		res.Spec.Version = *body.Version
+	}
+
+	out, err := yaml.Marshal(&res)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "marshal manifest: "+err.Error())
+		return
+	}
+
+	msg := fmt.Sprintf("fleet: update service %s (running=%v version=%s)", name, res.Spec.Running, res.Spec.Version)
+	if err := store.WriteFile(group, node, relPath, out, msg); err != nil {
+		writeError(w, http.StatusInternalServerError, "write manifest: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, fleetModule{ID: name, Version: res.Spec.Version, Running: res.Spec.Running})
+}
+
+// handleDeleteFleetNodeService removes config/services/{name}.yaml from the
+// node's gitops repo. The edge orchestrator's reconciler will tear down the
+// module on the next sync.
+//
+// DELETE /api/v1/fleet/nodes/{group}/{node}/services/{name}
+func (m *Module) handleDeleteFleetNodeService(w http.ResponseWriter, r *http.Request) {
+	group := chi.URLParam(r, "group")
+	node := chi.URLParam(r, "node")
+	name := chi.URLParam(r, "name")
+	if group == "" || node == "" || name == "" {
+		writeError(w, http.StatusBadRequest, "group, node and name are required")
+		return
+	}
+	if !validServiceName(name) {
+		writeError(w, http.StatusBadRequest, "invalid service name")
+		return
+	}
+	store := gitserver.Store()
+	if store == nil {
+		writeError(w, http.StatusServiceUnavailable, "git server module not enabled")
+		return
+	}
+	relPath := "config/services/" + name + ".yaml"
+	msg := fmt.Sprintf("fleet: remove service %s", name)
+	if err := store.DeleteFile(group, node, relPath, msg); err != nil {
+		writeError(w, http.StatusInternalServerError, "delete manifest: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// validServiceName mirrors what we accept as a manifest metadata.name segment
+// AND as a filename — keep this conservative.
+func validServiceName(s string) bool {
+	if s == "" || len(s) > 63 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		ok := (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // handleDeleteFleetNode evicts a node from the sparkplug-host inventory map and

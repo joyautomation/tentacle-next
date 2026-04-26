@@ -183,6 +183,42 @@ func (rs *RepoStore) WriteFile(group, node, path string, data []byte, msg string
 	return nil
 }
 
+// DeleteFile removes <path> in the (group, node) target's repo, commits with
+// the given message, and pushes back to the bare. No-op if the file does not
+// exist (or is already untracked).
+func (rs *RepoStore) DeleteFile(group, node, path, msg string) error {
+	name, err := rs.ensureRepoForTarget(group, node)
+	if err != nil {
+		return err
+	}
+	lk := rs.lockFor(name)
+	lk.Lock()
+	defer lk.Unlock()
+
+	work := rs.workPath(name)
+	full := filepath.Join(work, path)
+	if _, err := os.Stat(full); os.IsNotExist(err) {
+		return nil
+	}
+	if _, err := runGit(work, "rm", "-f", path); err != nil {
+		return fmt.Errorf("git rm: %w", err)
+	}
+	out, err := runGit(work, "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("git status: %w", err)
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil
+	}
+	if _, err := runGit(work, "commit", "-m", msg); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	if _, err := runGit(work, "push", "origin", "HEAD:main"); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+	return nil
+}
+
 // runGit runs `git -C <dir> <args...>` and returns combined output.
 func runGit(dir string, args ...string) (string, error) {
 	full := append([]string{"-C", dir}, args...)
