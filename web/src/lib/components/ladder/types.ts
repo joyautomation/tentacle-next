@@ -128,6 +128,9 @@ export type RungLayout = {
   branchLines: LayoutBranchLine[];
   /** y-coordinate of the main power-flow wire (left rail → outputs). */
   wireY: number;
+  /** x where the rung's content ends (last output's right edge). The
+   *  diagram pass extends this to the shared right rail. */
+  contentRight: number;
   totalWidth: number;
   totalHeight: number;
 };

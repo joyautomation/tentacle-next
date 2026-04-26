@@ -337,10 +337,9 @@ export function layoutRung(rung: Rung, rungIdx: number): RungLayout {
     cursor += r.width;
   });
 
-  // Right rail tap.
-  const rightRail = cursor + LAYOUT.RAIL_RIGHT_MARGIN;
-  wires.push({ x1: cursor, y1: wireY, x2: rightRail, y2: wireY });
-
+  // Right-rail tap is added in layoutDiagram once the shared right-rail
+  // x-coordinate is known across all rungs.
+  const contentRight = cursor;
   const totalHeight = wireY + descent + LAYOUT.RUNG_PADDING_Y;
 
   return {
@@ -348,32 +347,61 @@ export function layoutRung(rung: Rung, rungIdx: number): RungLayout {
     wires,
     branchLines,
     wireY,
-    totalWidth: rightRail,
+    contentRight,
+    totalWidth: contentRight,
     totalHeight,
   };
 }
 
 /**
  * Compute layouts for all rungs in a diagram, stacked vertically.
- * Returns rung layouts plus the y-offset where each rung starts.
+ * Aligns every rung to a shared right rail x and emits the two long
+ * vertical power rails so the renderer can draw them.
  */
 export function layoutDiagram(diagram: Diagram): {
   rungs: { layout: RungLayout; yOffset: number }[];
+  rails: { leftX: number; rightX: number; topY: number; bottomY: number };
   totalWidth: number;
   totalHeight: number;
 } {
   const rungs: { layout: RungLayout; yOffset: number }[] = [];
   let yOffset = 0;
-  let maxWidth = 0;
+  let maxContentRight = 0;
   diagram.rungs.forEach((r, i) => {
     const layout = layoutRung(r, i);
     rungs.push({ layout, yOffset });
-    if (layout.totalWidth > maxWidth) maxWidth = layout.totalWidth;
+    if (layout.contentRight > maxContentRight) maxContentRight = layout.contentRight;
     yOffset += layout.totalHeight + LAYOUT.RUNG_GAP;
   });
+
+  // Shared right rail. Padded so even an empty rung has a visible bus.
+  const rightX = Math.max(maxContentRight, LAYOUT.RAIL_LEFT + 120) + LAYOUT.RAIL_RIGHT_MARGIN;
+  const leftX = LAYOUT.RAIL_LEFT;
+
+  // Patch each rung's wire to extend from its content to the shared rail
+  // and tag totalWidth so the SVG sizes correctly.
+  for (const r of rungs) {
+    r.layout.wires.push({
+      x1: r.layout.contentRight,
+      y1: r.layout.wireY,
+      x2: rightX,
+      y2: r.layout.wireY,
+    });
+    r.layout.totalWidth = rightX;
+  }
+
+  // Vertical rails span from the top of the first rung to the bottom of
+  // the last (or a sensible default when there are no rungs).
+  const topY = 0;
+  const bottomY =
+    rungs.length === 0
+      ? 80
+      : rungs[rungs.length - 1].yOffset + rungs[rungs.length - 1].layout.totalHeight;
+
   return {
     rungs,
-    totalWidth: maxWidth,
-    totalHeight: Math.max(yOffset, 80),
+    rails: { leftX, rightX, topY, bottomY },
+    totalWidth: rightX,
+    totalHeight: Math.max(bottomY, 80),
   };
 }

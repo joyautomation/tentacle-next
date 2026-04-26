@@ -210,6 +210,22 @@
         height={Math.max(160, programLayout.totalHeight + 40)}
         viewBox={`0 0 ${Math.max(containerWidth, programLayout.totalWidth + 40)} ${Math.max(160, programLayout.totalHeight + 40)}`}
       >
+        <!-- Power rails span the full diagram height. -->
+        <line
+          class="rail"
+          x1={programLayout.rails.leftX}
+          y1={programLayout.rails.topY}
+          x2={programLayout.rails.leftX}
+          y2={programLayout.rails.bottomY}
+        />
+        <line
+          class="rail"
+          x1={programLayout.rails.rightX}
+          y1={programLayout.rails.topY}
+          x2={programLayout.rails.rightX}
+          y2={programLayout.rails.bottomY}
+        />
+
         {#each programLayout.rungs as r, idx}
           <g transform={`translate(0, ${r.yOffset})`}>
             <LadderRung
@@ -320,6 +336,12 @@
 
     svg {
       display: block;
+    }
+
+    :global(.rail) {
+      stroke: var(--theme-text, #ddd);
+      stroke-width: 2.5;
+      stroke-linecap: square;
     }
   }
 
