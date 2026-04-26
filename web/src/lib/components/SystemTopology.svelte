@@ -672,9 +672,10 @@
         if (!event.active) simulation?.alphaTarget(0);
         d.fx = null;
         d.fy = null;
-        // Navigate on click (not drag) — skip non-navigable nodes
+        // Navigate on click (not drag) — skip non-navigable nodes.
+        // Compact embeds (fleet detail) are read-only — no navigation.
         const skipTypes = new Set(['device', 'database', 'web', 'nats', 'bus']);
-        if (!dragMoved && !skipTypes.has(d.type)) {
+        if (!compact && !dragMoved && !skipTypes.has(d.type)) {
           goto(`/services/${d.type}`);
         }
       });
@@ -771,6 +772,10 @@
     &.compact {
       height: 100%;
       min-height: 0;
+
+      :global(.node) {
+        cursor: default;
+      }
     }
 
     :global(svg) {
