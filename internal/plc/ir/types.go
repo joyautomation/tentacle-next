@@ -95,11 +95,12 @@ type FBSlot struct {
 	Type *Type
 }
 
-// FBStepCtx is the per-cycle context handed to a built-in FB's Step.
-// Kept narrow: FBs only need wall-clock for timers today; growth
-// should stay deliberate to keep FBs cheap to call.
+// FBStepCtx is the per-cycle context handed to an FB's Step. Built-in FBs
+// only need NowMs (timers); user-defined FBs need Host so their lowered
+// bodies can call other FBs that themselves need NowMs.
 type FBStepCtx struct {
 	NowMs int64
+	Host  Host // nil for tests that don't drive any host-touching FBs
 }
 
 // FBStepFn runs one cycle of an FB. It mutates inst.Slots in place

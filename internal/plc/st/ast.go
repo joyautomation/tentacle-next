@@ -27,14 +27,35 @@ type Posed interface {
 // Program is the top-level PROGRAM ... END_PROGRAM block.
 // TypeDecls are file-scope TYPE ... END_TYPE declarations; they live on
 // Program for convenience even though they conceptually sit outside it.
+//
+// FBDecls are FUNCTION_BLOCK ... END_FUNCTION_BLOCK declarations declared
+// alongside (or in place of) the program body. A "library" file with no
+// PROGRAM keyword and only FB declarations parses into a Program with
+// empty Statements and one or more FBDecls. The engine registers each
+// FBDecl as a user FB so other programs can declare instances of it.
 type Program struct {
 	Name       string
 	TypeDecls  []TypeDecl
 	VarBlocks  []VarBlock
 	Statements []Statement
+	FBDecls    []*FunctionBlockDecl
 }
 
 func (p *Program) nodeType() string { return "Program" }
+
+// FunctionBlockDecl is a FUNCTION_BLOCK Name ... END_FUNCTION_BLOCK
+// declaration. Its VAR_INPUT / VAR_OUTPUT / VAR blocks define the FB's
+// input, output, and internal slots (in that runtime order). Statements
+// are the FB body run once per call.
+type FunctionBlockDecl struct {
+	Name       string
+	VarBlocks  []VarBlock
+	Statements []Statement
+	Pos        Pos
+}
+
+func (f *FunctionBlockDecl) nodeType() string { return "FunctionBlockDecl" }
+func (f *FunctionBlockDecl) NodePos() Pos     { return f.Pos }
 
 // VarBlock is a VAR / VAR_INPUT / VAR_OUTPUT / VAR_IN_OUT / VAR_TEMP / VAR_GLOBAL / VAR_EXTERNAL block.
 type VarBlock struct {

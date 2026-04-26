@@ -197,7 +197,7 @@ func execStmt(ctx *EvalCtx, s Stmt) error {
 			}
 			inst.Slots[in.SlotIdx] = coerceValue(v, n.Def.AllSlots()[in.SlotIdx].Type)
 		}
-		stepCtx := FBStepCtx{NowMs: ctx.Host.NowMs()}
+		stepCtx := FBStepCtx{NowMs: ctx.Host.NowMs(), Host: ctx.Host}
 		return n.Def.Step(inst, stepCtx)
 	}
 	return fmt.Errorf("unknown stmt %T", s)

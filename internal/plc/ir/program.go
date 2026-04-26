@@ -32,6 +32,12 @@ type Program struct {
 	// SlotIndex maps name → index. Populated by the lowering pass.
 	// The VM does not consult this; it exists for introspection (LSP, debug, tests).
 	SlotIndex map[string]int
+
+	// UserFBs are FBDefs declared at the top of this source file via
+	// FUNCTION_BLOCK ... END_FUNCTION_BLOCK. The engine pulls these out
+	// after Lower returns and registers them so other programs can use
+	// them by name.
+	UserFBs []*FBDef
 }
 
 // NewFrame allocates a Frame sized to the program's slot table and populates initial values.

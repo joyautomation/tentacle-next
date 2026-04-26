@@ -21,7 +21,50 @@ func (e *Engine) makeAssertBuiltins() starlark.StringDict {
 		"assert_near":   starlark.NewBuiltin("assert_near", builtinAssertNear),
 		"assert_raises": starlark.NewBuiltin("assert_raises", builtinAssertRaises),
 		"fail":          starlark.NewBuiltin("fail", builtinFail),
+		"run_st":        starlark.NewBuiltin("run_st", e.builtinRunST),
+		"reset_st":      starlark.NewBuiltin("reset_st", e.builtinResetST),
 	}
+}
+
+// builtinRunST executes one scan of a named ST program. State (retained
+// vars, FB instances) is preserved across calls within a single test by
+// keeping the TaskState in a thread-local map keyed by program name.
+// Reset state explicitly with reset_st(name).
+func (e *Engine) builtinRunST(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var name string
+	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, "name", &name); err != nil {
+		return nil, err
+	}
+	if !e.HasProgram(name) {
+		return nil, fmt.Errorf("run_st: program %q not found", name)
+	}
+	states, _ := thread.Local("st_states").(map[string]*TaskState)
+	if states == nil {
+		states = map[string]*TaskState{}
+		thread.SetLocal("st_states", states)
+	}
+	state, ok := states[name]
+	if !ok {
+		state = NewTaskState()
+		states[name] = state
+	}
+	if err := e.Execute(name, "", state); err != nil {
+		return nil, err
+	}
+	return starlark.None, nil
+}
+
+// builtinResetST clears the cached TaskState for an ST program so the
+// next run_st call starts with a fresh frame (useful between sub-tests).
+func (e *Engine) builtinResetST(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var name string
+	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, "name", &name); err != nil {
+		return nil, err
+	}
+	if states, ok := thread.Local("st_states").(map[string]*TaskState); ok {
+		delete(states, name)
+	}
+	return starlark.None, nil
 }
 
 func assertPrefix(msg string) string {

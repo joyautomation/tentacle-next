@@ -22,6 +22,8 @@ type Engine struct {
 	programs   map[string]*compiledProgram
 	stPrograms map[string]*ir.Program // language=="st" programs run on the IR VM
 	stSources  map[string]string      // raw ST source per program, for change-detection
+	stUserFBs  map[string]*ir.FBDef   // FB name -> def, contributed by ST sources
+	stFBOwner  map[string]string      // FB name -> source name that defined it
 	sources    map[string]string
 	builtins   starlark.StringDict
 	vars       *VariableStore
@@ -105,6 +107,8 @@ func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 		programs:   make(map[string]*compiledProgram),
 		stPrograms: make(map[string]*ir.Program),
 		stSources:  make(map[string]string),
+		stUserFBs:  make(map[string]*ir.FBDef),
+		stFBOwner:  make(map[string]string),
 		sources:    make(map[string]string),
 		vars:       vars,
 		host:       newIRHost(vars),
@@ -134,6 +138,11 @@ func (e *Engine) Compile(name, source string) error {
 // source into the typed IR. The resulting *ir.Program is cached under name
 // and dispatched by Execute when the matching task fires. Like Compile,
 // CompileST is mutually exclusive with the Starlark slot for that name.
+//
+// FUNCTION_BLOCK declarations in the source register into the engine-wide
+// user FB registry, visible to other ST programs. When this source's FB
+// set changes, every other ST program is re-lowered so member-access on
+// the new types resolves correctly.
 func (e *Engine) CompileST(name, source string) error {
 	prog, err := st.Parse(source)
 	if err != nil {
@@ -142,17 +151,90 @@ func (e *Engine) CompileST(name, source string) error {
 	if prog.Name == "" {
 		prog.Name = name
 	}
-	irProg, err := st.Lower(prog)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Resolver excludes any FBs previously contributed by this same source
+	// so they don't shadow the redeclarations we're about to compile.
+	resolver := make(map[string]*ir.FBDef, len(e.stUserFBs))
+	for fbName, def := range e.stUserFBs {
+		if e.stFBOwner[fbName] == name {
+			continue
+		}
+		resolver[fbName] = def
+	}
+	irProg, err := st.Lower(prog, resolver)
 	if err != nil {
 		return fmt.Errorf("lower st %s: %w", name, err)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	delete(e.programs, name)
 	delete(e.sources, name)
 	e.stPrograms[name] = irProg
 	e.stSources[name] = source
+
+	// Replace this source's FB contributions in the engine registry.
+	for fbName, owner := range e.stFBOwner {
+		if owner == name {
+			delete(e.stFBOwner, fbName)
+			delete(e.stUserFBs, fbName)
+		}
+	}
+	for _, def := range irProg.UserFBs {
+		e.stUserFBs[def.Name] = def
+		e.stFBOwner[def.Name] = name
+	}
+
+	// Re-lower other ST programs so their references to user FBs (which
+	// may have changed shape) bind to the latest defs. Best-effort: if a
+	// dependent fails to re-lower, log it but keep the new program live.
+	e.relowerOtherSTLocked(name)
 	return nil
+}
+
+// relowerOtherSTLocked re-lowers every ST program except `skip` against
+// the current user FB registry. Caller must hold e.mu.
+func (e *Engine) relowerOtherSTLocked(skip string) {
+	for n, src := range e.stSources {
+		if n == skip {
+			continue
+		}
+		prog, err := st.Parse(src)
+		if err != nil {
+			if e.log != nil {
+				e.log.Warn("re-parse st program failed", "program", n, "error", err)
+			}
+			continue
+		}
+		if prog.Name == "" {
+			prog.Name = n
+		}
+		resolver := make(map[string]*ir.FBDef, len(e.stUserFBs))
+		for fbName, def := range e.stUserFBs {
+			if e.stFBOwner[fbName] == n {
+				continue
+			}
+			resolver[fbName] = def
+		}
+		irProg, err := st.Lower(prog, resolver)
+		if err != nil {
+			if e.log != nil {
+				e.log.Warn("re-lower st program failed", "program", n, "error", err)
+			}
+			continue
+		}
+		e.stPrograms[n] = irProg
+		// Refresh this program's FB contributions too.
+		for fbName, owner := range e.stFBOwner {
+			if owner == n {
+				delete(e.stFBOwner, fbName)
+				delete(e.stUserFBs, fbName)
+			}
+		}
+		for _, def := range irProg.UserFBs {
+			e.stUserFBs[def.Name] = def
+			e.stFBOwner[def.Name] = n
+		}
+	}
 }
 
 // STSource returns the most recently compiled ST source for name, or "" if
@@ -173,6 +255,13 @@ func (e *Engine) Remove(name string) {
 	delete(e.programs, name)
 	delete(e.stPrograms, name)
 	delete(e.stSources, name)
+	for fbName, owner := range e.stFBOwner {
+		if owner == name {
+			delete(e.stFBOwner, fbName)
+			delete(e.stUserFBs, fbName)
+		}
+	}
+	e.relowerOtherSTLocked(name)
 	_ = e.compileAllLocked("")
 }
 

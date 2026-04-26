@@ -72,13 +72,23 @@ func (p *Parser) parseProgram() (*Program, error) {
 	prog := &Program{}
 	nameSet := false
 
-	// Pre-program TYPE declarations are allowed.
+	// File-level prelude: TYPE blocks and FUNCTION_BLOCK declarations may
+	// appear before (or instead of) PROGRAM. A file with no PROGRAM keyword
+	// is treated as a "library": its FBDecls are still registered, and any
+	// remaining bare statements parse into prog.Statements as before.
 	for {
 		switch p.peek().Type {
 		case TokenTypeKw:
 			if err := p.parseTypeBlock(prog); err != nil {
 				return nil, err
 			}
+			continue
+		case TokenFunctionBlock:
+			fb, err := p.parseFunctionBlock()
+			if err != nil {
+				return nil, err
+			}
+			prog.FBDecls = append(prog.FBDecls, fb)
 			continue
 		case TokenProgram:
 			p.advance()
@@ -89,7 +99,7 @@ func (p *Parser) parseProgram() (*Program, error) {
 		break
 	}
 
-	// Body: var blocks, type blocks (rarely but legal), and statements until
+	// Body: var blocks, type blocks, FB declarations, and statements until
 	// END_PROGRAM or EOF.
 	terminator := TokenEOF
 	if nameSet {
@@ -102,6 +112,12 @@ func (p *Parser) parseProgram() (*Program, error) {
 			if err := p.parseTypeBlock(prog); err != nil {
 				return nil, err
 			}
+		case p.peek().Type == TokenFunctionBlock:
+			fb, err := p.parseFunctionBlock()
+			if err != nil {
+				return nil, err
+			}
+			prog.FBDecls = append(prog.FBDecls, fb)
 		case p.isVarBlockStart():
 			vb, err := p.parseVarBlock()
 			if err != nil {
@@ -125,6 +141,48 @@ func (p *Parser) parseProgram() (*Program, error) {
 		prog.Name = "main"
 	}
 	return prog, nil
+}
+
+// parseFunctionBlock parses
+//
+//	FUNCTION_BLOCK Name
+//	    VAR_INPUT ... END_VAR
+//	    VAR_OUTPUT ... END_VAR
+//	    VAR ... END_VAR        (* internals *)
+//	    <body statements>
+//	END_FUNCTION_BLOCK
+//
+// The block kinds are stored on each VarBlock so the lowerer can route
+// them into FBDef.Inputs / Outputs / Internals.
+func (p *Parser) parseFunctionBlock() (*FunctionBlockDecl, error) {
+	startTok := p.advance() // FUNCTION_BLOCK
+	nameTok, err := p.expect(TokenIdent)
+	if err != nil {
+		return nil, fmt.Errorf("FUNCTION_BLOCK: expected name, got %q", nameTok.Literal)
+	}
+	fb := &FunctionBlockDecl{Name: nameTok.Literal, Pos: tokPos(startTok)}
+	for p.peek().Type != TokenEndFunctionBlock && p.peek().Type != TokenEOF {
+		switch {
+		case p.isVarBlockStart():
+			vb, err := p.parseVarBlock()
+			if err != nil {
+				return nil, fmt.Errorf("FUNCTION_BLOCK %s: %w", fb.Name, err)
+			}
+			fb.VarBlocks = append(fb.VarBlocks, *vb)
+		default:
+			stmt, err := p.parseStatement()
+			if err != nil {
+				return nil, fmt.Errorf("FUNCTION_BLOCK %s: %w", fb.Name, err)
+			}
+			if stmt != nil {
+				fb.Statements = append(fb.Statements, stmt)
+			}
+		}
+	}
+	if _, err := p.expect(TokenEndFunctionBlock); err != nil {
+		return nil, fmt.Errorf("FUNCTION_BLOCK %s: expected END_FUNCTION_BLOCK", fb.Name)
+	}
+	return fb, nil
 }
 
 // parseTypeBlock parses TYPE Name : <typeExpr> ; [Name : <typeExpr> ;]* END_TYPE.

@@ -17,10 +17,51 @@ import (
 // every expression, and rewrites array indexing to 0-based form using each
 // array's declared lower bound.
 //
-// Phase 3 intentionally does not lower function or function-block calls;
-// those arrive in Phase 4 alongside the FB runtime and built-in registry.
-func Lower(prog *Program) (*ir.Program, error) {
-	l := newLowerer(prog)
+// Top-level FUNCTION_BLOCK declarations are lowered into FBDef records
+// attached to the resulting ir.Program.UserFBs slice. The engine pulls
+// these out and registers them so other programs can use the FB type.
+//
+// userFBs is an optional registry of previously compiled user FB types
+// keyed by name; when non-nil it's consulted alongside the built-in FB
+// registry for `VAR x : SomeFB;` resolution. Pass nil for standalone
+// compilation (tests, single-file scripts).
+func Lower(prog *Program, userFBs ...map[string]*ir.FBDef) (*ir.Program, error) {
+	var resolver map[string]*ir.FBDef
+	if len(userFBs) > 0 {
+		resolver = userFBs[0]
+	}
+
+	// Pre-pass: build empty FBDef shells for every FUNCTION_BLOCK in this
+	// file so peer FBs and the outer program can reference them by name
+	// during type resolution. The defs are pointers, so populating their
+	// slot tables in the next phase is observed by all earlier references.
+	inFile := map[string]*ir.FBDef{}
+	for _, fbDecl := range prog.FBDecls {
+		if _, dup := inFile[fbDecl.Name]; dup {
+			return nil, fmt.Errorf("duplicate FUNCTION_BLOCK %q", fbDecl.Name)
+		}
+		inFile[fbDecl.Name] = &ir.FBDef{Name: fbDecl.Name, SlotIndex: map[string]int{}}
+	}
+	combined := resolver
+	if len(inFile) > 0 {
+		combined = make(map[string]*ir.FBDef, len(resolver)+len(inFile))
+		for k, v := range resolver {
+			combined[k] = v
+		}
+		for k, v := range inFile {
+			combined[k] = v
+		}
+	}
+
+	// Resolve FB signatures (slot lists + types) before lowering any body
+	// so FB-on-FB member access type-checks regardless of declaration order.
+	for _, fbDecl := range prog.FBDecls {
+		if err := populateFBSignature(fbDecl, inFile[fbDecl.Name], combined); err != nil {
+			return nil, err
+		}
+	}
+
+	l := newLowerer(prog, combined)
 	if err := l.collectTypes(); err != nil {
 		return nil, err
 	}
@@ -32,14 +73,121 @@ func Lower(prog *Program) (*ir.Program, error) {
 		return nil, err
 	}
 	l.irProg.Body = body
+
+	// Lower each FB body now that all FB signatures are known. Bodies may
+	// reference one another (and themselves) since `combined` exposes
+	// every in-file FB plus the engine-supplied registry.
+	for _, fbDecl := range prog.FBDecls {
+		def := inFile[fbDecl.Name]
+		if err := lowerFBBody(fbDecl, def, combined); err != nil {
+			return nil, err
+		}
+		l.irProg.UserFBs = append(l.irProg.UserFBs, def)
+	}
 	return l.irProg, nil
 }
 
+// populateFBSignature resolves the slot types for a FUNCTION_BLOCK and
+// writes them into def.Inputs/Outputs/Internals plus the SlotIndex map.
+// VAR_GLOBAL/VAR_EXTERNAL declarations don't contribute slots — they're
+// only honored during body lowering.
+func populateFBSignature(fbDecl *FunctionBlockDecl, def *ir.FBDef, userFBs map[string]*ir.FBDef) error {
+	sig := newLowerer(&Program{Name: fbDecl.Name}, userFBs)
+	for _, vb := range fbDecl.VarBlocks {
+		for _, vd := range vb.Variables {
+			switch vb.Kind {
+			case "VAR_GLOBAL", "VAR_EXTERNAL":
+				continue
+			}
+			t, err := sig.resolveType(vd.Type)
+			if err != nil {
+				return errAt(vd.Pos, fmt.Errorf("FUNCTION_BLOCK %s VAR %s: %w", fbDecl.Name, vd.Name, err))
+			}
+			slot := ir.FBSlot{Name: vd.Name, Type: t}
+			switch vb.Kind {
+			case "VAR_INPUT":
+				def.Inputs = append(def.Inputs, slot)
+			case "VAR_OUTPUT":
+				def.Outputs = append(def.Outputs, slot)
+			default:
+				def.Internals = append(def.Internals, slot)
+			}
+		}
+	}
+	idx := 0
+	for _, s := range def.Inputs {
+		if _, dup := def.SlotIndex[s.Name]; dup {
+			return fmt.Errorf("FUNCTION_BLOCK %s: duplicate slot %q", fbDecl.Name, s.Name)
+		}
+		def.SlotIndex[s.Name] = idx
+		idx++
+	}
+	for _, s := range def.Outputs {
+		if _, dup := def.SlotIndex[s.Name]; dup {
+			return fmt.Errorf("FUNCTION_BLOCK %s: duplicate slot %q", fbDecl.Name, s.Name)
+		}
+		def.SlotIndex[s.Name] = idx
+		idx++
+	}
+	for _, s := range def.Internals {
+		if _, dup := def.SlotIndex[s.Name]; dup {
+			return fmt.Errorf("FUNCTION_BLOCK %s: duplicate slot %q", fbDecl.Name, s.Name)
+		}
+		def.SlotIndex[s.Name] = idx
+		idx++
+	}
+	return nil
+}
+
+// lowerFBBody compiles the FUNCTION_BLOCK body to IR statements and
+// installs a Step closure on def. The body lowers against a synthetic
+// Program whose VarBlocks are reordered to VAR_INPUT ‖ VAR_OUTPUT ‖ VAR
+// so the resulting Slots match FBInstance.Slots index-for-index.
+func lowerFBBody(fbDecl *FunctionBlockDecl, def *ir.FBDef, userFBs map[string]*ir.FBDef) error {
+	var inputBlocks, outputBlocks, internalBlocks, globalBlocks []VarBlock
+	for _, vb := range fbDecl.VarBlocks {
+		switch vb.Kind {
+		case "VAR_INPUT":
+			inputBlocks = append(inputBlocks, vb)
+		case "VAR_OUTPUT":
+			outputBlocks = append(outputBlocks, vb)
+		case "VAR_GLOBAL", "VAR_EXTERNAL":
+			globalBlocks = append(globalBlocks, vb)
+		default:
+			internalBlocks = append(internalBlocks, vb)
+		}
+	}
+	var blocks []VarBlock
+	blocks = append(blocks, inputBlocks...)
+	blocks = append(blocks, outputBlocks...)
+	blocks = append(blocks, internalBlocks...)
+	blocks = append(blocks, globalBlocks...)
+
+	bodyProg := &Program{Name: fbDecl.Name, VarBlocks: blocks, Statements: fbDecl.Statements}
+	sub := newLowerer(bodyProg, userFBs)
+	if err := sub.collectVars(); err != nil {
+		return fmt.Errorf("FUNCTION_BLOCK %s: %w", fbDecl.Name, err)
+	}
+	stmts, err := sub.lowerStmts(fbDecl.Statements)
+	if err != nil {
+		return fmt.Errorf("FUNCTION_BLOCK %s: %w", fbDecl.Name, err)
+	}
+	sub.irProg.Body = stmts
+	bodyIR := sub.irProg
+
+	def.Step = func(inst *ir.FBInstance, ctx ir.FBStepCtx) error {
+		frame := &ir.Frame{Slots: inst.Slots}
+		return ir.Run(bodyIR, frame, ctx.Host)
+	}
+	return nil
+}
+
 type lowerer struct {
-	prog   *Program
-	irProg *ir.Program
-	scope  map[string]symbol
-	types  map[string]*ir.Type
+	prog    *Program
+	irProg  *ir.Program
+	scope   map[string]symbol
+	types   map[string]*ir.Type
+	userFBs map[string]*ir.FBDef // optional; consulted for FB type resolution
 }
 
 type symbol struct {
@@ -49,12 +197,13 @@ type symbol struct {
 	global string
 }
 
-func newLowerer(prog *Program) *lowerer {
+func newLowerer(prog *Program, userFBs map[string]*ir.FBDef) *lowerer {
 	return &lowerer{
-		prog:   prog,
-		irProg: &ir.Program{Name: prog.Name, SlotIndex: map[string]int{}},
-		scope:  map[string]symbol{},
-		types:  map[string]*ir.Type{},
+		prog:    prog,
+		irProg:  &ir.Program{Name: prog.Name, SlotIndex: map[string]int{}},
+		scope:   map[string]symbol{},
+		types:   map[string]*ir.Type{},
+		userFBs: userFBs,
 	}
 }
 
@@ -110,6 +259,14 @@ func (l *lowerer) resolveType(te TypeExpr) (*ir.Type, error) {
 		// FBInstance with its own slot vector.
 		if fbT := ir.LookupFBType(t.Name); fbT != nil {
 			return fbT, nil
+		}
+		// User-defined FBs supplied by the engine resolve here too. The
+		// caller is responsible for compiling FB-only files first so
+		// the registry is populated before any program references them.
+		if l.userFBs != nil {
+			if def, ok := l.userFBs[t.Name]; ok && def != nil {
+				return &ir.Type{Kind: ir.TypeFB, FB: def}, nil
+			}
 		}
 		return nil, fmt.Errorf("unknown type %q", t.Name)
 	case *ArrayType:
