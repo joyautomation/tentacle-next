@@ -1,6 +1,5 @@
 <script lang="ts">
   import { invalidateAll } from '$app/navigation';
-  import { slide } from 'svelte/transition';
   import { apiPut, apiDelete } from '$lib/api/client';
   import { state as saltState } from '@joyautomation/salt';
   import type { PageData } from './$types';
@@ -21,7 +20,6 @@
 
   let busy = $state<Record<string, boolean>>({});
   let confirmRemove = $state<string | null>(null);
-  let topologyOpen = $state(true);
 
   async function toggleService(svc: FleetModule) {
     busy = { ...busy, [svc.id]: true };
@@ -135,7 +133,7 @@
   </nav>
 
   <header class="page-header">
-    <div class="header-content">
+    <div class="header-info">
       <h1>{data.group} <span class="muted">/</span> {data.node}</h1>
       {#if data.fleetNode}
         <p class="subtitle">
@@ -155,6 +153,19 @@
         </p>
       {/if}
     </div>
+
+    <div class="header-topology">
+      {#if topologyServices.length === 0}
+        <div class="topology-empty muted">No running modules</div>
+      {:else}
+        <SystemTopology
+          services={topologyServices}
+          apiConnected={data.fleetNode?.online ?? false}
+          monolith={true}
+          compact={true}
+        />
+      {/if}
+    </div>
   </header>
 
   {#if data.error}
@@ -163,31 +174,6 @@
       <p>{data.error}</p>
     </div>
   {/if}
-
-  <section class="section">
-    <button class="collapsible-head" onclick={() => (topologyOpen = !topologyOpen)}>
-      <span class="caret" class:open={topologyOpen}>▶</span>
-      <span class="section-title">Topology</span>
-      <span class="section-hint inline">
-        {topologyServices.length} module{topologyServices.length === 1 ? '' : 's'} running
-      </span>
-    </button>
-    {#if topologyOpen}
-      <div class="topology-wrap" transition:slide={{ duration: 180 }}>
-        {#if topologyServices.length === 0}
-          <div class="info-box muted">
-            <p>No running modules to visualise yet. Add modules below.</p>
-          </div>
-        {:else}
-          <SystemTopology
-            services={topologyServices}
-            apiConnected={data.fleetNode?.online ?? false}
-            monolith={true}
-          />
-        {/if}
-      </div>
-    {/if}
-  </section>
 
   <section class="section">
     <h2 class="section-title">Modules</h2>
@@ -302,17 +288,48 @@
   }
 
   .page-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 1.5rem;
+    align-items: start;
     padding-bottom: 1.25rem;
     margin-bottom: 1.5rem;
     border-bottom: 1px solid var(--theme-border);
+
+    @media (max-width: 900px) {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
-  .header-content h1 {
+  .header-info h1 {
     margin: 0 0 0.5rem;
     font-size: 1.5rem;
     font-weight: 600;
     color: var(--theme-text);
     font-family: var(--font-mono, monospace);
+  }
+
+  .header-topology {
+    height: 260px;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md, 0.5rem);
+    background: var(--theme-surface);
+    overflow: hidden;
+    position: relative;
+
+    @media (max-width: 900px) {
+      height: 320px;
+      width: 100%;
+    }
+  }
+
+  .topology-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8125rem;
   }
 
   .subtitle {
@@ -354,41 +371,6 @@
     margin: 0 0 0.875rem;
     color: var(--theme-text-muted);
     font-size: 0.8125rem;
-
-    &.inline { margin: 0 0 0 0.5rem; }
-  }
-
-  .collapsible-head {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    padding: 0.5rem 0;
-    background: transparent;
-    border: none;
-    color: var(--theme-text);
-    cursor: pointer;
-    text-align: left;
-
-    &:hover .section-title { color: var(--theme-primary); }
-  }
-
-  .caret {
-    display: inline-block;
-    font-size: 0.7rem;
-    transition: transform 120ms;
-    color: var(--theme-text-muted);
-
-    &.open { transform: rotate(90deg); }
-  }
-
-  .topology-wrap {
-    margin-top: 0.5rem;
-    border: 1px solid var(--theme-border);
-    border-radius: var(--rounded-md, 0.5rem);
-    background: var(--theme-surface);
-    overflow: hidden;
-    min-height: 360px;
   }
 
   .badge {

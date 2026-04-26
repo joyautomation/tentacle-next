@@ -17,9 +17,11 @@
     services: Service[];
     apiConnected: boolean;
     monolith?: boolean;
+    /** Compact mode: smaller nodes, no subtitles, tighter labels. For embeds. */
+    compact?: boolean;
   }
 
-  let { services, apiConnected, monolith = false }: Props = $props();
+  let { services, apiConnected, monolith = false, compact = false }: Props = $props();
 
   type NodeType = 'nats' | 'bus' | 'api' | 'web' | 'caddy' | 'ethernetip' | 'gitserver' | 'history' | 'database' | 'mqtt' | 'plc' | 'network' | 'nftables' | 'snmp' | 'device' | 'orchestrator';
 
@@ -64,22 +66,25 @@
   }
 
   function getNodeRadius(type: NodeType): number {
-    switch (type) {
-      case 'nats':
-      case 'bus': return 50;
-      case 'api':
-      case 'web': return 40;
-      case 'caddy':
-      case 'ethernetip':
-      case 'ethernetip-server':
-      case 'gateway':
-      case 'mqtt':
-      case 'plc':
-      case 'snmp': return 35;
-      case 'database': return 28;
-      case 'device': return 25;
-      default: return 30;
-    }
+    const base = (() => {
+      switch (type) {
+        case 'nats':
+        case 'bus': return 50;
+        case 'api':
+        case 'web': return 40;
+        case 'caddy':
+        case 'ethernetip':
+        case 'ethernetip-server':
+        case 'gateway':
+        case 'mqtt':
+        case 'plc':
+        case 'snmp': return 35;
+        case 'database': return 28;
+        case 'device': return 25;
+        default: return 30;
+      }
+    })();
+    return compact ? Math.round(base * 0.55) : base;
   }
 
   /** Parse a numeric metadata field that may arrive as number or string. */
@@ -628,21 +633,23 @@
     // Node labels below
     nodeGroups.append('text')
       .attr('text-anchor', 'middle')
-      .attr('y', d => getNodeRadius(d.type) + 16)
+      .attr('y', d => getNodeRadius(d.type) + (compact ? 11 : 16))
       .attr('fill', 'var(--theme-text)')
-      .attr('font-size', '12px')
+      .attr('font-size', compact ? '10px' : '12px')
       .attr('font-weight', '500')
       .attr('opacity', d => !d.connected ? 0.4 : !d.enabled ? 0.5 : 1)
       .text(d => d.name);
 
-    // Node subtitles
-    nodeGroups.append('text')
-      .attr('text-anchor', 'middle')
-      .attr('y', d => getNodeRadius(d.type) + 30)
-      .attr('fill', d => !d.connected ? '#ef4444' : !d.enabled ? 'var(--amber-500, #f59e0b)' : 'var(--theme-text-muted)')
-      .attr('font-size', '10px')
-      .attr('opacity', d => !d.connected ? 0.6 : !d.enabled ? 0.7 : 1)
-      .text(d => d.subtitle || '');
+    // Node subtitles — hidden in compact mode to keep small embeds readable.
+    if (!compact) {
+      nodeGroups.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('y', d => getNodeRadius(d.type) + 30)
+        .attr('fill', d => !d.connected ? '#ef4444' : !d.enabled ? 'var(--amber-500, #f59e0b)' : 'var(--theme-text-muted)')
+        .attr('font-size', '10px')
+        .attr('opacity', d => !d.connected ? 0.6 : !d.enabled ? 0.7 : 1)
+        .text(d => d.subtitle || '');
+    }
 
     // Drag behavior with click-vs-drag discrimination
     let dragMoved = false;
