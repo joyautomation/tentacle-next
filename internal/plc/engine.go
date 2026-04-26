@@ -10,27 +10,34 @@ import (
 	"time"
 
 	"github.com/joyautomation/tentacle/internal/plc/ir"
+	"github.com/joyautomation/tentacle/internal/plc/lad"
 	"github.com/joyautomation/tentacle/internal/plc/st"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 )
 
-// Engine manages Starlark program compilation and execution.
+// Engine manages PLC program compilation and execution across the three
+// supported languages: Starlark (legacy), Structured Text (ST → IR), and
+// Ladder Diagram (LAD → IR). ST and LAD share the IR VM and a unified
+// user-FB registry, so blocks defined in either language are visible to
+// the other.
 type Engine struct {
-	mu         sync.RWMutex
-	programs   map[string]*compiledProgram
-	stPrograms map[string]*ir.Program // language=="st" programs run on the IR VM
-	stSources  map[string]string      // raw ST source per program, for change-detection
-	stUserFBs  map[string]*ir.FBDef   // FB name -> def, contributed by ST sources
-	stFBOwner  map[string]string      // FB name -> source name that defined it
-	sources    map[string]string
-	builtins   starlark.StringDict
-	vars       *VariableStore
-	host       ir.Host // shared host adapter for all ST programs
-	templates  map[string]*itypes.PlcTemplate
-	deviceTags *DeviceTagCache
-	log        *slog.Logger
+	mu          sync.RWMutex
+	programs    map[string]*compiledProgram
+	stPrograms  map[string]*ir.Program // language=="st" programs run on the IR VM
+	stSources   map[string]string      // raw ST source per program, for change-detection
+	ladPrograms map[string]*ir.Program // language=="lad" programs run on the IR VM
+	ladSources  map[string]string      // raw LAD source per program (canonical JSON)
+	userFBs     map[string]*ir.FBDef   // FB name -> def, contributed by ST/LAD sources
+	fbOwner     map[string]string      // FB name -> source name that defined it
+	sources     map[string]string
+	builtins    starlark.StringDict
+	vars        *VariableStore
+	host        ir.Host // shared host adapter for all IR-backed programs
+	templates   map[string]*itypes.PlcTemplate
+	deviceTags  *DeviceTagCache
+	log         *slog.Logger
 
 	errMu     sync.Mutex
 	errObs    map[int]ErrorObserver
@@ -68,9 +75,9 @@ type TaskState struct {
 	// starlark.Thread per tick. Lazily initialised by Engine.Execute.
 	thread *starlark.Thread
 
-	// stFrame retains slot values across scans for ST programs.
-	// Lazily allocated on first scan via NewFrame, then reused.
-	stFrame *ir.Frame
+	// irFrame retains slot values across scans for any IR-backed program
+	// (ST or LAD). Lazily allocated on first scan via NewFrame, then reused.
+	irFrame *ir.Frame
 }
 
 // TimerState tracks a timer's persistent state.
@@ -104,16 +111,18 @@ func NewTaskState() *TaskState {
 // NewEngine creates a new Starlark execution engine.
 func NewEngine(vars *VariableStore, log *slog.Logger) *Engine {
 	e := &Engine{
-		programs:   make(map[string]*compiledProgram),
-		stPrograms: make(map[string]*ir.Program),
-		stSources:  make(map[string]string),
-		stUserFBs:  make(map[string]*ir.FBDef),
-		stFBOwner:  make(map[string]string),
-		sources:    make(map[string]string),
-		vars:       vars,
-		host:       newIRHost(vars),
-		templates:  make(map[string]*itypes.PlcTemplate),
-		log:        log,
+		programs:    make(map[string]*compiledProgram),
+		stPrograms:  make(map[string]*ir.Program),
+		stSources:   make(map[string]string),
+		ladPrograms: make(map[string]*ir.Program),
+		ladSources:  make(map[string]string),
+		userFBs:     make(map[string]*ir.FBDef),
+		fbOwner:     make(map[string]string),
+		sources:     make(map[string]string),
+		vars:        vars,
+		host:        newIRHost(vars),
+		templates:   make(map[string]*itypes.PlcTemplate),
+		log:         log,
 	}
 	e.builtins = e.makeBuiltins()
 	return e
@@ -128,10 +137,26 @@ func (e *Engine) Compile(name, source string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	// A name can only live in one engine at a time. If this program
-	// previously ran as ST, drop the IR copy before compiling Starlark.
+	// previously ran on the IR VM (ST or LAD), drop those entries before
+	// compiling Starlark.
 	delete(e.stPrograms, name)
+	delete(e.stSources, name)
+	delete(e.ladPrograms, name)
+	delete(e.ladSources, name)
+	e.dropFBContributionsLocked(name)
 	e.sources[name] = source
 	return e.compileAllLocked(name)
+}
+
+// dropFBContributionsLocked removes any user-FB defs registered as owned
+// by `source`. Caller must hold e.mu.
+func (e *Engine) dropFBContributionsLocked(source string) {
+	for fbName, owner := range e.fbOwner {
+		if owner == source {
+			delete(e.fbOwner, fbName)
+			delete(e.userFBs, fbName)
+		}
+	}
 }
 
 // CompileST parses, type-checks, and lowers an IEC 61131-3 Structured Text
@@ -154,46 +179,83 @@ func (e *Engine) CompileST(name, source string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Resolver excludes any FBs previously contributed by this same source
-	// so they don't shadow the redeclarations we're about to compile.
-	resolver := make(map[string]*ir.FBDef, len(e.stUserFBs))
-	for fbName, def := range e.stUserFBs {
-		if e.stFBOwner[fbName] == name {
-			continue
-		}
-		resolver[fbName] = def
-	}
+	resolver := e.fbResolverLocked(name)
 	irProg, err := st.Lower(prog, resolver)
 	if err != nil {
 		return fmt.Errorf("lower st %s: %w", name, err)
 	}
 	delete(e.programs, name)
 	delete(e.sources, name)
+	delete(e.ladPrograms, name)
+	delete(e.ladSources, name)
 	e.stPrograms[name] = irProg
 	e.stSources[name] = source
 
-	// Replace this source's FB contributions in the engine registry.
-	for fbName, owner := range e.stFBOwner {
-		if owner == name {
-			delete(e.stFBOwner, fbName)
-			delete(e.stUserFBs, fbName)
-		}
-	}
+	e.dropFBContributionsLocked(name)
 	for _, def := range irProg.UserFBs {
-		e.stUserFBs[def.Name] = def
-		e.stFBOwner[def.Name] = name
+		e.userFBs[def.Name] = def
+		e.fbOwner[def.Name] = name
 	}
 
-	// Re-lower other ST programs so their references to user FBs (which
-	// may have changed shape) bind to the latest defs. Best-effort: if a
-	// dependent fails to re-lower, log it but keep the new program live.
-	e.relowerOtherSTLocked(name)
+	// Re-lower other IR programs so their references to user FBs (which
+	// may have changed shape) bind to the latest defs.
+	e.relowerOtherIRLocked(name)
 	return nil
 }
 
-// relowerOtherSTLocked re-lowers every ST program except `skip` against
-// the current user FB registry. Caller must hold e.mu.
-func (e *Engine) relowerOtherSTLocked(skip string) {
+// CompileLAD parses canonical LAD JSON, lowers it to IR, and stores the
+// result under name. Like CompileST, the slot is mutually exclusive with
+// the Starlark/ST programs of the same name.
+func (e *Engine) CompileLAD(name, source string) error {
+	diag, err := lad.Parse(source)
+	if err != nil {
+		return fmt.Errorf("parse lad %s: %w", name, err)
+	}
+	if diag.Name == "" {
+		diag.Name = name
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	resolver := e.fbResolverLocked(name)
+	irProg, err := lad.Lower(diag, resolver)
+	if err != nil {
+		return fmt.Errorf("lower lad %s: %w", name, err)
+	}
+	delete(e.programs, name)
+	delete(e.sources, name)
+	delete(e.stPrograms, name)
+	delete(e.stSources, name)
+	e.ladPrograms[name] = irProg
+	e.ladSources[name] = source
+
+	// LAD doesn't yet declare user FBs of its own, but drop any prior
+	// contributions in case this name was previously ST.
+	e.dropFBContributionsLocked(name)
+
+	e.relowerOtherIRLocked(name)
+	return nil
+}
+
+// fbResolverLocked returns the user-FB registry minus any contributions
+// owned by `excludeOwner`, so a source can be re-lowered without seeing
+// the stale definitions it's about to replace. Caller must hold e.mu.
+func (e *Engine) fbResolverLocked(excludeOwner string) map[string]*ir.FBDef {
+	resolver := make(map[string]*ir.FBDef, len(e.userFBs))
+	for fbName, def := range e.userFBs {
+		if e.fbOwner[fbName] == excludeOwner {
+			continue
+		}
+		resolver[fbName] = def
+	}
+	return resolver
+}
+
+// relowerOtherIRLocked re-lowers every ST and LAD program except `skip`
+// against the current user FB registry. Best-effort: if a dependent
+// fails to re-lower, log it but keep the new program live.
+// Caller must hold e.mu.
+func (e *Engine) relowerOtherIRLocked(skip string) {
 	for n, src := range e.stSources {
 		if n == skip {
 			continue
@@ -208,13 +270,7 @@ func (e *Engine) relowerOtherSTLocked(skip string) {
 		if prog.Name == "" {
 			prog.Name = n
 		}
-		resolver := make(map[string]*ir.FBDef, len(e.stUserFBs))
-		for fbName, def := range e.stUserFBs {
-			if e.stFBOwner[fbName] == n {
-				continue
-			}
-			resolver[fbName] = def
-		}
+		resolver := e.fbResolverLocked(n)
 		irProg, err := st.Lower(prog, resolver)
 		if err != nil {
 			if e.log != nil {
@@ -224,16 +280,35 @@ func (e *Engine) relowerOtherSTLocked(skip string) {
 		}
 		e.stPrograms[n] = irProg
 		// Refresh this program's FB contributions too.
-		for fbName, owner := range e.stFBOwner {
-			if owner == n {
-				delete(e.stFBOwner, fbName)
-				delete(e.stUserFBs, fbName)
-			}
-		}
+		e.dropFBContributionsLocked(n)
 		for _, def := range irProg.UserFBs {
-			e.stUserFBs[def.Name] = def
-			e.stFBOwner[def.Name] = n
+			e.userFBs[def.Name] = def
+			e.fbOwner[def.Name] = n
 		}
+	}
+	for n, src := range e.ladSources {
+		if n == skip {
+			continue
+		}
+		diag, err := lad.Parse(src)
+		if err != nil {
+			if e.log != nil {
+				e.log.Warn("re-parse lad program failed", "program", n, "error", err)
+			}
+			continue
+		}
+		if diag.Name == "" {
+			diag.Name = n
+		}
+		resolver := e.fbResolverLocked(n)
+		irProg, err := lad.Lower(diag, resolver)
+		if err != nil {
+			if e.log != nil {
+				e.log.Warn("re-lower lad program failed", "program", n, "error", err)
+			}
+			continue
+		}
+		e.ladPrograms[n] = irProg
 	}
 }
 
@@ -255,13 +330,10 @@ func (e *Engine) Remove(name string) {
 	delete(e.programs, name)
 	delete(e.stPrograms, name)
 	delete(e.stSources, name)
-	for fbName, owner := range e.stFBOwner {
-		if owner == name {
-			delete(e.stFBOwner, fbName)
-			delete(e.stUserFBs, fbName)
-		}
-	}
-	e.relowerOtherSTLocked(name)
+	delete(e.ladPrograms, name)
+	delete(e.ladSources, name)
+	e.dropFBContributionsLocked(name)
+	e.relowerOtherIRLocked(name)
 	_ = e.compileAllLocked("")
 }
 
@@ -388,21 +460,31 @@ func extractTopLevelDefs(source string) ([]string, error) {
 // Execute runs a named top-level function in a compiled program with the given
 // TaskState. fnName defaults to "main" when empty for backwards compatibility.
 //
-// ST programs ignore fnName: the entire program body is the entry point and
-// runs against state.stFrame, which retains slot values across scans.
+// ST and LAD programs ignore fnName: the entire program body is the entry point
+// and runs against state.irFrame, which retains slot values across scans.
 func (e *Engine) Execute(name, fnName string, state *TaskState) error {
 	if fnName == "" {
 		fnName = "main"
 	}
 	e.mu.RLock()
 	stProg, isST := e.stPrograms[name]
+	ladProg, isLAD := e.ladPrograms[name]
 	prog, ok := e.programs[name]
 	e.mu.RUnlock()
 	if isST {
-		if state.stFrame == nil {
-			state.stFrame = ir.NewFrame(stProg)
+		if state.irFrame == nil {
+			state.irFrame = ir.NewFrame(stProg)
 		}
-		if err := ir.Run(stProg, state.stFrame, e.host); err != nil {
+		if err := ir.Run(stProg, state.irFrame, e.host); err != nil {
+			return fmt.Errorf("execute %s: %w", name, err)
+		}
+		return nil
+	}
+	if isLAD {
+		if state.irFrame == nil {
+			state.irFrame = ir.NewFrame(ladProg)
+		}
+		if err := ir.Run(ladProg, state.irFrame, e.host); err != nil {
 			return fmt.Errorf("execute %s: %w", name, err)
 		}
 		return nil
@@ -453,15 +535,27 @@ func (e *Engine) EntryFunctions(name string) []string {
 }
 
 // HasProgram returns true if a program with the given name is compiled,
-// regardless of which engine (Starlark or ST/IR) owns it.
+// regardless of which language (Starlark, ST, or LAD) owns it.
 func (e *Engine) HasProgram(name string) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if _, ok := e.programs[name]; ok {
 		return true
 	}
-	_, ok := e.stPrograms[name]
+	if _, ok := e.stPrograms[name]; ok {
+		return true
+	}
+	_, ok := e.ladPrograms[name]
 	return ok
+}
+
+// LADSource returns the most recently compiled LAD source for name, or ""
+// if the program isn't currently registered as a LAD program. Mirrors
+// STSource.
+func (e *Engine) LADSource(name string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.ladSources[name]
 }
 
 // Source returns the currently-compiled source for a program, or "" if the

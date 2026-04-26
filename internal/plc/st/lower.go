@@ -381,7 +381,7 @@ func evalConstValue(e Expression, t *ir.Type) (ir.Value, error) {
 	case *StringLit:
 		return ir.StringVal(n.Value), nil
 	case *TimeLit:
-		return ir.TimeVal(int64(parseTimeMs(n.Raw))), nil
+		return ir.TimeVal(int64(ParseTimeMs(n.Raw))), nil
 	case *TypedLit:
 		return evalConstValue(n.Inner, t)
 	case *UnaryExpr:
@@ -676,7 +676,7 @@ func (l *lowerer) lowerExpr(e Expression) (ir.Expr, error) {
 	case *StringLit:
 		return &ir.Lit{V: ir.StringVal(n.Value), T: ir.StringT}, nil
 	case *TimeLit:
-		return &ir.Lit{V: ir.TimeVal(int64(parseTimeMs(n.Raw))), T: ir.TimeT}, nil
+		return &ir.Lit{V: ir.TimeVal(int64(ParseTimeMs(n.Raw))), T: ir.TimeT}, nil
 	case *TypedLit:
 		return l.lowerExpr(n.Inner)
 	case *IdentExpr:

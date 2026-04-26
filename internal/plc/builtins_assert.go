@@ -12,6 +12,10 @@ import (
 
 // makeAssertBuiltins returns the assertion helpers available to unit tests.
 // These are added to the predeclared scope only when a test is running.
+//
+// run_program / reset_program are the canonical IR-program drivers; they
+// dispatch to whichever language (ST or LAD) currently owns the named
+// program. run_st / reset_st remain as backwards-compatible aliases.
 func (e *Engine) makeAssertBuiltins() starlark.StringDict {
 	return starlark.StringDict{
 		"assert_eq":     starlark.NewBuiltin("assert_eq", builtinAssertEq),
@@ -21,27 +25,31 @@ func (e *Engine) makeAssertBuiltins() starlark.StringDict {
 		"assert_near":   starlark.NewBuiltin("assert_near", builtinAssertNear),
 		"assert_raises": starlark.NewBuiltin("assert_raises", builtinAssertRaises),
 		"fail":          starlark.NewBuiltin("fail", builtinFail),
-		"run_st":        starlark.NewBuiltin("run_st", e.builtinRunST),
-		"reset_st":      starlark.NewBuiltin("reset_st", e.builtinResetST),
+		"run_program":   starlark.NewBuiltin("run_program", e.builtinRunProgram),
+		"reset_program": starlark.NewBuiltin("reset_program", e.builtinResetProgram),
+		"run_st":        starlark.NewBuiltin("run_st", e.builtinRunProgram),
+		"reset_st":      starlark.NewBuiltin("reset_st", e.builtinResetProgram),
+		"run_lad":       starlark.NewBuiltin("run_lad", e.builtinRunProgram),
+		"reset_lad":     starlark.NewBuiltin("reset_lad", e.builtinResetProgram),
 	}
 }
 
-// builtinRunST executes one scan of a named ST program. State (retained
-// vars, FB instances) is preserved across calls within a single test by
-// keeping the TaskState in a thread-local map keyed by program name.
-// Reset state explicitly with reset_st(name).
-func (e *Engine) builtinRunST(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+// builtinRunProgram executes one scan of a named IR-backed program.
+// State (retained vars, FB instances) is preserved across calls within a
+// single test by keeping the TaskState in a thread-local map keyed by
+// program name. Reset state explicitly with reset_program(name).
+func (e *Engine) builtinRunProgram(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var name string
 	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, "name", &name); err != nil {
 		return nil, err
 	}
 	if !e.HasProgram(name) {
-		return nil, fmt.Errorf("run_st: program %q not found", name)
+		return nil, fmt.Errorf("%s: program %q not found", fn.Name(), name)
 	}
-	states, _ := thread.Local("st_states").(map[string]*TaskState)
+	states, _ := thread.Local("ir_states").(map[string]*TaskState)
 	if states == nil {
 		states = map[string]*TaskState{}
-		thread.SetLocal("st_states", states)
+		thread.SetLocal("ir_states", states)
 	}
 	state, ok := states[name]
 	if !ok {
@@ -54,14 +62,15 @@ func (e *Engine) builtinRunST(thread *starlark.Thread, fn *starlark.Builtin, arg
 	return starlark.None, nil
 }
 
-// builtinResetST clears the cached TaskState for an ST program so the
-// next run_st call starts with a fresh frame (useful between sub-tests).
-func (e *Engine) builtinResetST(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+// builtinResetProgram clears the cached TaskState for an IR program so
+// the next run_program call starts with a fresh frame (useful between
+// sub-tests).
+func (e *Engine) builtinResetProgram(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var name string
 	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, "name", &name); err != nil {
 		return nil, err
 	}
-	if states, ok := thread.Local("st_states").(map[string]*TaskState); ok {
+	if states, ok := thread.Local("ir_states").(map[string]*TaskState); ok {
 		delete(states, name)
 	}
 	return starlark.None, nil

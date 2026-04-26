@@ -7,9 +7,10 @@ import (
 	"strings"
 )
 
-// parseTimeMs converts a time literal like "5s", "100ms", "1h30m", "2d4h"
+// ParseTimeMs converts a time literal like "5s", "100ms", "1h30m", "2d4h"
 // to milliseconds. Units scanned left-to-right; unknown units count as ms.
-func parseTimeMs(raw string) int {
+// Exported so peer packages (LAD) can parse the same IEC time literal form.
+func ParseTimeMs(raw string) int {
 	raw = strings.TrimSpace(raw)
 	total := 0
 	i := 0

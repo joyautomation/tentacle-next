@@ -79,6 +79,43 @@ assert_eq(get_num("counter"), 1)
 	}
 }
 
+// TestRunTest_RunProgramDispatchesLAD exercises the generalized
+// run_program builtin against a LAD-backed program — the same harness
+// drives both languages.
+func TestRunTest_RunProgramDispatchesLAD(t *testing.T) {
+	vs := NewVariableStore()
+	addRuntimeBool(vs, "trigger", false)
+	addRuntimeBool(vs, "out", false)
+
+	ladSrc := `{
+		"variables": [
+			{"name": "trigger", "type": "BOOL", "kind": "global"},
+			{"name": "out",     "type": "BOOL", "kind": "global"}
+		],
+		"rungs": [{
+			"logic": {"kind": "contact", "form": "NO", "operand": "trigger"},
+			"outputs": [{"kind": "coil", "form": "OTE", "operand": "out"}]
+		}]
+	}`
+	testSrc := `
+set_var("trigger", True)
+run_program("relay")
+assert_eq(get_bool("out"), True)
+set_var("trigger", False)
+run_program("relay")
+assert_eq(get_bool("out"), False)
+`
+
+	eng := NewEngine(vs, slog.Default())
+	if err := eng.CompileLAD("relay", ladSrc); err != nil {
+		t.Fatalf("CompileLAD: %v", err)
+	}
+	res := eng.RunTest("relay_test", testSrc)
+	if res.Status != "pass" {
+		t.Fatalf("expected pass, got %q (%s)", res.Status, res.Message)
+	}
+}
+
 // TestRunTest_RunSTUnknownProgram surfaces a clear error when the
 // referenced program isn't registered.
 func TestRunTest_RunSTUnknownProgram(t *testing.T) {
