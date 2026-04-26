@@ -101,18 +101,36 @@
   // for remote nodes yet, so this renders the *desired* topology — what's
   // intended to run on the edge. Live status will fill in via Sparkplug
   // (Phase 3).
-  const topologyServices = $derived(
-    data.services
+  //
+  // We synthesize an `api` entry because monolith edges always serve the API
+  // (it's compiled in, never a desired-service entry). This makes
+  // SystemTopology render the UI → API → Bus chain the same way the main
+  // local topology does.
+  const topologyServices = $derived.by(() => {
+    const startedAt = data.fleetNode?.firstSeen ?? Date.now();
+    const fromGitops = data.services
       .filter((m) => m.running)
       .map((m) => ({
         serviceType: m.id,
         moduleId: m.id,
-        startedAt: data.fleetNode?.firstSeen ?? Date.now(),
+        startedAt,
         version: m.version ?? null,
         metadata: null as Record<string, unknown> | null,
-        enabled: m.running,
-      })),
-  );
+        enabled: true,
+      }));
+    if (fromGitops.length === 0) return fromGitops;
+    return [
+      {
+        serviceType: 'api',
+        moduleId: 'api',
+        startedAt,
+        version: null,
+        metadata: null as Record<string, unknown> | null,
+        enabled: true,
+      },
+      ...fromGitops,
+    ];
+  });
 
   function formatRelative(ts: number): string {
     if (!ts) return 'never';
