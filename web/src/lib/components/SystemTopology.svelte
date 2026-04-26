@@ -434,10 +434,13 @@
         if ((n.x ?? 0) + r > x1) x1 = (n.x ?? 0) + r;
         if ((n.y ?? 0) + r > y1) y1 = (n.y ?? 0) + r;
       }
-      const padding = 80;
+      const padding = compact ? 30 : 80;
       const bw = x1 - x0 + padding * 2;
       const bh = y1 - y0 + padding * 2;
-      const scale = Math.min(1.0, Math.min(width / bw, height / bh));
+      // Compact embeds get a slightly punchier starting zoom — tight panels
+      // look empty when capped at 1.0.
+      const maxScale = compact ? 1.5 : 1.0;
+      const scale = Math.min(maxScale, Math.min(width / bw, height / bh));
       const tx = width / 2 - scale * ((x0 + x1) / 2);
       const ty = height / 2 - scale * ((y0 + y1) / 2);
       const transform = d3.zoomIdentity.translate(tx, ty).scale(scale);
