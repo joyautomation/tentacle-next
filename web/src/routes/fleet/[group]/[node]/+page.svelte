@@ -220,9 +220,9 @@
                   <span class="name-id mono">{row.serviceType}</span>
                 </div>
 
-                <div class="module-status">
+                <div class="module-actions">
                   {#if inst}
-                    <label class="toggle" title="Toggle running state">
+                    <label class="toggle" title="Disable to keep config but stop the module">
                       <input
                         type="checkbox"
                         checked={inst.running}
@@ -230,22 +230,16 @@
                         onchange={() => toggleService(inst)}
                       />
                       <span class="toggle-label" class:running={inst.running}>
-                        {inst.running ? 'Running' : 'Stopped'}
+                        {inst.running ? 'Enabled' : 'Disabled'}
                       </span>
                     </label>
-                  {:else}
-                    <span class="status-text muted">Not installed</span>
-                  {/if}
-                </div>
 
-                <div class="module-actions">
-                  {#if inst && isConfigurable}
-                    <a class="ghost-btn" href={configureHref(row.serviceType)}>Configure</a>
-                  {:else if inst && isComingSoon}
-                    <span class="soon-tag" title="Configurator UI coming soon">Configure (soon)</span>
-                  {/if}
+                    {#if isConfigurable}
+                      <a class="ghost-btn" href={configureHref(row.serviceType)}>Configure</a>
+                    {:else if isComingSoon}
+                      <span class="soon-tag" title="Configurator UI coming soon">Configure (soon)</span>
+                    {/if}
 
-                  {#if inst}
                     {#if confirmRemove === row.serviceType}
                       <button
                         class="danger-btn"
@@ -431,7 +425,7 @@
 
   .module-row {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto;
     align-items: center;
     gap: 1rem;
     padding: 0.625rem 0.875rem;
@@ -460,18 +454,6 @@
   .name-id {
     font-size: 0.75rem;
     color: var(--theme-text-muted);
-  }
-
-  .module-status {
-    min-width: 7rem;
-    text-align: right;
-  }
-
-  .status-text {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 600;
   }
 
   .module-actions {
