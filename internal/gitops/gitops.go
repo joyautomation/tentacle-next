@@ -103,11 +103,16 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.repo.EnsureIdentity()
 		m.log.Info("gitops: repo initialized", "dir", cloneDir, "remote", m.cfg.RepoURL, "branch", m.cfg.Branch)
 
-		// Do an initial sync from git (apply remote state).
+		// Initial reconciliation: always apply on-disk manifests to KV, even if
+		// no "new" remote changes were pulled. After a fresh clone, KV may hold
+		// stale local state from the persistence file while the repo holds the
+		// authoritative desired state. Without this forced apply, the syncToGit
+		// below would export stale KV and overwrite the just-cloned files.
 		configPath := filepath.Join(cloneDir, m.cfg.Path)
-		syncFromGit(b, m.repo, configPath, m.log)
+		applyFromDisk(b, configPath, m.log)
 
-		// Also do an initial export to git (capture any local state not in git).
+		// Now export KV → disk to capture any local state not yet in git.
+		// Since apply just converged KV with disk, this should typically be a no-op.
 		syncToGit(b, m.repo, configPath, m.cfg.AutoPush, m.log)
 	}
 

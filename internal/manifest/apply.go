@@ -33,24 +33,43 @@ type SkippedResource struct {
 
 // Apply writes resources to the appropriate KV buckets and bus targets.
 // The source parameter is used for change tracking (e.g., "gui", "cli", "gitops").
+//
+// Per-resource resilience: if validation or apply fails for one resource, that
+// resource is recorded in result.Skipped and the loop continues with the rest.
+// This prevents one bad manifest in a gitops repo from blocking every other
+// resource on the node. The returned error is non-nil only if the whole batch
+// could not be processed (currently never — kept in the signature for future
+// fatal cases).
 func Apply(b bus.Bus, resources []any, source string) (*ApplyResult, error) {
-	if err := Validate(resources); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
-	}
-
 	result := &ApplyResult{}
 
 	for _, res := range resources {
+		kind := resourceKindOf(res)
+		name := resourceNameOf(res)
+
+		if err := ValidateResource(res); err != nil {
+			result.Skipped = append(result.Skipped, SkippedResource{
+				Kind: kind, Name: name,
+				Reason: "validation: " + err.Error(),
+			})
+			slog.Warn("apply: skipping invalid resource", "kind", kind, "name", name, "error", err)
+			continue
+		}
+
 		switch r := res.(type) {
 		case *GatewayResource:
 			if err := applyGateway(b, r, source); err != nil {
-				return result, fmt.Errorf("apply Gateway %q: %w", r.Metadata.Name, err)
+				result.Skipped = append(result.Skipped, SkippedResource{Kind: KindGateway, Name: r.Metadata.Name, Reason: err.Error()})
+				slog.Warn("apply: gateway failed", "name", r.Metadata.Name, "error", err)
+				continue
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindGateway, Name: r.Metadata.Name})
 
 		case *ServiceResource:
 			if err := applyService(b, r, source); err != nil {
-				return result, fmt.Errorf("apply Service %q: %w", r.Metadata.Name, err)
+				result.Skipped = append(result.Skipped, SkippedResource{Kind: KindService, Name: r.Metadata.Name, Reason: err.Error()})
+				slog.Warn("apply: service failed", "name", r.Metadata.Name, "error", err)
+				continue
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindService, Name: r.Metadata.Name})
 
@@ -61,25 +80,67 @@ func Apply(b bus.Bus, resources []any, source string) (*ApplyResult, error) {
 
 		case *NftablesResource:
 			if err := applyNftables(b, r, source); err != nil {
-				return result, fmt.Errorf("apply Nftables %q: %w", r.Metadata.Name, err)
+				result.Skipped = append(result.Skipped, SkippedResource{Kind: KindNftables, Name: r.Metadata.Name, Reason: err.Error()})
+				slog.Warn("apply: nftables failed", "name", r.Metadata.Name, "error", err)
+				continue
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindNftables, Name: r.Metadata.Name})
 
 		case *NetworkResource:
 			if err := applyNetwork(b, r, source); err != nil {
-				return result, fmt.Errorf("apply Network %q: %w", r.Metadata.Name, err)
+				result.Skipped = append(result.Skipped, SkippedResource{Kind: KindNetwork, Name: r.Metadata.Name, Reason: err.Error()})
+				slog.Warn("apply: network failed", "name", r.Metadata.Name, "error", err)
+				continue
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindNetwork, Name: r.Metadata.Name})
 
 		case *PlcResource:
 			if err := applyPlc(b, r, source); err != nil {
-				return result, fmt.Errorf("apply Plc %q: %w", r.Metadata.Name, err)
+				result.Skipped = append(result.Skipped, SkippedResource{Kind: KindPlc, Name: r.Metadata.Name, Reason: err.Error()})
+				slog.Warn("apply: plc failed", "name", r.Metadata.Name, "error", err)
+				continue
 			}
 			result.Applied = append(result.Applied, AppliedResource{Kind: KindPlc, Name: r.Metadata.Name})
 		}
 	}
 
 	return result, nil
+}
+
+func resourceKindOf(res any) string {
+	switch r := res.(type) {
+	case *GatewayResource:
+		return r.Kind
+	case *ServiceResource:
+		return r.Kind
+	case *ModuleConfigResource:
+		return r.Kind
+	case *NftablesResource:
+		return r.Kind
+	case *NetworkResource:
+		return r.Kind
+	case *PlcResource:
+		return r.Kind
+	}
+	return "Unknown"
+}
+
+func resourceNameOf(res any) string {
+	switch r := res.(type) {
+	case *GatewayResource:
+		return r.Metadata.Name
+	case *ServiceResource:
+		return r.Metadata.Name
+	case *ModuleConfigResource:
+		return r.Metadata.Name
+	case *NftablesResource:
+		return r.Metadata.Name
+	case *NetworkResource:
+		return r.Metadata.Name
+	case *PlcResource:
+		return r.Metadata.Name
+	}
+	return ""
 }
 
 func applyGateway(b bus.Bus, r *GatewayResource, source string) error {

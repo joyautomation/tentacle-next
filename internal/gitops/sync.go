@@ -62,6 +62,26 @@ func syncToGit(b bus.Bus, repo *gitRepo, configPath string, autoPush bool, log *
 	}
 }
 
+// applyFromDisk reads all manifests in configPath and applies them to KV
+// unconditionally. Used at startup to force convergence of KV with the
+// just-cloned repo, regardless of whether any "new" commits were pulled.
+func applyFromDisk(b bus.Bus, configPath string, log *slog.Logger) {
+	resources, err := readManifestFiles(configPath)
+	if err != nil {
+		log.Error("gitops: read manifests for initial apply failed", "error", err)
+		return
+	}
+	if len(resources) == 0 {
+		return
+	}
+	result, err := manifest.Apply(b, resources, "gitops")
+	if err != nil {
+		log.Error("gitops: initial apply from disk failed", "error", err)
+		return
+	}
+	log.Info("gitops: initial apply from disk", "applied", len(result.Applied), "skipped", len(result.Skipped))
+}
+
 // syncFromGit pulls remote changes and applies them to KV.
 func syncFromGit(b bus.Bus, repo *gitRepo, configPath string, log *slog.Logger) {
 	hasNew, err := repo.HasRemoteChanges()

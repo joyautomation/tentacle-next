@@ -27,27 +27,43 @@ func (ve *ValidationError) hasErrors() bool {
 func Validate(resources []any) error {
 	ve := &ValidationError{}
 	for i, res := range resources {
-		switch r := res.(type) {
-		case *GatewayResource:
-			validateGateway(r, i, ve)
-		case *ServiceResource:
-			validateService(r, i, ve)
-		case *ModuleConfigResource:
-			validateModuleConfig(r, i, ve)
-		case *NftablesResource:
-			validateNftables(r, i, ve)
-		case *NetworkResource:
-			validateNetwork(r, i, ve)
-		case *PlcResource:
-			validatePlc(r, i, ve)
-		default:
-			ve.add("resource %d: unknown type %T", i, res)
-		}
+		validateOne(res, i, ve)
 	}
 	if ve.hasErrors() {
 		return ve
 	}
 	return nil
+}
+
+// ValidateResource checks a single resource and returns nil if valid.
+// Used by callers (like the gitops apply loop) that want to skip invalid
+// resources individually rather than rejecting the whole batch.
+func ValidateResource(res any) error {
+	ve := &ValidationError{}
+	validateOne(res, 0, ve)
+	if ve.hasErrors() {
+		return ve
+	}
+	return nil
+}
+
+func validateOne(res any, idx int, ve *ValidationError) {
+	switch r := res.(type) {
+	case *GatewayResource:
+		validateGateway(r, idx, ve)
+	case *ServiceResource:
+		validateService(r, idx, ve)
+	case *ModuleConfigResource:
+		validateModuleConfig(r, idx, ve)
+	case *NftablesResource:
+		validateNftables(r, idx, ve)
+	case *NetworkResource:
+		validateNetwork(r, idx, ve)
+	case *PlcResource:
+		validatePlc(r, idx, ve)
+	default:
+		ve.add("resource %d: unknown type %T", idx, res)
+	}
 }
 
 func validateGateway(r *GatewayResource, idx int, ve *ValidationError) {
@@ -80,11 +96,17 @@ func validateGateway(r *GatewayResource, idx int, ve *ValidationError) {
 		}
 	}
 
-	// Check device protocols.
+	// Check device protocols. Auto-managed devices (gateway-self, mqtt-self,
+	// network status) self-publish and use the protocol field as an
+	// informational tag, not a scanner selector — skip the strict check for
+	// them so the gateway's own bookkeeping doesn't fail validation.
 	validProtocols := map[string]bool{
 		"ethernetip": true, "opcua": true, "snmp": true, "modbus": true,
 	}
 	for devID, d := range r.Spec.Devices {
+		if d.AutoManaged {
+			continue
+		}
 		if d.Protocol == "" {
 			ve.add("%s: device %q has no protocol", prefix, devID)
 		} else if !validProtocols[d.Protocol] {
@@ -159,7 +181,8 @@ func validatePlc(r *PlcResource, idx int, ve *ValidationError) {
 		}
 	}
 
-	// Check device protocols.
+	// Check device protocols. PLC subscribes to scanners only, so the strict
+	// protocol set applies here.
 	validProtocols := map[string]bool{
 		"ethernetip": true, "opcua": true, "snmp": true, "modbus": true,
 	}
