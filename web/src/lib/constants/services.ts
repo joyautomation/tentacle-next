@@ -225,3 +225,45 @@ export function getServiceTabs(serviceType: string): ServiceTab[] {
 export function getModuleName(moduleId: string): string {
   return MODULE_NAMES[moduleId] ?? MODULE_NAMES[`tentacle-${moduleId}`] ?? moduleId.replace('tentacle-', '');
 }
+
+/**
+ * Categorization of service types for module-list UIs (fleet detail page,
+ * sidebar). Categories are render-ordered. A service type appearing in a
+ * category here is the source-of-truth for its grouping; if a type appears
+ * here it should also have an entry in SERVICE_NAMES.
+ */
+export interface ServiceCategory {
+  id: string;
+  label: string;
+  serviceTypes: string[];
+}
+
+export const SERVICE_CATEGORIES: ServiceCategory[] = [
+  { id: 'gateway', label: 'Gateway & Logic', serviceTypes: ['gateway', 'plc'] },
+  {
+    id: 'clients',
+    label: 'Protocol Clients',
+    serviceTypes: ['ethernetip', 'opcua', 'snmp', 'profinetcontroller', 'mqtt', 'sparkplug-host'],
+  },
+  {
+    id: 'servers',
+    label: 'Protocol Servers',
+    serviceTypes: ['ethernetip-server', 'profinet', 'mqtt-broker'],
+  },
+  { id: 'data', label: 'Data', serviceTypes: ['history', 'telemetry'] },
+  {
+    id: 'infra',
+    label: 'Infrastructure',
+    serviceTypes: ['caddy', 'gitops', 'gitserver', 'network', 'nftables'],
+  },
+  {
+    id: 'system',
+    label: 'System',
+    serviceTypes: ['api', 'graphql', 'nats', 'orchestrator', 'web'],
+  },
+];
+
+export function getServiceCategory(serviceType: string): ServiceCategory | undefined {
+  const lower = serviceType.toLowerCase();
+  return SERVICE_CATEGORIES.find((c) => c.serviceTypes.includes(lower));
+}
