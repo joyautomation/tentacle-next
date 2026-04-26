@@ -87,6 +87,7 @@ func applyFromDisk(b bus.Bus, configPath string, log *slog.Logger) {
 		log.Error("gitops: initial apply from disk failed", "error", err)
 		return
 	}
+	manifest.Prune(b, result, "gitops")
 	log.Info("gitops: initial apply from disk", "applied", len(result.Applied), "skipped", len(result.Skipped))
 }
 
@@ -127,6 +128,7 @@ func syncFromGit(b bus.Bus, repo *gitRepo, configPath string, log *slog.Logger) 
 		log.Error("gitops: apply from git failed", "error", err)
 		return
 	}
+	manifest.Prune(b, result, "gitops")
 
 	log.Info("gitops: applied remote changes",
 		"applied", len(result.Applied),

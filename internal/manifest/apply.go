@@ -338,6 +338,45 @@ func applyPlc(b bus.Bus, r *PlcResource, source string) error {
 	return nil
 }
 
+// Prune removes KV entries in gitops-owned buckets that were not in the
+// applied resource set. This is what makes "delete a manifest file" actually
+// take effect — without it, removed files leave orphan KV entries that the
+// edge would re-export and re-commit on the next sync, undoing the deletion.
+//
+// Only buckets that are 1:1 with manifest kinds get pruned (services,
+// gateways, plc). Other buckets (config env vars, metadata) are not pruned
+// here because they don't have a clean per-resource mapping.
+func Prune(b bus.Bus, result *ApplyResult, source string) {
+	pruneBucket(b, topics.BucketDesiredServices, KindService, result, source)
+	pruneBucket(b, topics.BucketGatewayConfig, KindGateway, result, source)
+	pruneBucket(b, topics.BucketPlcConfig, KindPlc, result, source)
+}
+
+func pruneBucket(b bus.Bus, bucket, kind string, result *ApplyResult, source string) {
+	desired := make(map[string]bool)
+	for _, ar := range result.Applied {
+		if ar.Kind == kind {
+			desired[ar.Name] = true
+		}
+	}
+
+	keys, err := b.KVKeys(bucket)
+	if err != nil {
+		return
+	}
+	for _, key := range keys {
+		if desired[key] {
+			continue
+		}
+		if err := b.KVDelete(bucket, key); err != nil {
+			slog.Warn("prune: delete failed", "bucket", bucket, "key", key, "error", err)
+			continue
+		}
+		writeSourceMetadata(b, bucket, key, source)
+		slog.Info("prune: removed orphan", "bucket", bucket, "key", key)
+	}
+}
+
 // writeSourceMetadata records the source of a config write for GitOps feedback loop prevention.
 func writeSourceMetadata(b bus.Bus, bucket, key, source string) {
 	meta := struct {
