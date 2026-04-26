@@ -1,11 +1,52 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { invalidateAll } from '$app/navigation';
+  import { apiDelete } from '$lib/api/client';
+  import { state as saltState } from '@joyautomation/salt';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
 
   let pollHandle: ReturnType<typeof setInterval> | null = null;
+
+  let deleteTarget: { groupId: string; nodeId: string; deviceCount: number } | null = $state(null);
+  let deleteConfirmInput = $state('');
+  let deleting = $state(false);
+
+  const deleteTargetKey = $derived(deleteTarget ? `${deleteTarget.groupId}/${deleteTarget.nodeId}` : '');
+
+  function openDelete(groupId: string, nodeId: string, deviceCount: number) {
+    deleteTarget = { groupId, nodeId, deviceCount };
+    deleteConfirmInput = '';
+  }
+
+  function closeDelete() {
+    if (deleting) return;
+    deleteTarget = null;
+    deleteConfirmInput = '';
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || deleteConfirmInput !== deleteTargetKey) return;
+    deleting = true;
+    const { groupId, nodeId } = deleteTarget;
+    const result = await apiDelete<{ repoError?: string }>(
+      `/fleet/nodes/${encodeURIComponent(groupId)}/${encodeURIComponent(nodeId)}`,
+    );
+    deleting = false;
+    if (result.error) {
+      saltState.addNotification({ message: `Failed to delete ${groupId}/${nodeId}: ${result.error.error}`, type: 'error' });
+      return;
+    }
+    if (result.data?.repoError) {
+      saltState.addNotification({ message: `Evicted ${groupId}/${nodeId}; repo cleanup warning: ${result.data.repoError}`, type: 'warning' });
+    } else {
+      saltState.addNotification({ message: `Evicted ${groupId}/${nodeId}`, type: 'success' });
+    }
+    deleteTarget = null;
+    deleteConfirmInput = '';
+    await invalidateAll();
+  }
 
   function formatRelative(ts: number): string {
     if (!ts) return '—';
@@ -95,10 +136,17 @@
               </td>
               <td class="num mono">{Object.keys(n.devices ?? {}).length}</td>
               <td class="muted">{formatRelative(n.lastSeen)}</td>
-              <td>
+              <td class="actions">
                 <a class="link-btn" href={nodeHref(n.groupId, n.nodeId)} onclick={(e) => e.stopPropagation()}>
                   Configure →
                 </a>
+                <button
+                  class="delete-btn"
+                  title="Evict this node from the fleet"
+                  onclick={(e) => { e.stopPropagation(); openDelete(n.groupId, n.nodeId, Object.keys(n.devices ?? {}).length); }}
+                >
+                  Delete
+                </button>
               </td>
             </tr>
           {/each}
@@ -107,6 +155,39 @@
     </div>
   {/if}
 </div>
+
+{#if deleteTarget}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onkeydown={(e) => { if (e.key === 'Escape') closeDelete(); }} onclick={closeDelete}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <h2>Evict node from fleet</h2>
+      <p class="modal-warning">
+        This removes <strong>{deleteTarget.groupId}/{deleteTarget.nodeId}</strong> from the inventory and
+        deletes its bare gitops repo. The edge's next <code>git pull</code> will fail —
+        that's how it learns it's no longer adopted here. If the edge keeps publishing
+        NBIRTH it will reappear in inventory until you stop or reconfigure it.
+      </p>
+      <p class="modal-confirm-label">Type <strong>{deleteTargetKey}</strong> to confirm:</p>
+      <input
+        class="modal-input"
+        bind:value={deleteConfirmInput}
+        placeholder={deleteTargetKey}
+        autocomplete="off"
+        spellcheck="false"
+        onkeydown={(e) => { if (e.key === 'Enter' && deleteConfirmInput === deleteTargetKey) confirmDelete(); }}
+      />
+      <div class="modal-actions">
+        <button class="modal-cancel-btn" onclick={closeDelete} disabled={deleting}>Cancel</button>
+        <button
+          class="modal-delete-btn"
+          disabled={deleteConfirmInput !== deleteTargetKey || deleting}
+          onclick={confirmDelete}
+        >{deleting ? 'Evicting...' : 'Evict node'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style lang="scss">
   .page {
@@ -301,6 +382,135 @@
 
     &:hover {
       background: color-mix(in srgb, var(--theme-surface) 80%, var(--theme-text) 8%);
+    }
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    justify-content: flex-end;
+  }
+
+  .delete-btn {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--theme-danger, #ef4444);
+    background: color-mix(in srgb, var(--theme-danger, #ef4444) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-danger, #ef4444) 35%, transparent);
+    border-radius: var(--rounded-md, 0.375rem);
+    cursor: pointer;
+    transition: background 120ms;
+
+    &:hover {
+      background: color-mix(in srgb, var(--theme-danger, #ef4444) 18%, transparent);
+    }
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .modal {
+    background: var(--theme-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-lg, 0.5rem);
+    padding: 1.5rem;
+    max-width: 520px;
+    width: 100%;
+
+    h2 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: var(--theme-text);
+      margin: 0 0 1rem;
+    }
+  }
+
+  .modal-warning {
+    font-size: 0.8125rem;
+    color: var(--theme-danger, #ef4444);
+    line-height: 1.5;
+    margin: 0 0 1rem;
+
+    code {
+      font-family: var(--font-mono, monospace);
+      background: color-mix(in srgb, var(--theme-danger, #ef4444) 12%, transparent);
+      padding: 0 0.25rem;
+      border-radius: var(--rounded-sm, 0.25rem);
+    }
+  }
+
+  .modal-confirm-label {
+    font-size: 0.8125rem;
+    color: var(--theme-text-muted);
+    margin: 0 0 0.5rem;
+  }
+
+  .modal-input {
+    width: 100%;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    font-family: var(--font-mono, monospace);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md, 0.375rem);
+    background: var(--theme-input-bg, var(--theme-surface));
+    color: var(--theme-text);
+    box-sizing: border-box;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .modal-cancel-btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--rounded-md, 0.375rem);
+    background: var(--theme-surface);
+    color: var(--theme-text);
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--theme-text) 5%, var(--theme-surface));
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+
+  .modal-delete-btn {
+    padding: 0.375rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border: none;
+    border-radius: var(--rounded-md, 0.375rem);
+    background: var(--theme-danger, #ef4444);
+    color: white;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      opacity: 0.9;
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
   }
 </style>

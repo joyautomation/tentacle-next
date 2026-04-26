@@ -20,3 +20,9 @@ const SubjectHostFrame = "sparkplug.host.frame"
 // SubjectHostNodes is the bus subject sparkplug-host serves node inventory snapshots on.
 // Reply with a JSON array of Node entries.
 const SubjectHostNodes = "sparkplug.host.nodes"
+
+// SubjectHostNodesDelete is the bus subject sparkplug-host accepts inventory eviction
+// requests on. Request payload: {"groupId":"...","nodeId":"..."}. Reply: {"removed":bool}.
+// Note: if the edge keeps publishing NBIRTH it will reappear; pair with a gitops repo
+// delete to fully evict the node.
+const SubjectHostNodesDelete = "sparkplug.host.nodes.delete"

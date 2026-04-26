@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/joyautomation/tentacle/internal/gitserver"
 	"github.com/joyautomation/tentacle/internal/manifest"
 	"github.com/joyautomation/tentacle/internal/sparkplug"
@@ -117,6 +118,40 @@ func readNodeModules(group, node string) ([]fleetModule, error) {
 // exporting it just for this caller.
 func repoNameForFleet(group, node string) string {
 	return sanitizeRepoSegment(group) + "--" + sanitizeRepoSegment(node)
+}
+
+// handleDeleteFleetNode evicts a node from the sparkplug-host inventory map and
+// deletes its bare gitops repo. If the edge keeps publishing NBIRTH it will
+// reappear in inventory, but its `git pull` against this mantle will then 404,
+// which is the natural way to signal "you're no longer adopted here."
+//
+// DELETE /api/v1/fleet/nodes/{group}/{node}
+func (m *Module) handleDeleteFleetNode(w http.ResponseWriter, r *http.Request) {
+	group := chi.URLParam(r, "group")
+	node := chi.URLParam(r, "node")
+	if group == "" || node == "" {
+		writeError(w, http.StatusBadRequest, "group and node are required")
+		return
+	}
+
+	reqBody, _ := json.Marshal(map[string]string{"groupId": group, "nodeId": node})
+	if _, err := m.bus.Request(sparkplug.SubjectHostNodesDelete, reqBody, busTimeout); err != nil {
+		writeError(w, http.StatusBadGateway, "sparkplug-host module unavailable: "+err.Error())
+		return
+	}
+
+	var repoErr string
+	if srv := gitserver.Server(); srv != nil {
+		if err := srv.DeleteRepo(r.Context(), repoNameForFleet(group, node)); err != nil {
+			repoErr = err.Error()
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"groupId": group,
+		"nodeId":  node,
+		"repoError": repoErr,
+	})
 }
 
 func sanitizeRepoSegment(s string) string {

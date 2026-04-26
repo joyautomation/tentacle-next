@@ -228,6 +228,31 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		_ = reply(data)
 	})
 
+	nodesDeleteSub, _ := b.Subscribe(sparkplug.SubjectHostNodesDelete, func(_ string, data []byte, reply bus.ReplyFunc) {
+		var req struct {
+			GroupID string `json:"groupId"`
+			NodeID  string `json:"nodeId"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil || req.GroupID == "" || req.NodeID == "" {
+			if reply != nil {
+				_ = reply([]byte(`{"removed":false,"error":"invalid request"}`))
+			}
+			return
+		}
+		key := req.GroupID + "/" + req.NodeID
+		m.invMu.Lock()
+		_, existed := m.nodes[key]
+		delete(m.nodes, key)
+		m.invMu.Unlock()
+		if reply != nil {
+			if existed {
+				_ = reply([]byte(`{"removed":true}`))
+			} else {
+				_ = reply([]byte(`{"removed":false}`))
+			}
+		}
+	})
+
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
 		m.log.Info("sparkplug-host: received shutdown command via Bus")
 		m.Stop()
@@ -236,6 +261,9 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.mu.Lock()
 	if nodesSub != nil {
 		m.subs = append(m.subs, nodesSub)
+	}
+	if nodesDeleteSub != nil {
+		m.subs = append(m.subs, nodesDeleteSub)
 	}
 	m.subs = append(m.subs, shutdownSub)
 	m.mu.Unlock()
