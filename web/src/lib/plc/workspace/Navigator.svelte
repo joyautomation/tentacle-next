@@ -609,6 +609,15 @@
                 <span class="badge lang">ST</span>
                 <span class="add-menu-label">Structured Text</span>
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="add-menu-item"
+                onclick={() => newProgramTab("ladder")}
+              >
+                <span class="badge lang">LD</span>
+                <span class="add-menu-label">Ladder Diagram</span>
+              </button>
             </div>
           {/if}
         </div>

@@ -9,6 +9,7 @@
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import DirtyIcon from '$lib/components/DirtyIcon.svelte';
 	import TagInput from './TagInput.svelte';
+	import { LadderEditor, emptyDiagram, type Diagram } from '$lib/components/ladder';
 	import {
 		workspaceDiagnostics,
 		workspaceTabs,
@@ -71,6 +72,21 @@
 	const NEW_ST_PLACEHOLDER =
 		'PROGRAM new_program\nVAR_GLOBAL\nEND_VAR\n\nEND_PROGRAM\n';
 
+	// Seed for a brand-new ladder program. The user names it via the
+	// rename input (extractLadName looks up `name` in the diagram).
+	function newLadderDiagram(): Diagram {
+		return {
+			name: 'new_ladder',
+			variables: [],
+			rungs: [
+				{
+					logic: { kind: 'contact', form: 'NO', operand: '' },
+					outputs: [{ kind: 'coil', form: 'OTE', operand: '' }],
+				},
+			],
+		};
+	}
+
 	let loading = $state(false);
 	let saving = $state(false);
 	let deleting = $state(false);
@@ -85,13 +101,27 @@
 	let tryRemaining = $state(0);
 	const TRY_TIMEOUT_SECONDS = 120;
 	const newIsST = isNew && initialLanguage === 'st';
-	let serverSource = $state(isNew && !newIsST ? NEW_STARLARK_PLACEHOLDER : '');
+	const newIsLad = isNew && initialLanguage === 'ladder';
+	const newIsStarlark = isNew && !newIsST && !newIsLad;
+	let serverSource = $state(newIsStarlark ? NEW_STARLARK_PLACEHOLDER : '');
 	let serverStSource = $state(newIsST ? NEW_ST_PLACEHOLDER : '');
 	let serverTags = $state<string[]>([]);
 	let language = $state<string>(isNew ? initialLanguage : 'starlark');
-	let draftSource = $state(isNew && !newIsST ? NEW_STARLARK_PLACEHOLDER : '');
+	let draftSource = $state(newIsStarlark ? NEW_STARLARK_PLACEHOLDER : '');
 	let draftStSource = $state(newIsST ? NEW_ST_PLACEHOLDER : '');
 	let draftTags = $state<string[]>([]);
+
+	// Ladder programs hold their AST in `source` as JSON. The editor
+	// works on the parsed Diagram and we stringify on save / for dirty
+	// comparison so the existing source-based plumbing keeps working.
+	const initialLadDiagram = newIsLad ? newLadderDiagram() : emptyDiagram();
+	let serverDiagram = $state<Diagram>(initialLadDiagram);
+	let draftDiagram = $state<Diagram>(structuredClone(initialLadDiagram));
+	if (newIsLad) {
+		const seeded = JSON.stringify(initialLadDiagram, null, 2);
+		serverSource = '';
+		draftSource = seeded;
+	}
 
 	const dirty = $derived(
 		isNew
@@ -124,6 +154,7 @@
 	const pendingName = $derived.by(() => {
 		if (language === 'st') return extractProgramName(draftStSource);
 		if (language === 'starlark') return extractDefName(draftSource);
+		if (language === 'ladder') return draftDiagram.name?.trim() ?? '';
 		return name;
 	});
 
@@ -181,6 +212,17 @@
 	const liveValuesMap = $derived.by(() => {
 		void liveValuesVersion();
 		return liveValuesSnapshot();
+	});
+
+	// Plain-object view of live values for the ladder editor (TagValues
+	// is a Record, but liveValuesSnapshot returns a ReadonlyMap).
+	const tagValuesForLad = $derived.by(() => {
+		const out: Record<string, { value: unknown; energized?: boolean }> = {};
+		for (const [k, v] of liveValuesMap) {
+			const val = v?.value;
+			out[k] = { value: val, energized: typeof val === 'boolean' ? val : undefined };
+		}
+		return out;
 	});
 
 	onMount(() => {
@@ -278,6 +320,24 @@
 		draftSource = serverSource;
 		draftStSource = serverStSource;
 		draftTags = serverTags.slice();
+		if (language === 'ladder') {
+			const parsed = parseLadderSource(serverSource);
+			serverDiagram = parsed;
+			draftDiagram = structuredClone(parsed);
+		}
+	}
+
+	function parseLadderSource(src: string): Diagram {
+		if (!src) return emptyDiagram();
+		try {
+			const parsed = JSON.parse(src) as Diagram;
+			if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.rungs)) {
+				return emptyDiagram();
+			}
+			return parsed;
+		} catch {
+			return emptyDiagram();
+		}
 	}
 
 	function onEditorChange(val: string) {
@@ -286,6 +346,17 @@
 		} else {
 			draftSource = val;
 		}
+	}
+
+	function onLadderChange(next: Diagram) {
+		draftDiagram = next;
+		// Mirror to draftSource so dirty-tracking + save keep using `source`
+		// as the canonical wire field for ladder programs.
+		draftSource = JSON.stringify(next, null, 2);
+	}
+
+	function renameLadder(newName: string) {
+		onLadderChange({ ...draftDiagram, name: newName });
 	}
 
 	// saveBlockedReason returns a short explanation when save is disabled.
@@ -301,6 +372,11 @@
 			if (!nameIsValid) return `"${pendingName}" is not a valid identifier`;
 			if (nameCollision) return `A program named "${pendingName}" already exists`;
 		}
+		if (language === 'ladder') {
+			if (!pendingName) return 'Set a name for this ladder program';
+			if (!nameIsValid) return `"${pendingName}" is not a valid identifier`;
+			if (nameCollision) return `A program named "${pendingName}" already exists`;
+		}
 		if (errorCount > 0) return `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} before saving`;
 		return undefined;
 	});
@@ -308,7 +384,7 @@
 	const canSave = $derived.by(() => {
 		if (!dirty || saving) return false;
 		if (errorCount > 0) return false;
-		if (language === 'starlark' || language === 'st') {
+		if (language === 'starlark' || language === 'st' || language === 'ladder') {
 			if (!nameIsValid) return false;
 			if (nameCollision) return false;
 		}
@@ -320,12 +396,14 @@
 		saving = true;
 		try {
 			// The stored key follows the language's header (def for Starlark,
-			// PROGRAM for ST). New tabs POST to the derived name; saved tabs
-			// PUT to the old key and ask the server to rename when the
-			// header has changed.
+			// PROGRAM for ST, diagram name for ladder). New tabs POST to the
+			// derived name; saved tabs PUT to the old key and ask the server
+			// to rename when the header has changed.
 			const urlName = isNew ? pendingName : name;
 			const bodyName =
-				language === 'starlark' || language === 'st' ? pendingName : name;
+				language === 'starlark' || language === 'st' || language === 'ladder'
+					? pendingName
+					: name;
 			const body: Record<string, unknown> = {
 				name: bodyName,
 				language,
@@ -342,6 +420,9 @@
 			serverSource = draftSource;
 			serverStSource = draftStSource;
 			serverTags = draftTags.slice();
+			if (language === 'ladder') {
+				serverDiagram = structuredClone(draftDiagram);
+			}
 			const renamed = !isNew && bodyName !== name;
 			if (isNew || renamed) {
 				workspaceTabs.renameTab(tabId, bodyName);
@@ -362,6 +443,9 @@
 		draftSource = serverSource;
 		draftStSource = serverStSource;
 		draftTags = serverTags.slice();
+		if (language === 'ladder') {
+			draftDiagram = structuredClone(serverDiagram);
+		}
 	}
 
 	function sameTags(a: string[], b: string[]): boolean {
@@ -574,7 +658,27 @@
 		{:else if error}
 			<div class="status error">{error}</div>
 		{:else if language === 'ladder'}
-			<div class="status">Ladder editing isn't wired into the workspace yet.</div>
+			<div class="lad-wrap">
+				<div class="lad-name-row">
+					<label class="lad-name">
+						<span>Diagram name</span>
+						<input
+							type="text"
+							value={draftDiagram.name ?? ''}
+							oninput={(e) => renameLadder((e.target as HTMLInputElement).value)}
+							placeholder="program_name"
+						/>
+					</label>
+				</div>
+				<div class="lad-canvas">
+					<LadderEditor
+						diagram={draftDiagram}
+						tagValues={tagValuesForLad}
+						monitoring={showInlineValues}
+						onChange={onLadderChange}
+					/>
+				</div>
+			</div>
 		{:else}
 			<div class="diff-wrap" class:diff-active={showDiff}>
 				<div class="diff-pane pending-pane">
@@ -862,6 +966,49 @@
 	@keyframes pulse {
 		0%, 100% { opacity: 1; transform: scale(1); }
 		50% { opacity: 0.5; transform: scale(0.8); }
+	}
+
+	.lad-wrap {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.lad-name-row {
+		padding: 0.375rem 0.625rem;
+		border-bottom: 1px solid var(--theme-border);
+		background: var(--theme-surface);
+	}
+
+	.lad-name {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.75rem;
+		color: var(--theme-text-muted);
+
+		input {
+			background: var(--theme-background, #111);
+			border: 1px solid var(--theme-border);
+			color: var(--theme-text);
+			padding: 0.25rem 0.5rem;
+			border-radius: 0.25rem;
+			font-family: var(--theme-font-basic, ui-monospace, monospace);
+			font-size: 0.8125rem;
+			min-width: 14rem;
+
+			&:focus {
+				outline: none;
+				border-color: var(--theme-primary);
+			}
+		}
+	}
+
+	.lad-canvas {
+		flex: 1;
+		min-height: 0;
+		display: flex;
 	}
 
 	.status {
