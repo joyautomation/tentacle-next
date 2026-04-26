@@ -212,7 +212,7 @@ func parseExpr(data json.RawMessage) (Expr, error) {
 			return nil, err
 		}
 		if raw.Raw != "" && raw.Ms == 0 {
-			raw.Ms = int64(st.ParseTimeMs(raw.Raw))
+			raw.Ms = int64(st.ParseTimeMs(stripTimePrefix(raw.Raw)))
 		}
 		return &raw, nil
 	case "string":
