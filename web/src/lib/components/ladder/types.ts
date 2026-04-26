@@ -1,135 +1,197 @@
 /**
- * Ladder Logic Editor Types
+ * Ladder Diagram editor types.
  *
- * These mirror the runtime types from tentacle-plc/ladder.ts so the editor
- * can parse .lad.ts files and render them, and write edits back as valid TS.
+ * These mirror the canonical JSON AST emitted by `internal/plc/lad` on
+ * the Go side. The wire format is one-for-one with the Go shape so the
+ * server can `Parse(json)` and `Print(ast)` round-trip cleanly.
+ *
+ * Keep in sync with internal/plc/lad/ast.go and parser.go.
  */
 
 // =============================================================================
-// Ladder Element Types (same as runtime)
+// Wire types — serialized to JSON, matching Go AST.
 // =============================================================================
 
-export type LadderContact = {
-  type: 'NO' | 'NC';
-  tag: string;
-};
-
-export type LadderSeries = {
-  type: 'series';
-  elements: LadderCondition[];
-};
-
-export type LadderBranch = {
-  type: 'branch';
-  paths: LadderCondition[];
-};
-
-export type LadderCondition = LadderContact | LadderBranch | LadderSeries;
-
-export type LadderCoil = {
-  type: 'OTE' | 'OTL' | 'OTU';
-  tag: string;
-};
-
-export type LadderTimer = {
-  type: 'TON' | 'TOF';
-  tag: string;
-  preset: number;
-};
-
-export type LadderCounter = {
-  type: 'CTU' | 'CTD';
-  tag: string;
-  preset: number;
-};
-
-export type LadderOutput = LadderCoil | LadderTimer | LadderCounter;
-
-export type LadderElement = LadderCondition | LadderOutput;
-
-// =============================================================================
-// Editor-specific Types
-// =============================================================================
-
-export type Rung = {
-  id: string;
-  comment: string;
-  conditions: LadderCondition[];
-  outputs: LadderOutput[];
-};
-
-export type LadderProgram = {
-  name: string;
+export type Diagram = {
+  name?: string;
+  variables?: VarDecl[];
   rungs: Rung[];
 };
 
-/** Selection state for the editor */
-export type Selection = {
-  rungId: string;
-  /** Path into the rung tree — array of indices */
-  path: number[];
-  type: 'condition' | 'output';
-} | null;
+export type VarDecl = {
+  name: string;
+  type: string;
+  /** "" (default VAR) | "global" | "input" | "output" */
+  kind?: '' | 'global' | 'input' | 'output';
+  init?: string;
+  retain?: boolean;
+};
 
-/** Live monitoring values for tags */
-export type TagValues = Record<string, {
-  value: unknown;
-  energized?: boolean;
-}>;
+export type Rung = {
+  comment?: string;
+  logic: Element;
+  outputs?: Output[];
+};
+
+export type Element = Contact | Series | Parallel;
+
+export type Contact = {
+  kind: 'contact';
+  form: 'NO' | 'NC';
+  operand: string;
+};
+
+export type Series = {
+  kind: 'series';
+  items: Element[];
+};
+
+export type Parallel = {
+  kind: 'parallel';
+  items: Element[];
+};
+
+export type Output = Coil | FBCall;
+
+export type Coil = {
+  kind: 'coil';
+  form: 'OTE' | 'OTL' | 'OTU';
+  operand: string;
+};
+
+export type FBCall = {
+  kind: 'fb';
+  instance: string;
+  /** Override for which input receives rung power flow; default = first input. */
+  powerInput?: string;
+  inputs?: Record<string, Expr>;
+};
+
+export type Expr = Ref | IntLit | RealLit | BoolLit | TimeLit | StringLit;
+
+export type Ref = { kind: 'ref'; name: string };
+export type IntLit = { kind: 'int'; value: number };
+export type RealLit = { kind: 'real'; value: number };
+export type BoolLit = { kind: 'bool'; value: boolean };
+export type TimeLit = { kind: 'time'; raw?: string; ms?: number };
+export type StringLit = { kind: 'string'; value: string };
 
 // =============================================================================
-// Layout Types (computed from the data model)
+// Editor-only types
 // =============================================================================
 
-export type LayoutElement = {
-  id: string;
-  element: LadderElement;
-  x: number;
+/**
+ * Path identifies a node within a Diagram for selection/edit dispatch.
+ *
+ * - rung: index into Diagram.rungs
+ * - logic: array of indices walking into Series/Parallel.items; empty means
+ *   the rung's root logic node
+ * - output: index into rung.outputs (when targeting an output)
+ *
+ * The two are mutually exclusive: a path either points at a logic element
+ * or at an output. `kind` disambiguates.
+ */
+export type EditPath =
+  | { kind: 'logic'; rung: number; logic: number[] }
+  | { kind: 'output'; rung: number; output: number };
+
+export type Selection = EditPath | null;
+
+/** Live monitoring values for tags (placeholder until the live runtime wires up). */
+export type TagValues = Record<string, { value: unknown; energized?: boolean }>;
+
+// =============================================================================
+// Layout types — produced by the layout pass, consumed by the renderer.
+// =============================================================================
+
+export type LayoutNode =
+  | { kind: 'contact'; element: Contact; path: EditPath; x: number; y: number; width: number; height: number }
+  | { kind: 'coil'; element: Coil; path: EditPath; x: number; y: number; width: number; height: number }
+  | { kind: 'fb'; element: FBCall; path: EditPath; x: number; y: number; width: number; height: number; pins: FBPin[] };
+
+export type FBPin = {
+  name: string;
+  isPower: boolean;
+  /** y offset within the FB box (for wire termination). */
   y: number;
-  width: number;
-  height: number;
+  /** Pre-rendered value text shown to the right of the pin name. */
+  valueText?: string;
 };
 
-export type LayoutWire = {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-};
+export type LayoutWire = { x1: number; y1: number; x2: number; y2: number };
 
-export type LayoutBranchLine = {
-  x: number;
-  y1: number;
-  y2: number;
-};
+export type LayoutBranchLine = { x: number; y1: number; y2: number };
 
 export type RungLayout = {
-  elements: LayoutElement[];
+  nodes: LayoutNode[];
   wires: LayoutWire[];
   branchLines: LayoutBranchLine[];
+  /** y-coordinate of the main power-flow wire (left rail → outputs). */
+  wireY: number;
   totalWidth: number;
   totalHeight: number;
 };
 
 // =============================================================================
-// Layout Constants
+// Layout constants. Tuned for legibility at default scale.
 // =============================================================================
 
 export const LAYOUT = {
   RAIL_LEFT: 30,
   RAIL_RIGHT_MARGIN: 30,
-  CONTACT_WIDTH: 100,
+  CONTACT_WIDTH: 96,
   CONTACT_HEIGHT: 40,
-  COIL_WIDTH: 100,
+  COIL_WIDTH: 96,
   COIL_HEIGHT: 40,
-  TIMER_WIDTH: 140,
-  TIMER_HEIGHT: 70,
-  COUNTER_WIDTH: 140,
-  COUNTER_HEIGHT: 70,
+  FB_MIN_WIDTH: 140,
+  FB_HEADER_HEIGHT: 24,
+  FB_PIN_ROW_HEIGHT: 22,
+  FB_HORIZONTAL_PADDING: 12,
   WIRE_GAP: 16,
   BRANCH_GAP: 12,
-  RUNG_PADDING_Y: 16,
+  RUNG_PADDING_Y: 24,
   RUNG_GAP: 8,
-  TAG_FONT_SIZE: 11,
-  LABEL_FONT_SIZE: 9,
+  TAG_FONT_SIZE: 12,
+  LABEL_FONT_SIZE: 10,
 } as const;
+
+// =============================================================================
+// Helpers — building blocks for editor mutations.
+// =============================================================================
+
+export function emptyDiagram(name = ''): Diagram {
+  return { name, variables: [], rungs: [] };
+}
+
+export function newRung(): Rung {
+  return {
+    logic: { kind: 'contact', form: 'NO', operand: '' },
+    outputs: [],
+  };
+}
+
+export function newContact(form: 'NO' | 'NC' = 'NO', operand = ''): Contact {
+  return { kind: 'contact', form, operand };
+}
+
+export function newCoil(form: 'OTE' | 'OTL' | 'OTU' = 'OTE', operand = ''): Coil {
+  return { kind: 'coil', form, operand };
+}
+
+/** Pretty label for an Expr — used in FB pin value rendering. */
+export function exprLabel(e: Expr): string {
+  switch (e.kind) {
+    case 'ref':
+      return e.name;
+    case 'int':
+      return String(e.value);
+    case 'real':
+      return String(e.value);
+    case 'bool':
+      return e.value ? 'TRUE' : 'FALSE';
+    case 'time':
+      return e.raw ?? `T#${e.ms ?? 0}ms`;
+    case 'string':
+      return `'${e.value}'`;
+  }
+}

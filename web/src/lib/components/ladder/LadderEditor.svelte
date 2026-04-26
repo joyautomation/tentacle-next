@@ -1,27 +1,45 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { LadderProgram, Rung, Selection, TagValues, LadderCondition, LadderOutput, LadderElement } from './types.js';
-  import { layoutProgram, layoutRung } from './layout.js';
   import LadderRung from './LadderRung.svelte';
   import LadderToolbar from './LadderToolbar.svelte';
-  import { LAYOUT } from './types.js';
+  import {
+    type Diagram,
+    type EditPath,
+    type Element,
+    type Rung,
+    type Selection,
+    type TagValues,
+    LAYOUT,
+    newCoil,
+    newContact,
+    newRung,
+  } from './types.js';
+  import { layoutDiagram } from './layout.js';
+  import {
+    deleteAtPath,
+    getElementAt,
+    getOutputAt,
+    setOperand,
+    setForm,
+    wrapInParallel,
+    appendContactInSeries,
+  } from './mutations.js';
 
   interface Props {
-    program: LadderProgram;
+    diagram: Diagram;
     tagValues?: TagValues;
     monitoring?: boolean;
-    onProgramChange?: (program: LadderProgram) => void;
+    onChange?: (next: Diagram) => void;
   }
 
-  let { program, tagValues = {}, monitoring = false, onProgramChange }: Props = $props();
+  let { diagram, tagValues = {}, monitoring = false, onChange }: Props = $props();
 
   let selection = $state<Selection>(null);
   let containerEl: HTMLDivElement | undefined = $state();
   let containerWidth = $state(800);
 
-  const programLayout = $derived(layoutProgram(program.rungs));
+  const programLayout = $derived(layoutDiagram(diagram));
 
-  // Resize observer
   onMount(() => {
     if (!containerEl) return;
     const observer = new ResizeObserver((entries) => {
@@ -33,13 +51,12 @@
     return () => observer.disconnect();
   });
 
-  function updateProgram(updatedRungs: Rung[]) {
-    const updated = { ...program, rungs: updatedRungs };
-    onProgramChange?.(updated);
+  function emit(next: Diagram) {
+    onChange?.(next);
   }
 
-  function handleSelect(rungId: string, path: number[], type: 'condition' | 'output') {
-    selection = { rungId, path, type };
+  function handleSelect(path: EditPath) {
+    selection = path;
   }
 
   function handleDeselect() {
@@ -47,161 +64,94 @@
   }
 
   function addRung() {
-    const newRung: Rung = {
-      id: `rung_${Date.now()}`,
-      comment: '',
-      conditions: [],
-      outputs: [],
+    const next: Diagram = {
+      ...diagram,
+      rungs: [...diagram.rungs, newRung()],
     };
-    updateProgram([...program.rungs, newRung]);
-  }
-
-  function deleteRung(rungId: string) {
-    updateProgram(program.rungs.filter(r => r.id !== rungId));
-    if (selection?.rungId === rungId) selection = null;
-  }
-
-  function addContact(type: 'NO' | 'NC') {
-    if (!selection) {
-      // No selection — add to last rung, or create one
-      if (program.rungs.length === 0) addRung();
-      const lastRung = program.rungs[program.rungs.length - 1];
-      const updated = program.rungs.map(r =>
-        r.id === lastRung.id
-          ? { ...r, conditions: [...r.conditions, { type, tag: 'newTag' } as LadderCondition] }
-          : r
-      );
-      updateProgram(updated);
-      return;
-    }
-
-    const updated = program.rungs.map(r => {
-      if (r.id !== selection!.rungId) return r;
-      // Insert contact after selection position
-      const newConditions = [...r.conditions];
-      const insertIdx = selection!.type === 'condition'
-        ? Math.min(selection!.path[0] + 1, newConditions.length)
-        : newConditions.length;
-      newConditions.splice(insertIdx, 0, { type, tag: 'newTag' });
-      return { ...r, conditions: newConditions };
-    });
-    updateProgram(updated);
-  }
-
-  function addCoil(type: 'OTE' | 'OTL' | 'OTU') {
-    if (!selection) {
-      if (program.rungs.length === 0) addRung();
-      const lastRung = program.rungs[program.rungs.length - 1];
-      const updated = program.rungs.map(r =>
-        r.id === lastRung.id
-          ? { ...r, outputs: [...r.outputs, { type, tag: 'newTag' } as LadderOutput] }
-          : r
-      );
-      updateProgram(updated);
-      return;
-    }
-
-    const updated = program.rungs.map(r => {
-      if (r.id !== selection!.rungId) return r;
-      return { ...r, outputs: [...r.outputs, { type, tag: 'newTag' }] };
-    });
-    updateProgram(updated);
-  }
-
-  function addBranch() {
-    if (!selection || selection.type !== 'condition') return;
-
-    const updated = program.rungs.map(r => {
-      if (r.id !== selection!.rungId) return r;
-      const idx = selection!.path[0];
-      if (idx < 0 || idx >= r.conditions.length) return r;
-
-      // Wrap the selected condition in a branch with an empty parallel path
-      const selected = r.conditions[idx];
-      const branch: LadderCondition = {
-        type: 'branch',
-        paths: [selected, { type: 'NO', tag: 'newTag' }],
-      };
-      const newConditions = [...r.conditions];
-      newConditions[idx] = branch;
-      return { ...r, conditions: newConditions };
-    });
-    updateProgram(updated);
-  }
-
-  function addTimer(type: 'TON' | 'TOF') {
-    const target = selection?.rungId ?? program.rungs[program.rungs.length - 1]?.id;
-    if (!target) return;
-
-    const updated = program.rungs.map(r => {
-      if (r.id !== target) return r;
-      return { ...r, outputs: [...r.outputs, { type, tag: 'newTimer', preset: 1000 }] };
-    });
-    updateProgram(updated);
+    selection = { kind: 'logic', rung: next.rungs.length - 1, logic: [] };
+    emit(next);
   }
 
   function deleteSelected() {
     if (!selection) return;
-
-    const updated = program.rungs.map(r => {
-      if (r.id !== selection!.rungId) return r;
-      if (selection!.type === 'condition') {
-        const newConditions = [...r.conditions];
-        newConditions.splice(selection!.path[0], 1);
-        return { ...r, conditions: newConditions };
-      } else {
-        const newOutputs = [...r.outputs];
-        newOutputs.splice(selection!.path[0], 1);
-        return { ...r, outputs: newOutputs };
-      }
-    });
-    updateProgram(updated);
+    const next = deleteAtPath(diagram, selection);
     selection = null;
+    emit(next);
   }
 
-  function handleTagEdit(rungId: string, path: number[], type: 'condition' | 'output', newTag: string) {
-    const updated = program.rungs.map(r => {
-      if (r.id !== rungId) return r;
-      if (type === 'condition') {
-        const newConditions = structuredClone(r.conditions);
-        const el = newConditions[path[0]];
-        if (el && (el.type === 'NO' || el.type === 'NC')) {
-          el.tag = newTag;
-        }
-        return { ...r, conditions: newConditions };
-      } else {
-        const newOutputs = structuredClone(r.outputs);
-        const el = newOutputs[path[0]];
-        if (el && 'tag' in el) {
-          el.tag = newTag;
-        }
-        return { ...r, outputs: newOutputs };
-      }
-    });
-    updateProgram(updated);
+  function addContactInSeries(form: 'NO' | 'NC') {
+    const target = selection ?? defaultSelection();
+    if (!target || target.kind !== 'logic') return;
+    const next = appendContactInSeries(diagram, target, newContact(form, ''));
+    emit(next);
   }
 
-  function handleCommentEdit(rungId: string, comment: string) {
-    const updated = program.rungs.map(r =>
-      r.id === rungId ? { ...r, comment } : r
+  function addCoil(form: 'OTE' | 'OTL' | 'OTU') {
+    const rungIdx = selection?.rung ?? (diagram.rungs.length - 1);
+    if (rungIdx < 0 || rungIdx >= diagram.rungs.length) return;
+    const rungs = diagram.rungs.map((r, i) =>
+      i === rungIdx
+        ? { ...r, outputs: [...(r.outputs ?? []), newCoil(form, '')] }
+        : r,
     );
-    updateProgram(updated);
+    const next: Diagram = { ...diagram, rungs };
+    selection = {
+      kind: 'output',
+      rung: rungIdx,
+      output: (next.rungs[rungIdx].outputs?.length ?? 1) - 1,
+    };
+    emit(next);
   }
 
-  // Keyboard shortcuts
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.target instanceof HTMLInputElement) return;
+  function wrapSelectionInParallel() {
+    if (!selection || selection.kind !== 'logic') return;
+    const next = wrapInParallel(diagram, selection);
+    emit(next);
+  }
 
-    switch (e.key) {
-      case 'Delete':
-      case 'Backspace':
+  function defaultSelection(): EditPath | null {
+    if (diagram.rungs.length === 0) return null;
+    return { kind: 'logic', rung: diagram.rungs.length - 1, logic: [] };
+  }
+
+  // Keyboard shortcuts: Delete/Backspace removes the selected node;
+  // Escape clears selection. Inputs are excluded so typing in the
+  // operand field doesn't fire shortcuts.
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selection) {
         deleteSelected();
         e.preventDefault();
-        break;
-      case 'Escape':
-        handleDeselect();
-        break;
+      }
+    } else if (e.key === 'Escape') {
+      handleDeselect();
     }
+  }
+
+  // Inspector-style operand editor for the currently selected node.
+  // Reads the live element from the diagram so external updates stay
+  // in sync.
+  const selectedElement = $derived.by(() => {
+    if (!selection) return null;
+    if (selection.kind === 'logic') {
+      const el = getElementAt(diagram, selection);
+      return el && el.kind === 'contact' ? el : null;
+    }
+    const out = getOutputAt(diagram, selection);
+    return out;
+  });
+
+  function commitOperand(value: string) {
+    if (!selection) return;
+    emit(setOperand(diagram, selection, value));
+  }
+
+  function commitForm(value: string) {
+    if (!selection) return;
+    emit(setForm(diagram, selection, value));
   }
 </script>
 
@@ -210,55 +160,86 @@
 <div class="ladder-editor" bind:this={containerEl}>
   <LadderToolbar
     {selection}
-    {monitoring}
-    onAddContact={addContact}
-    onAddCoil={addCoil}
-    onAddBranch={addBranch}
-    onAddTimer={addTimer}
     onAddRung={addRung}
+    onAddContact={addContactInSeries}
+    onAddCoil={addCoil}
+    onWrapParallel={wrapSelectionInParallel}
     onDelete={deleteSelected}
   />
 
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ladder-canvas" onclick={handleDeselect}>
-    <svg
-      width={containerWidth}
-      height={Math.max(200, programLayout.totalHeight + 40)}
-      viewBox="0 0 {Math.max(containerWidth, programLayout.totalWidth + 40)} {Math.max(200, programLayout.totalHeight + 40)}"
-    >
-      {#each program.rungs as rung, rungIdx}
-        {@const layout = programLayout.layouts[rungIdx]}
-        {@const yOffset = programLayout.layouts.slice(0, rungIdx).reduce((sum, l) => sum + l.totalHeight + LAYOUT.RUNG_GAP, 0)}
-        <g transform="translate(0, {yOffset})">
-          <LadderRung
-            {rung}
-            {layout}
-            {selection}
-            {tagValues}
-            {monitoring}
-            rungNumber={rungIdx}
-            onSelect={handleSelect}
-            onTagEdit={handleTagEdit}
-            onCommentEdit={handleCommentEdit}
-            onDeleteRung={() => deleteRung(rung.id)}
-          />
-        </g>
-      {/each}
+  <div class="ladder-body">
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="ladder-canvas" onclick={handleDeselect}>
+      <svg
+        width={Math.max(containerWidth, programLayout.totalWidth + 40)}
+        height={Math.max(160, programLayout.totalHeight + 40)}
+        viewBox={`0 0 ${Math.max(containerWidth, programLayout.totalWidth + 40)} ${Math.max(160, programLayout.totalHeight + 40)}`}
+      >
+        {#each programLayout.rungs as r, idx}
+          <g transform={`translate(0, ${r.yOffset})`}>
+            <LadderRung
+              rung={diagram.rungs[idx]}
+              rungIndex={idx}
+              layout={r.layout}
+              {selection}
+              {tagValues}
+              {monitoring}
+              onSelect={handleSelect}
+            />
+          </g>
+        {/each}
 
-      {#if program.rungs.length === 0}
-        <text
-          x={containerWidth / 2}
-          y={100}
-          text-anchor="middle"
-          fill="var(--theme-text-muted, #888)"
-          font-size="14"
-          font-family="var(--theme-font-basic, sans-serif)"
-        >
-          Click "Add Rung" to get started
-        </text>
-      {/if}
-    </svg>
+        {#if diagram.rungs.length === 0}
+          <text
+            x={containerWidth / 2}
+            y={80}
+            text-anchor="middle"
+            class="empty-hint"
+          >
+            Click "Add Rung" to start
+          </text>
+        {/if}
+      </svg>
+    </div>
+
+    {#if selection && selectedElement}
+      <aside class="inspector">
+        <h4>Selection</h4>
+        {#if selectedElement.kind === 'contact' || selectedElement.kind === 'coil'}
+          <label>
+            <span>Form</span>
+            <select
+              value={selectedElement.form}
+              onchange={(e) => commitForm((e.target as HTMLSelectElement).value)}
+            >
+              {#if selectedElement.kind === 'contact'}
+                <option value="NO">NO</option>
+                <option value="NC">NC</option>
+              {:else}
+                <option value="OTE">OTE</option>
+                <option value="OTL">OTL</option>
+                <option value="OTU">OTU</option>
+              {/if}
+            </select>
+          </label>
+          <label>
+            <span>Operand</span>
+            <input
+              type="text"
+              value={selectedElement.operand}
+              oninput={(e) => commitOperand((e.target as HTMLInputElement).value)}
+              placeholder="variable name"
+            />
+          </label>
+        {:else if selectedElement.kind === 'fb'}
+          <label>
+            <span>Instance</span>
+            <input type="text" value={selectedElement.instance} disabled />
+          </label>
+          <p class="muted">FB inputs aren't editable in v1 — edit the source directly for now.</p>
+        {/if}
+      </aside>
+    {/if}
   </div>
 </div>
 
@@ -266,20 +247,85 @@
   .ladder-editor {
     display: flex;
     flex-direction: column;
-    gap: 0;
     background: var(--theme-background, #111);
     border: 1px solid var(--theme-border, #333);
     border-radius: var(--rounded-lg, 8px);
     overflow: hidden;
+    height: 100%;
+    min-height: 240px;
+  }
+
+  .ladder-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
   }
 
   .ladder-canvas {
+    flex: 1;
     overflow: auto;
     padding: 8px;
-    min-height: 200px;
 
     svg {
       display: block;
+    }
+  }
+
+  .empty-hint {
+    fill: var(--theme-text-muted, #888);
+    font-size: 13px;
+    font-family: var(--theme-font-basic, sans-serif);
+  }
+
+  .inspector {
+    width: 240px;
+    border-left: 1px solid var(--theme-border, #333);
+    padding: 12px;
+    background: var(--theme-surface, #181818);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    h4 {
+      margin: 0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--theme-text-muted, #888);
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--theme-text, #ddd);
+
+      span {
+        color: var(--theme-text-muted, #888);
+      }
+    }
+
+    input,
+    select {
+      background: var(--theme-background, #111);
+      border: 1px solid var(--theme-border, #333);
+      color: var(--theme-text, #ddd);
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-family: var(--theme-font-basic, ui-monospace, monospace);
+      font-size: 12px;
+
+      &:focus {
+        outline: none;
+        border-color: var(--theme-primary, #3b82f6);
+      }
+    }
+
+    .muted {
+      color: var(--theme-text-muted, #888);
+      font-size: 11px;
+      margin: 0;
     }
   }
 </style>

@@ -1,325 +1,379 @@
 /**
- * Ladder Logic Layout Algorithm
+ * Ladder Diagram layout pass.
  *
- * Walks the rung tree and computes (x, y) positions for each element.
- * The layout flows left-to-right, with branches stacking vertically.
- * This is NOT a grid — positions are computed from the tree structure
- * just like RSLogix auto-layout.
+ * Walks a Diagram and computes positions, wires, and branch lines so the
+ * SVG renderer can draw the rungs without doing geometry inline. Layout
+ * is bottom-up: each element reports its bounding box, parents stack
+ * children. Series flows left→right (max height), Parallel stacks
+ * top→bottom (max width). The result mirrors RSLogix-style auto-layout.
  */
 
 import {
-  type LadderCondition,
-  type LadderElement,
-  type LadderOutput,
+  type Coil,
+  type Contact,
+  type Diagram,
+  type EditPath,
+  type Element,
+  type FBCall,
+  type FBPin,
   type LayoutBranchLine,
-  type LayoutElement,
+  type LayoutNode,
   type LayoutWire,
+  type Output,
   type Rung,
   type RungLayout,
   LAYOUT,
+  exprLabel,
 } from './types.js';
 
-type LayoutResult = {
-  elements: LayoutElement[];
+type LogicLayoutResult = {
+  nodes: LayoutNode[];
   wires: LayoutWire[];
   branchLines: LayoutBranchLine[];
   width: number;
-  height: number;
+  /** Vertical extent above the centerline (for Parallel half-heights). */
+  ascent: number;
+  /** Vertical extent below the centerline. */
+  descent: number;
+  /** Y coordinate where parents should connect power flow into/out of this node. */
+  connectY: number;
 };
 
-let _idCounter = 0;
-function nextId(): string {
-  return `el_${_idCounter++}`;
-}
-
-function elementWidth(el: LadderElement): number {
-  switch (el.type) {
-    case 'NO':
-    case 'NC':
-      return LAYOUT.CONTACT_WIDTH;
-    case 'OTE':
-    case 'OTL':
-    case 'OTU':
-      return LAYOUT.COIL_WIDTH;
-    case 'TON':
-    case 'TOF':
-      return LAYOUT.TIMER_WIDTH;
-    case 'CTU':
-    case 'CTD':
-      return LAYOUT.COUNTER_WIDTH;
-    case 'series':
-    case 'branch':
-      return 0; // computed recursively
-  }
-}
-
-function elementHeight(el: LadderElement): number {
-  switch (el.type) {
-    case 'NO':
-    case 'NC':
-      return LAYOUT.CONTACT_HEIGHT;
-    case 'OTE':
-    case 'OTL':
-    case 'OTU':
-      return LAYOUT.COIL_HEIGHT;
-    case 'TON':
-    case 'TOF':
-      return LAYOUT.TIMER_HEIGHT;
-    case 'CTU':
-    case 'CTD':
-      return LAYOUT.COUNTER_HEIGHT;
-    case 'series':
-    case 'branch':
-      return 0; // computed recursively
-  }
-}
+type OutputLayoutResult = {
+  nodes: LayoutNode[];
+  wires: LayoutWire[];
+  width: number;
+  /** Centerline-based extents like LogicLayoutResult. */
+  ascent: number;
+  descent: number;
+  /** Y where the rung wire connects to this output. */
+  connectY: number;
+};
 
 /**
- * Lay out a single condition element (contact, series, or branch).
- * Returns positioned elements, wires, and branch lines.
+ * Lay out a logic element (Contact / Series / Parallel) centered on `centerY`.
+ * `path` is the EditPath that this node would receive on click.
  */
-function layoutCondition(
-  condition: LadderCondition,
+function layoutLogic(
+  el: Element,
   x: number,
-  y: number,
-): LayoutResult {
-  switch (condition.type) {
-    case 'NO':
-    case 'NC': {
-      const w = elementWidth(condition);
-      const h = elementHeight(condition);
+  centerY: number,
+  rungIdx: number,
+  logicPath: number[],
+): LogicLayoutResult {
+  switch (el.kind) {
+    case 'contact': {
+      const w = LAYOUT.CONTACT_WIDTH;
+      const h = LAYOUT.CONTACT_HEIGHT;
+      const half = h / 2;
+      const node: LayoutNode = {
+        kind: 'contact',
+        element: el,
+        path: { kind: 'logic', rung: rungIdx, logic: logicPath },
+        x,
+        y: centerY - half,
+        width: w,
+        height: h,
+      };
       return {
-        elements: [{
-          id: nextId(),
-          element: condition,
-          x,
-          y: y - h / 2,
-          width: w,
-          height: h,
-        }],
+        nodes: [node],
         wires: [],
         branchLines: [],
         width: w,
-        height: h,
+        ascent: half,
+        descent: half,
+        connectY: centerY,
       };
     }
 
     case 'series': {
-      const elements: LayoutElement[] = [];
+      const nodes: LayoutNode[] = [];
       const wires: LayoutWire[] = [];
       const branchLines: LayoutBranchLine[] = [];
       let cursor = x;
-      let maxHeight: number = LAYOUT.CONTACT_HEIGHT;
+      let ascent = 0;
+      let descent = 0;
 
-      for (let i = 0; i < condition.elements.length; i++) {
-        const child = condition.elements[i];
-
-        // Wire before element (except first)
+      el.items.forEach((child, i) => {
         if (i > 0) {
-          wires.push({ x1: cursor, y1: y, x2: cursor + LAYOUT.WIRE_GAP, y2: y });
+          wires.push({ x1: cursor, y1: centerY, x2: cursor + LAYOUT.WIRE_GAP, y2: centerY });
           cursor += LAYOUT.WIRE_GAP;
         }
-
-        const result = layoutCondition(child, cursor, y);
-        elements.push(...result.elements);
-        wires.push(...result.wires);
-        branchLines.push(...result.branchLines);
-        cursor += result.width;
-        maxHeight = Math.max(maxHeight, result.height);
-      }
+        const r = layoutLogic(child, cursor, centerY, rungIdx, [...logicPath, i]);
+        nodes.push(...r.nodes);
+        wires.push(...r.wires);
+        branchLines.push(...r.branchLines);
+        cursor += r.width;
+        if (r.ascent > ascent) ascent = r.ascent;
+        if (r.descent > descent) descent = r.descent;
+      });
 
       return {
-        elements,
+        nodes,
         wires,
         branchLines,
         width: cursor - x,
-        height: maxHeight,
+        ascent,
+        descent,
+        connectY: centerY,
       };
     }
 
-    case 'branch': {
-      const elements: LayoutElement[] = [];
+    case 'parallel': {
+      // First pass: lay out each branch at origin to measure width.
+      type Measured = { result: LogicLayoutResult; height: number };
+      const measured: Measured[] = el.items.map((child, i) =>
+        ({
+          result: layoutLogic(child, 0, 0, rungIdx, [...logicPath, i]),
+          height: 0, // filled below
+        })
+      );
+      let maxBranchWidth = 0;
+      measured.forEach(m => {
+        m.height = m.result.ascent + m.result.descent;
+        if (m.result.width > maxBranchWidth) maxBranchWidth = m.result.width;
+      });
+
+      // Position branches: first branch on the centerline; subsequent
+      // branches stack downward by their (descent of previous + gap +
+      // ascent of next).
+      const nodes: LayoutNode[] = [];
       const wires: LayoutWire[] = [];
       const branchLines: LayoutBranchLine[] = [];
+      const branchYs: number[] = [];
+      let prevDescent = 0;
+      let pen = centerY;
+      el.items.forEach((child, i) => {
+        const m = measured[i];
+        if (i === 0) {
+          pen = centerY;
+        } else {
+          pen += prevDescent + LAYOUT.BRANCH_GAP + m.result.ascent;
+        }
+        branchYs.push(pen);
 
-      // Layout each path, stacking vertically
-      const pathResults: LayoutResult[] = [];
-      let totalHeight = 0;
-      let maxWidth = 0;
+        // Re-lay out this branch at the resolved (x, pen) position with
+        // its proper EditPath so click targets are correct.
+        const r = layoutLogic(child, x, pen, rungIdx, [...logicPath, i]);
+        nodes.push(...r.nodes);
+        wires.push(...r.wires);
+        branchLines.push(...r.branchLines);
 
-      for (let i = 0; i < condition.paths.length; i++) {
-        const path = condition.paths[i];
-        // Temporary layout to measure
-        const result = layoutCondition(path, 0, 0);
-        pathResults.push(result);
-        maxWidth = Math.max(maxWidth, result.width);
-        if (i > 0) totalHeight += LAYOUT.BRANCH_GAP;
-        totalHeight += result.height;
-      }
-
-      // Now position each path
-      // First path is at the main wire level (y)
-      // Subsequent paths are below
-      let pathY = y;
-      const branchX = x;
-      const branchEndX = x + maxWidth;
-      const pathYPositions: number[] = [];
-
-      for (let i = 0; i < condition.paths.length; i++) {
-        const path = condition.paths[i];
-        pathYPositions.push(pathY);
-
-        const result = layoutCondition(path, branchX, pathY);
-        elements.push(...result.elements);
-        wires.push(...result.wires);
-        branchLines.push(...result.branchLines);
-
-        // Wire from element end to branch end (align all paths to same width)
-        if (result.width < maxWidth) {
-          wires.push({
-            x1: branchX + result.width,
-            y1: pathY,
-            x2: branchEndX,
-            y2: pathY,
-          });
+        // Right-pad shorter branches so they all reach the same x.
+        if (r.width < maxBranchWidth) {
+          wires.push({ x1: x + r.width, y1: pen, x2: x + maxBranchWidth, y2: pen });
         }
 
-        pathY += result.height + LAYOUT.BRANCH_GAP;
+        prevDescent = m.result.descent;
+      });
+
+      // Vertical branch rails on the left and right edges.
+      if (branchYs.length > 1) {
+        const top = branchYs[0];
+        const bottom = branchYs[branchYs.length - 1];
+        branchLines.push({ x, y1: top, y2: bottom });
+        branchLines.push({ x: x + maxBranchWidth, y1: top, y2: bottom });
       }
 
-      // Vertical branch lines on left and right
-      if (pathYPositions.length > 1) {
-        const firstY = pathYPositions[0];
-        const lastY = pathYPositions[pathYPositions.length - 1];
-        branchLines.push({ x: branchX, y1: firstY, y2: lastY });
-        branchLines.push({ x: branchEndX, y1: firstY, y2: lastY });
-      }
+      const ascentTotal = centerY - branchYs[0] + measured[0].result.ascent;
+      const lastIdx = branchYs.length - 1;
+      const descentTotal = branchYs[lastIdx] - centerY + measured[lastIdx].result.descent;
 
       return {
-        elements,
+        nodes,
         wires,
         branchLines,
-        width: maxWidth,
-        height: totalHeight,
+        width: maxBranchWidth,
+        ascent: ascentTotal,
+        descent: descentTotal,
+        connectY: centerY,
       };
     }
   }
 }
 
 /**
- * Lay out a single output element (coil, timer, counter).
+ * Lay out an output (Coil or FBCall) centered on `centerY`.
+ *
+ * For FBCall, the box is anchored so the chosen power-flow pin sits on
+ * the rung wire. Other pins extend below; the box header sits above.
  */
 function layoutOutput(
-  output: LadderOutput,
+  out: Output,
   x: number,
-  y: number,
-): LayoutResult {
-  const w = elementWidth(output);
-  const h = elementHeight(output);
-  return {
-    elements: [{
-      id: nextId(),
-      element: output,
-      x,
-      y: y - h / 2,
+  centerY: number,
+  rungIdx: number,
+  outputIdx: number,
+): OutputLayoutResult {
+  const path: EditPath = { kind: 'output', rung: rungIdx, output: outputIdx };
+
+  if (out.kind === 'coil') {
+    const w = LAYOUT.COIL_WIDTH;
+    const h = LAYOUT.COIL_HEIGHT;
+    const half = h / 2;
+    return {
+      nodes: [{
+        kind: 'coil',
+        element: out,
+        path,
+        x,
+        y: centerY - half,
+        width: w,
+        height: h,
+      }],
+      wires: [],
       width: w,
-      height: h,
+      ascent: half,
+      descent: half,
+      connectY: centerY,
+    };
+  }
+
+  // FBCall — generic box with header + pin rows.
+  const inputKeys = Object.keys(out.inputs ?? {}).sort();
+  const powerKey = out.powerInput || inputKeys[0] || 'EN';
+  const orderedKeys = [
+    powerKey,
+    ...inputKeys.filter(k => k !== powerKey),
+  ].filter(k => k.length > 0);
+
+  // Width: text-based estimate; the renderer can override with a measured
+  // value later, but for v1 we approximate with character counts.
+  const longest = Math.max(
+    out.instance.length,
+    ...orderedKeys.map(k => k.length + (out.inputs?.[k] ? exprLabel(out.inputs[k]).length + 4 : 0)),
+  );
+  const approxCharPx = 7;
+  const width = Math.max(
+    LAYOUT.FB_MIN_WIDTH,
+    longest * approxCharPx + LAYOUT.FB_HORIZONTAL_PADDING * 2,
+  );
+
+  const headerH = LAYOUT.FB_HEADER_HEIGHT;
+  const rowH = LAYOUT.FB_PIN_ROW_HEIGHT;
+  const rows = Math.max(orderedKeys.length, 1);
+  const totalH = headerH + rows * rowH;
+
+  // Anchor: power pin sits on the rung wire. Power pin = first row.
+  const powerPinY = headerH + rowH / 2; // relative to box top
+  const yTop = centerY - powerPinY;
+
+  const pins: FBPin[] = orderedKeys.map((name, i) => {
+    const expr = out.inputs?.[name];
+    return {
+      name,
+      isPower: name === powerKey,
+      y: headerH + i * rowH + rowH / 2,
+      valueText: expr ? exprLabel(expr) : undefined,
+    };
+  });
+
+  return {
+    nodes: [{
+      kind: 'fb',
+      element: out,
+      path,
+      x,
+      y: yTop,
+      width,
+      height: totalH,
+      pins,
     }],
     wires: [],
-    branchLines: [],
-    width: w,
-    height: h,
+    width,
+    ascent: powerPinY,
+    descent: totalH - powerPinY,
+    connectY: centerY,
   };
 }
 
 /**
- * Compute the full layout for a rung.
+ * Compute layout for a single rung. Rungs are positioned starting at y=0
+ * (caller adds vertical offset between rungs).
  */
-export function layoutRung(rung: Rung): RungLayout {
-  _idCounter = 0;
+export function layoutRung(rung: Rung, rungIdx: number): RungLayout {
+  // Probe pass: measure the rung at a placeholder centerline so we know
+  // how far above the wire we have to push for parallels with branches
+  // above the main path.
+  const probe = layoutLogic(rung.logic, 0, 0, rungIdx, []);
+  const probeOutputs = (rung.outputs ?? []).map((o, i) => layoutOutput(o, 0, 0, rungIdx, i));
 
-  const elements: LayoutElement[] = [];
+  let ascent = probe.ascent;
+  let descent = probe.descent;
+  for (const po of probeOutputs) {
+    if (po.ascent > ascent) ascent = po.ascent;
+    if (po.descent > descent) descent = po.descent;
+  }
+
+  const wireY = LAYOUT.RUNG_PADDING_Y + ascent;
+  const nodes: LayoutNode[] = [];
   const wires: LayoutWire[] = [];
   const branchLines: LayoutBranchLine[] = [];
 
-  const wireY = LAYOUT.RUNG_PADDING_Y + LAYOUT.CONTACT_HEIGHT / 2;
   let cursor = LAYOUT.RAIL_LEFT;
-
-  // Wire from left rail
+  // Left rail tap.
   wires.push({ x1: 0, y1: wireY, x2: cursor, y2: wireY });
 
-  // Layout conditions
-  for (let i = 0; i < rung.conditions.length; i++) {
-    if (i > 0) {
-      wires.push({ x1: cursor, y1: wireY, x2: cursor + LAYOUT.WIRE_GAP, y2: wireY });
-      cursor += LAYOUT.WIRE_GAP;
-    }
+  const logic = layoutLogic(rung.logic, cursor, wireY, rungIdx, []);
+  nodes.push(...logic.nodes);
+  wires.push(...logic.wires);
+  branchLines.push(...logic.branchLines);
+  cursor += logic.width;
 
-    const result = layoutCondition(rung.conditions[i], cursor, wireY);
-    elements.push(...result.elements);
-    wires.push(...result.wires);
-    branchLines.push(...result.branchLines);
-    cursor += result.width;
-  }
-
-  // Wire gap before outputs
-  if (rung.conditions.length > 0 && rung.outputs.length > 0) {
+  // Wire gap before outputs.
+  if ((rung.outputs?.length ?? 0) > 0) {
     wires.push({ x1: cursor, y1: wireY, x2: cursor + LAYOUT.WIRE_GAP, y2: wireY });
     cursor += LAYOUT.WIRE_GAP;
   }
 
-  // Layout outputs
-  for (let i = 0; i < rung.outputs.length; i++) {
+  (rung.outputs ?? []).forEach((output, i) => {
     if (i > 0) {
       wires.push({ x1: cursor, y1: wireY, x2: cursor + LAYOUT.WIRE_GAP, y2: wireY });
       cursor += LAYOUT.WIRE_GAP;
     }
+    const r = layoutOutput(output, cursor, wireY, rungIdx, i);
+    nodes.push(...r.nodes);
+    wires.push(...r.wires);
+    cursor += r.width;
+  });
 
-    const result = layoutOutput(rung.outputs[i], cursor, wireY);
-    elements.push(...result.elements);
-    wires.push(...result.wires);
-    branchLines.push(...result.branchLines);
-    cursor += result.width;
-  }
-
-  // Wire to right rail
+  // Right rail tap.
   const rightRail = cursor + LAYOUT.RAIL_RIGHT_MARGIN;
   wires.push({ x1: cursor, y1: wireY, x2: rightRail, y2: wireY });
 
-  // Compute total height from all elements
-  let maxBottom = wireY + LAYOUT.CONTACT_HEIGHT / 2;
-  for (const el of elements) {
-    maxBottom = Math.max(maxBottom, el.y + el.height);
-  }
+  const totalHeight = wireY + descent + LAYOUT.RUNG_PADDING_Y;
 
   return {
-    elements,
+    nodes,
     wires,
     branchLines,
+    wireY,
     totalWidth: rightRail,
-    totalHeight: maxBottom + LAYOUT.RUNG_PADDING_Y,
+    totalHeight,
   };
 }
 
 /**
- * Compute layouts for all rungs in a program, stacking vertically.
+ * Compute layouts for all rungs in a diagram, stacked vertically.
+ * Returns rung layouts plus the y-offset where each rung starts.
  */
-export function layoutProgram(
-  rungs: Rung[],
-): { layouts: RungLayout[]; totalWidth: number; totalHeight: number } {
-  const layouts: RungLayout[] = [];
+export function layoutDiagram(diagram: Diagram): {
+  rungs: { layout: RungLayout; yOffset: number }[];
+  totalWidth: number;
+  totalHeight: number;
+} {
+  const rungs: { layout: RungLayout; yOffset: number }[] = [];
+  let yOffset = 0;
   let maxWidth = 0;
-
-  for (const rung of rungs) {
-    const layout = layoutRung(rung);
-    layouts.push(layout);
-    maxWidth = Math.max(maxWidth, layout.totalWidth);
-  }
-
-  let totalHeight = 0;
-  for (const layout of layouts) {
-    totalHeight += layout.totalHeight + LAYOUT.RUNG_GAP;
-  }
-
-  return { layouts, totalWidth: maxWidth, totalHeight };
+  diagram.rungs.forEach((r, i) => {
+    const layout = layoutRung(r, i);
+    rungs.push({ layout, yOffset });
+    if (layout.totalWidth > maxWidth) maxWidth = layout.totalWidth;
+    yOffset += layout.totalHeight + LAYOUT.RUNG_GAP;
+  });
+  return {
+    rungs,
+    totalWidth: maxWidth,
+    totalHeight: Math.max(yOffset, 80),
+  };
 }

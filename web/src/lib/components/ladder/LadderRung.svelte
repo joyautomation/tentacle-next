@@ -1,499 +1,362 @@
 <script lang="ts">
-  import type { Rung, RungLayout, Selection, TagValues, LayoutElement } from './types.js';
+  import type {
+    EditPath,
+    LayoutNode,
+    Rung,
+    RungLayout,
+    Selection,
+    TagValues,
+  } from './types.js';
   import { LAYOUT } from './types.js';
 
   interface Props {
     rung: Rung;
+    rungIndex: number;
     layout: RungLayout;
     selection: Selection;
-    tagValues: TagValues;
-    monitoring: boolean;
-    rungNumber: number;
-    onSelect: (rungId: string, path: number[], type: 'condition' | 'output') => void;
-    onTagEdit: (rungId: string, path: number[], type: 'condition' | 'output', newTag: string) => void;
-    onCommentEdit: (rungId: string, comment: string) => void;
-    onDeleteRung: () => void;
+    tagValues?: TagValues;
+    monitoring?: boolean;
+    onSelect: (path: EditPath) => void;
   }
 
   let {
-    rung, layout, selection, tagValues, monitoring, rungNumber,
-    onSelect, onTagEdit, onCommentEdit, onDeleteRung,
+    rung,
+    rungIndex,
+    layout,
+    selection,
+    tagValues = {},
+    monitoring = false,
+    onSelect,
   }: Props = $props();
 
-  let editingTag = $state<string | null>(null);
-  let editingComment = $state(false);
-  let editValue = $state('');
-
-  function isSelected(el: LayoutElement, idx: number): boolean {
-    if (!selection || selection.rungId !== rung.id) return false;
-    return selection.path[0] === idx;
+  // Two paths are equal when they target the same rung+kind+sub-index.
+  function pathEq(a: EditPath, b: EditPath): boolean {
+    if (a.kind !== b.kind || a.rung !== b.rung) return false;
+    if (a.kind === 'output' && b.kind === 'output') return a.output === b.output;
+    if (a.kind === 'logic' && b.kind === 'logic') {
+      if (a.logic.length !== b.logic.length) return false;
+      return a.logic.every((v, i) => v === b.logic[i]);
+    }
+    return false;
   }
 
-  function getElementType(el: LayoutElement): 'condition' | 'output' {
-    const t = el.element.type;
-    if (t === 'NO' || t === 'NC' || t === 'series' || t === 'branch') return 'condition';
-    return 'output';
+  function isSelected(node: LayoutNode): boolean {
+    return selection !== null && pathEq(selection, node.path);
   }
 
-  function isEnergized(tag: string): boolean {
+  function isEnergized(operand: string): boolean {
     if (!monitoring) return false;
-    const tv = tagValues[tag];
+    const tv = tagValues[operand];
     return tv ? Boolean(tv.value) : false;
   }
 
-  function getTagValue(tag: string): string {
-    const tv = tagValues[tag];
-    if (!tv) return '';
+  function valueText(operand: string): string | null {
+    const tv = tagValues[operand];
+    if (!tv) return null;
     if (typeof tv.value === 'boolean') return tv.value ? '1' : '0';
-    if (typeof tv.value === 'number') return tv.value.toFixed(1);
+    if (typeof tv.value === 'number') return Number.isInteger(tv.value) ? String(tv.value) : tv.value.toFixed(2);
     return String(tv.value);
   }
 
-  function wireColor(energized: boolean): string {
-    return energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text-muted, #666)';
-  }
-
-  function handleElementClick(e: MouseEvent, elId: string, idx: number, type: 'condition' | 'output') {
+  function handleNodeClick(e: MouseEvent, node: LayoutNode) {
     e.stopPropagation();
-    onSelect(rung.id, [idx], type);
-  }
-
-  function startTagEdit(e: MouseEvent, elId: string, currentTag: string) {
-    e.stopPropagation();
-    editingTag = elId;
-    editValue = currentTag;
-  }
-
-  function commitTagEdit(elId: string, idx: number, type: 'condition' | 'output') {
-    if (editValue.trim()) {
-      onTagEdit(rung.id, [idx], type, editValue.trim());
-    }
-    editingTag = null;
-  }
-
-  function startCommentEdit(e: MouseEvent) {
-    e.stopPropagation();
-    editingComment = true;
-    editValue = rung.comment;
-  }
-
-  function commitCommentEdit() {
-    onCommentEdit(rung.id, editValue);
-    editingComment = false;
-  }
-
-  // Find the condition/output index for an element
-  function findElementIndex(el: LayoutElement): { idx: number; type: 'condition' | 'output' } {
-    const t = el.element.type;
-    if (t === 'NO' || t === 'NC' || t === 'series' || t === 'branch') {
-      const idx = rung.conditions.indexOf(el.element as any);
-      return { idx: Math.max(0, idx), type: 'condition' };
-    }
-    const idx = rung.outputs.indexOf(el.element as any);
-    return { idx: Math.max(0, idx), type: 'output' };
+    onSelect(node.path);
   }
 </script>
 
-<g class="rung">
-  <!-- Rung number -->
+<g class="rung" data-rung={rungIndex}>
+  <!-- Rung number gutter -->
   <text
+    class="rung-number"
     x="4"
-    y="10"
-    fill="var(--theme-text-muted, #666)"
-    font-size="10"
-    font-family="var(--theme-font-basic, sans-serif)"
+    y={layout.wireY + 4}
   >
-    {rungNumber}
+    {rungIndex}
   </text>
 
-  <!-- Comment -->
-  {#if rung.comment || editingComment}
-    {#if editingComment}
-      <foreignObject x={LAYOUT.RAIL_LEFT} y="-2" width="400" height="18">
-        <input
-          type="text"
-          class="comment-input"
-          bind:value={editValue}
-          onblur={() => commitCommentEdit()}
-          onkeydown={(e) => { if (e.key === 'Enter') commitCommentEdit(); }}
-          autofocus
-        />
-      </foreignObject>
-    {:else}
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <text
-        x={LAYOUT.RAIL_LEFT}
-        y="8"
-        fill="var(--green-400, #4ade80)"
-        font-size="10"
-        font-family="monospace"
-        font-style="italic"
-        class="comment-text"
-        ondblclick={startCommentEdit}
-      >
-        // {rung.comment}
-      </text>
-    {/if}
+  {#if rung.comment}
+    <text
+      class="rung-comment"
+      x={LAYOUT.RAIL_LEFT}
+      y={Math.max(LAYOUT.RUNG_PADDING_Y - 8, 12)}
+    >
+      {rung.comment}
+    </text>
   {/if}
-
-  <!-- Power rails -->
-  <line
-    x1="0" y1="0"
-    x2="0" y2={layout.totalHeight}
-    stroke="var(--theme-text, #ccc)"
-    stroke-width="2"
-  />
-  <line
-    x1={layout.totalWidth} y1="0"
-    x2={layout.totalWidth} y2={layout.totalHeight}
-    stroke="var(--theme-text, #ccc)"
-    stroke-width="2"
-  />
 
   <!-- Wires -->
   {#each layout.wires as wire}
     <line
-      x1={wire.x1} y1={wire.y1}
-      x2={wire.x2} y2={wire.y2}
-      stroke="var(--theme-text-muted, #666)"
-      stroke-width="1.5"
+      x1={wire.x1}
+      y1={wire.y1}
+      x2={wire.x2}
+      y2={wire.y2}
+      class="wire"
     />
   {/each}
 
-  <!-- Branch lines -->
+  <!-- Branch rails (vertical lines of Parallel groups) -->
   {#each layout.branchLines as bl}
     <line
-      x1={bl.x} y1={bl.y1}
-      x2={bl.x} y2={bl.y2}
-      stroke="var(--theme-text-muted, #666)"
-      stroke-width="1.5"
+      x1={bl.x}
+      y1={bl.y1}
+      x2={bl.x}
+      y2={bl.y2}
+      class="wire branch"
     />
   {/each}
 
-  <!-- Elements -->
-  {#each layout.elements as layoutEl, i}
-    {@const el = layoutEl.element}
-    {@const elType = getElementType(layoutEl)}
-    {@const selected = selection?.rungId === rung.id && selection?.path[0] === i && selection?.type === elType}
-    {@const tag = 'tag' in el ? el.tag : ''}
-    {@const energized = monitoring && tag ? isEnergized(tag) : false}
-
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <g
-      class="ladder-element"
-      class:selected
-      class:energized
-      transform="translate({layoutEl.x}, {layoutEl.y})"
-      onclick={(e) => handleElementClick(e, layoutEl.id, i, elType)}
-    >
-      {#if el.type === 'NO' || el.type === 'NC'}
-        <!-- Contact symbol -->
-        <rect
-          x="0" y="0"
-          width={layoutEl.width} height={layoutEl.height}
-          fill="transparent"
-          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : 'transparent'}
-          stroke-width="1"
-          rx="2"
-        />
-        <!-- Contact lines -->
-        <line x1="0" y1={layoutEl.height / 2} x2={layoutEl.width * 0.3} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="1.5" />
-        <line x1={layoutEl.width * 0.7} y1={layoutEl.height / 2} x2={layoutEl.width} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="1.5" />
-        <!-- Vertical bars -->
-        <line x1={layoutEl.width * 0.3} y1={layoutEl.height * 0.2} x2={layoutEl.width * 0.3} y2={layoutEl.height * 0.8}
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="2" />
-        <line x1={layoutEl.width * 0.7} y1={layoutEl.height * 0.2} x2={layoutEl.width * 0.7} y2={layoutEl.height * 0.8}
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="2" />
-        {#if el.type === 'NC'}
-          <!-- Diagonal slash for NC -->
-          <line x1={layoutEl.width * 0.35} y1={layoutEl.height * 0.75} x2={layoutEl.width * 0.65} y2={layoutEl.height * 0.25}
-            stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-            stroke-width="1.5" />
+  <!-- Nodes -->
+  {#each layout.nodes as node}
+    {#if node.kind === 'contact'}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <g
+        class="node contact"
+        class:selected={isSelected(node)}
+        class:energized={isEnergized(node.element.operand)}
+        transform={`translate(${node.x}, ${node.y})`}
+        onclick={(e) => handleNodeClick(e, node)}
+      >
+        <!-- Contact body: two vertical bars at the ends, gap in the middle. -->
+        <rect class="hit" x="0" y="0" width={node.width} height={node.height} rx="2" />
+        <line x1="14" y1="6" x2="14" y2={node.height - 6} class="post" />
+        <line x1={node.width - 14} y1="6" x2={node.width - 14} y2={node.height - 6} class="post" />
+        <!-- NC mark: diagonal slash through the gap. -->
+        {#if node.element.form === 'NC'}
+          <line
+            x1="14"
+            y1={node.height - 4}
+            x2={node.width - 14}
+            y2="4"
+            class="nc-slash"
+          />
         {/if}
-
-        <!-- Tag name -->
-        {#if editingTag === layoutEl.id}
-          <foreignObject x="5" y={layoutEl.height - 4} width={layoutEl.width - 10} height="18">
-            <input
-              type="text"
-              class="tag-input"
-              bind:value={editValue}
-              onblur={() => commitTagEdit(layoutEl.id, i, elType)}
-              onkeydown={(e) => { if (e.key === 'Enter') commitTagEdit(layoutEl.id, i, elType); }}
-              autofocus
-            />
-          </foreignObject>
-        {:else}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <text
-            x={layoutEl.width / 2}
-            y={-4}
-            text-anchor="middle"
-            fill="var(--theme-text, #ccc)"
-            font-size={LAYOUT.TAG_FONT_SIZE}
-            font-family="monospace"
-            class="tag-label"
-            ondblclick={(e) => startTagEdit(e, layoutEl.id, tag)}
-          >
-            {tag}
-          </text>
-        {/if}
-
-        <!-- Type label -->
         <text
-          x={layoutEl.width / 2}
-          y={layoutEl.height + 12}
+          class="operand"
+          x={node.width / 2}
+          y={node.height / 2 + 4}
           text-anchor="middle"
-          fill="var(--theme-text-muted, #666)"
-          font-size={LAYOUT.LABEL_FONT_SIZE}
-          font-family="monospace"
         >
-          {el.type}
+          {node.element.operand || '?'}
         </text>
-
-        <!-- Monitoring value -->
-        {#if monitoring && tag}
-          <text
-            x={layoutEl.width / 2}
-            y={layoutEl.height + 22}
-            text-anchor="middle"
-            fill={energized ? 'var(--green-400, #4ade80)' : 'var(--red-400, #f87171)'}
-            font-size="9"
-            font-family="monospace"
-            font-weight="bold"
-          >
-            {getTagValue(tag)}
-          </text>
-        {/if}
-
-      {:else if el.type === 'OTE' || el.type === 'OTL' || el.type === 'OTU'}
-        <!-- Coil symbol -->
-        <rect
-          x="0" y="0"
-          width={layoutEl.width} height={layoutEl.height}
-          fill="transparent"
-          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : 'transparent'}
-          stroke-width="1"
-          rx="2"
-        />
-        <!-- Coil wires -->
-        <line x1="0" y1={layoutEl.height / 2} x2={layoutEl.width * 0.25} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="1.5" />
-        <line x1={layoutEl.width * 0.75} y1={layoutEl.height / 2} x2={layoutEl.width} y2={layoutEl.height / 2}
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="1.5" />
-        <!-- Coil parentheses (arcs) -->
-        <path
-          d="M {layoutEl.width * 0.35} {layoutEl.height * 0.2} C {layoutEl.width * 0.2} {layoutEl.height * 0.2}, {layoutEl.width * 0.2} {layoutEl.height * 0.8}, {layoutEl.width * 0.35} {layoutEl.height * 0.8}"
-          fill="none"
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="2"
-        />
-        <path
-          d="M {layoutEl.width * 0.65} {layoutEl.height * 0.2} C {layoutEl.width * 0.8} {layoutEl.height * 0.2}, {layoutEl.width * 0.8} {layoutEl.height * 0.8}, {layoutEl.width * 0.65} {layoutEl.height * 0.8}"
-          fill="none"
-          stroke={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-          stroke-width="2"
-        />
-        {#if el.type === 'OTL'}
-          <!-- L for latch -->
-          <text x={layoutEl.width / 2} y={layoutEl.height / 2 + 4} text-anchor="middle"
-            fill={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-            font-size="12" font-family="monospace" font-weight="bold">L</text>
-        {:else if el.type === 'OTU'}
-          <!-- U for unlatch -->
-          <text x={layoutEl.width / 2} y={layoutEl.height / 2 + 4} text-anchor="middle"
-            fill={energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text, #ccc)'}
-            font-size="12" font-family="monospace" font-weight="bold">U</text>
-        {/if}
-
-        <!-- Tag name -->
-        {#if editingTag === layoutEl.id}
-          <foreignObject x="5" y={layoutEl.height - 4} width={layoutEl.width - 10} height="18">
-            <input
-              type="text"
-              class="tag-input"
-              bind:value={editValue}
-              onblur={() => commitTagEdit(layoutEl.id, i, elType)}
-              onkeydown={(e) => { if (e.key === 'Enter') commitTagEdit(layoutEl.id, i, elType); }}
-              autofocus
-            />
-          </foreignObject>
-        {:else}
-          <text
-            x={layoutEl.width / 2}
-            y={-4}
-            text-anchor="middle"
-            fill="var(--theme-text, #ccc)"
-            font-size={LAYOUT.TAG_FONT_SIZE}
-            font-family="monospace"
-            class="tag-label"
-            ondblclick={(e) => startTagEdit(e, layoutEl.id, tag)}
-          >
-            {tag}
-          </text>
-        {/if}
-
-        <!-- Type label -->
         <text
-          x={layoutEl.width / 2}
-          y={layoutEl.height + 12}
+          class="form-label"
+          x={node.width / 2}
+          y={-4}
           text-anchor="middle"
-          fill="var(--theme-text-muted, #666)"
-          font-size={LAYOUT.LABEL_FONT_SIZE}
-          font-family="monospace"
         >
-          {el.type}
-        </text>
-
-        <!-- Monitoring value -->
-        {#if monitoring && tag}
-          <text
-            x={layoutEl.width / 2}
-            y={layoutEl.height + 22}
-            text-anchor="middle"
-            fill={energized ? 'var(--green-400, #4ade80)' : 'var(--red-400, #f87171)'}
-            font-size="9"
-            font-family="monospace"
-            font-weight="bold"
-          >
-            {getTagValue(tag)}
-          </text>
-        {/if}
-
-      {:else if el.type === 'TON' || el.type === 'TOF'}
-        <!-- Timer block -->
-        <rect
-          x="0" y="0"
-          width={layoutEl.width} height={layoutEl.height}
-          fill="var(--theme-surface, #1a1a1a)"
-          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text-muted, #666)'}
-          stroke-width={selected ? 2 : 1.5}
-          rx="3"
-        />
-        <!-- Wires in/out -->
-        <line x1={-LAYOUT.WIRE_GAP} y1={layoutEl.height / 2} x2="0" y2={layoutEl.height / 2}
-          stroke="var(--theme-text-muted, #666)" stroke-width="1.5" />
-        <line x1={layoutEl.width} y1={layoutEl.height / 2} x2={layoutEl.width + LAYOUT.WIRE_GAP} y2={layoutEl.height / 2}
-          stroke="var(--theme-text-muted, #666)" stroke-width="1.5" />
-        <!-- Timer type -->
-        <text x={layoutEl.width / 2} y="16" text-anchor="middle"
-          fill="var(--theme-text, #ccc)" font-size="12" font-family="monospace" font-weight="bold">
-          {el.type}
-        </text>
-        <!-- Tag -->
-        <text x={layoutEl.width / 2} y="32" text-anchor="middle"
-          fill="var(--theme-text, #ccc)" font-size={LAYOUT.TAG_FONT_SIZE} font-family="monospace">
-          {el.tag}
-        </text>
-        <!-- Preset -->
-        <text x={layoutEl.width / 2} y="48" text-anchor="middle"
-          fill="var(--theme-text-muted, #666)" font-size="9" font-family="monospace">
-          PRE: {el.preset}ms
-        </text>
-        <!-- Monitoring: ACC and DN -->
-        {#if monitoring}
-          <text x={layoutEl.width / 2} y="62" text-anchor="middle"
-            fill="var(--cyan-400, #22d3ee)" font-size="9" font-family="monospace">
-            ACC: {getTagValue(`${el.tag}.ACC`)} | DN: {getTagValue(`${el.tag}.DN`)}
-          </text>
-        {/if}
-
-      {:else if el.type === 'CTU' || el.type === 'CTD'}
-        <!-- Counter block -->
-        <rect
-          x="0" y="0"
-          width={layoutEl.width} height={layoutEl.height}
-          fill="var(--theme-surface, #1a1a1a)"
-          stroke={selected ? 'var(--theme-primary, #0ea5e9)' : energized ? 'var(--green-500, #22c55e)' : 'var(--theme-text-muted, #666)'}
-          stroke-width={selected ? 2 : 1.5}
-          rx="3"
-        />
-        <line x1={-LAYOUT.WIRE_GAP} y1={layoutEl.height / 2} x2="0" y2={layoutEl.height / 2}
-          stroke="var(--theme-text-muted, #666)" stroke-width="1.5" />
-        <line x1={layoutEl.width} y1={layoutEl.height / 2} x2={layoutEl.width + LAYOUT.WIRE_GAP} y2={layoutEl.height / 2}
-          stroke="var(--theme-text-muted, #666)" stroke-width="1.5" />
-        <text x={layoutEl.width / 2} y="16" text-anchor="middle"
-          fill="var(--theme-text, #ccc)" font-size="12" font-family="monospace" font-weight="bold">
-          {el.type}
-        </text>
-        <text x={layoutEl.width / 2} y="32" text-anchor="middle"
-          fill="var(--theme-text, #ccc)" font-size={LAYOUT.TAG_FONT_SIZE} font-family="monospace">
-          {el.tag}
-        </text>
-        <text x={layoutEl.width / 2} y="48" text-anchor="middle"
-          fill="var(--theme-text-muted, #666)" font-size="9" font-family="monospace">
-          PRE: {el.preset}
+          {node.element.form}
         </text>
         {#if monitoring}
-          <text x={layoutEl.width / 2} y="62" text-anchor="middle"
-            fill="var(--cyan-400, #22d3ee)" font-size="9" font-family="monospace">
-            ACC: {getTagValue(`${el.tag}.ACC`)} | DN: {getTagValue(`${el.tag}.DN`)}
-          </text>
+          {@const v = valueText(node.element.operand)}
+          {#if v !== null}
+            <text class="live-value" x={node.width / 2} y={node.height + 12} text-anchor="middle">
+              {v}
+            </text>
+          {/if}
         {/if}
-      {/if}
-    </g>
+      </g>
+    {:else if node.kind === 'coil'}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <g
+        class="node coil"
+        class:selected={isSelected(node)}
+        class:energized={isEnergized(node.element.operand)}
+        transform={`translate(${node.x}, ${node.y})`}
+        onclick={(e) => handleNodeClick(e, node)}
+      >
+        <rect class="hit" x="0" y="0" width={node.width} height={node.height} rx="2" />
+        <!-- Coil body: two arcs facing each other forming a (). -->
+        <path
+          class="coil-arc"
+          d={`M 12 6 Q 4 ${node.height / 2} 12 ${node.height - 6}`}
+          fill="none"
+        />
+        <path
+          class="coil-arc"
+          d={`M ${node.width - 12} 6 Q ${node.width - 4} ${node.height / 2} ${node.width - 12} ${node.height - 6}`}
+          fill="none"
+        />
+        <text class="operand" x={node.width / 2} y={node.height / 2 + 4} text-anchor="middle">
+          {node.element.operand || '?'}
+        </text>
+        <text class="form-label" x={node.width / 2} y={-4} text-anchor="middle">
+          {node.element.form}
+        </text>
+      </g>
+    {:else}
+      <!-- FB call: header + pin rows. -->
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <g
+        class="node fb"
+        class:selected={isSelected(node)}
+        transform={`translate(${node.x}, ${node.y})`}
+        onclick={(e) => handleNodeClick(e, node)}
+      >
+        <rect class="fb-body" x="0" y="0" width={node.width} height={node.height} rx="3" />
+        <line
+          x1="0"
+          y1={LAYOUT.FB_HEADER_HEIGHT}
+          x2={node.width}
+          y2={LAYOUT.FB_HEADER_HEIGHT}
+          class="fb-header-rule"
+        />
+        <text
+          class="fb-instance"
+          x={node.width / 2}
+          y={LAYOUT.FB_HEADER_HEIGHT - 8}
+          text-anchor="middle"
+        >
+          {node.element.instance}
+        </text>
+        {#each node.pins as pin}
+          <text
+            class="fb-pin-name"
+            class:power={pin.isPower}
+            x={LAYOUT.FB_HORIZONTAL_PADDING}
+            y={pin.y + 4}
+          >
+            {pin.name}
+          </text>
+          {#if pin.valueText !== undefined}
+            <text
+              class="fb-pin-value"
+              x={node.width - LAYOUT.FB_HORIZONTAL_PADDING}
+              y={pin.y + 4}
+              text-anchor="end"
+            >
+              {pin.valueText}
+            </text>
+          {/if}
+          <!-- Power-flow tick on the left edge for the power pin. -->
+          {#if pin.isPower}
+            <line x1="-6" y1={pin.y} x2="0" y2={pin.y} class="wire" />
+          {/if}
+        {/each}
+      </g>
+    {/if}
   {/each}
 </g>
 
 <style lang="scss">
-  .ladder-element {
-    cursor: pointer;
-
-    &:hover {
-      opacity: 0.85;
-    }
-
-    &.selected {
-      filter: drop-shadow(0 0 4px var(--theme-primary, #0ea5e9));
-    }
-
-    &.energized line,
-    &.energized path {
-      filter: drop-shadow(0 0 3px var(--green-500, #22c55e));
-    }
+  .rung-number {
+    fill: var(--theme-text-muted, #888);
+    font-size: 10px;
+    font-family: var(--theme-font-basic, ui-monospace, monospace);
   }
 
-  .tag-label {
-    cursor: text;
-    user-select: none;
-
-    &:hover {
-      fill: var(--theme-primary, #0ea5e9);
-    }
-  }
-
-  .comment-text {
-    cursor: text;
-    user-select: none;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-
-  :global(.tag-input),
-  :global(.comment-input) {
-    background: var(--theme-input-bg, #333);
-    border: 1px solid var(--theme-primary, #0ea5e9);
-    color: var(--theme-text, #ccc);
-    font-family: monospace;
+  .rung-comment {
+    fill: var(--theme-text-muted, #888);
     font-size: 11px;
-    padding: 1px 4px;
-    width: 100%;
-    height: 100%;
-    box-sizing: border-box;
-    outline: none;
-    border-radius: 2px;
+    font-style: italic;
+    font-family: var(--theme-font-basic, sans-serif);
+  }
+
+  .wire {
+    stroke: var(--theme-text-muted, #888);
+    stroke-width: 1.5;
+  }
+
+  .wire.branch {
+    stroke-width: 1.5;
+  }
+
+  .node {
+    cursor: pointer;
+  }
+
+  .node .hit {
+    fill: transparent;
+    stroke: transparent;
+  }
+
+  .node.selected .hit {
+    fill: var(--theme-primary, #3b82f6);
+    fill-opacity: 0.08;
+    stroke: var(--theme-primary, #3b82f6);
+    stroke-width: 1;
+  }
+
+  .post {
+    stroke: var(--theme-text, #ddd);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .nc-slash {
+    stroke: var(--theme-text, #ddd);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  .coil-arc {
+    stroke: var(--theme-text, #ddd);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .operand {
+    fill: var(--theme-text, #ddd);
+    font-size: 12px;
+    font-family: var(--theme-font-basic, ui-monospace, monospace);
+  }
+
+  .form-label {
+    fill: var(--theme-text-muted, #888);
+    font-size: 9px;
+    font-family: var(--theme-font-basic, ui-monospace, monospace);
+    letter-spacing: 0.5px;
+  }
+
+  .live-value {
+    fill: var(--theme-primary, #3b82f6);
+    font-size: 10px;
+    font-family: var(--theme-font-basic, ui-monospace, monospace);
+  }
+
+  .energized .post,
+  .energized .nc-slash,
+  .energized .coil-arc {
+    stroke: var(--green-500, #22c55e);
+  }
+
+  .fb-body {
+    fill: var(--theme-surface, #1f2937);
+    stroke: var(--theme-text, #ddd);
+    stroke-width: 1.2;
+  }
+
+  .fb-header-rule {
+    stroke: var(--theme-text-muted, #888);
+    stroke-width: 0.8;
+  }
+
+  .fb-instance {
+    fill: var(--theme-text, #ddd);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--theme-font-basic, ui-monospace, monospace);
+  }
+
+  .fb-pin-name {
+    fill: var(--theme-text-muted, #aaa);
+    font-size: 11px;
+    font-family: var(--theme-font-basic, ui-monospace, monospace);
+  }
+
+  .fb-pin-name.power {
+    fill: var(--theme-text, #ddd);
+    font-weight: 600;
+  }
+
+  .fb-pin-value {
+    fill: var(--theme-text, #ddd);
+    font-size: 11px;
+    font-family: var(--theme-font-basic, ui-monospace, monospace);
+  }
+
+  .fb.selected .fb-body {
+    stroke: var(--theme-primary, #3b82f6);
+    stroke-width: 1.8;
   }
 </style>
