@@ -17,6 +17,7 @@
     tagValues?: TagValues;
     monitoring?: boolean;
     onSelect: (path: EditPath) => void;
+    onVariableDrop?: (path: EditPath, varName: string) => void;
   }
 
   let {
@@ -27,7 +28,51 @@
     tagValues = {},
     monitoring = false,
     onSelect,
+    onVariableDrop,
   }: Props = $props();
+
+  // Tracks which node is currently being hovered over with a variable
+  // drag — drives the .drop-target style so the user sees where the drop
+  // will land.
+  let dropTargetKey = $state<string | null>(null);
+
+  function nodeKey(node: LayoutNode): string {
+    if (node.path.kind === 'logic') return `L:${node.path.rung}:${node.path.logic.join('.')}`;
+    return `O:${node.path.rung}:${node.path.output}`;
+  }
+
+  function isContactOrCoil(node: LayoutNode): boolean {
+    return node.kind === 'contact' || node.kind === 'coil';
+  }
+
+  function handleDragOver(e: DragEvent, node: LayoutNode) {
+    if (!onVariableDrop) return;
+    if (!isContactOrCoil(node)) return;
+    if (!e.dataTransfer?.types.includes('application/x-plc-variable')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropTargetKey = nodeKey(node);
+  }
+
+  function handleDragLeave(node: LayoutNode) {
+    if (dropTargetKey === nodeKey(node)) dropTargetKey = null;
+  }
+
+  function handleDrop(e: DragEvent, node: LayoutNode) {
+    if (!onVariableDrop) return;
+    if (!isContactOrCoil(node)) return;
+    const raw = e.dataTransfer?.getData('application/x-plc-variable');
+    if (!raw) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dropTargetKey = null;
+    try {
+      const payload = JSON.parse(raw) as { name?: string };
+      if (payload?.name) onVariableDrop(node.path, payload.name);
+    } catch {
+      // Malformed payload — ignore silently.
+    }
+  }
 
   // Two paths are equal when they target the same rung+kind+sub-index.
   function pathEq(a: EditPath, b: EditPath): boolean {
@@ -114,8 +159,12 @@
         class="node contact"
         class:selected={isSelected(node)}
         class:energized={isEnergized(node.element.operand)}
+        class:drop-target={dropTargetKey === nodeKey(node)}
         transform={`translate(${node.x}, ${node.y})`}
         onclick={(e) => handleNodeClick(e, node)}
+        ondragover={(e) => handleDragOver(e, node)}
+        ondragleave={() => handleDragLeave(node)}
+        ondrop={(e) => handleDrop(e, node)}
       >
         <!-- Contact body: two vertical bars at the ends, gap in the middle. -->
         <rect class="hit" x="0" y="0" width={node.width} height={node.height} rx="2" />
@@ -162,8 +211,12 @@
         class="node coil"
         class:selected={isSelected(node)}
         class:energized={isEnergized(node.element.operand)}
+        class:drop-target={dropTargetKey === nodeKey(node)}
         transform={`translate(${node.x}, ${node.y})`}
         onclick={(e) => handleNodeClick(e, node)}
+        ondragover={(e) => handleDragOver(e, node)}
+        ondragleave={() => handleDragLeave(node)}
+        ondrop={(e) => handleDrop(e, node)}
       >
         <rect class="hit" x="0" y="0" width={node.width} height={node.height} rx="2" />
         <!-- Coil body: two arcs facing each other forming a (). -->
@@ -275,6 +328,14 @@
     fill-opacity: 0.08;
     stroke: var(--theme-primary, #3b82f6);
     stroke-width: 1;
+  }
+
+  .node.drop-target .hit {
+    fill: var(--green-500, #22c55e);
+    fill-opacity: 0.18;
+    stroke: var(--green-500, #22c55e);
+    stroke-width: 1.5;
+    stroke-dasharray: 3 2;
   }
 
   .post {

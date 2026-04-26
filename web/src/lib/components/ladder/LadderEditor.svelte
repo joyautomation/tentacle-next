@@ -29,10 +29,29 @@
     diagram: Diagram;
     tagValues?: TagValues;
     monitoring?: boolean;
+    /** Names available for operand autocomplete + drag-drop targets. */
+    variableNames?: string[];
     onChange?: (next: Diagram) => void;
   }
 
-  let { diagram, tagValues = {}, monitoring = false, onChange }: Props = $props();
+  let {
+    diagram,
+    tagValues = {},
+    monitoring = false,
+    variableNames = [],
+    onChange,
+  }: Props = $props();
+
+  // Stable id so the inspector input can reference its own <datalist>
+  // even if multiple LadderEditor instances mount on the page.
+  const operandListId = `lad-operand-list-${Math.random().toString(36).slice(2, 8)}`;
+  let lastBlockMessage = $state<string | null>(null);
+  let blockMessageTimer: number | null = null;
+  function flashBlocked(msg: string) {
+    lastBlockMessage = msg;
+    if (blockMessageTimer !== null) window.clearTimeout(blockMessageTimer);
+    blockMessageTimer = window.setTimeout(() => (lastBlockMessage = null), 2400);
+  }
 
   let selection = $state<Selection>(null);
   let containerEl: HTMLDivElement | undefined = $state();
@@ -74,9 +93,25 @@
 
   function deleteSelected() {
     if (!selection) return;
+    // Illegal-state guard: a rung with no output is not useful, so block
+    // deleting the last output instead of letting the diagram reach that
+    // state. The user can always replace it instead.
+    if (selection.kind === 'output') {
+      const rung = diagram.rungs[selection.rung];
+      if (rung && (rung.outputs?.length ?? 0) <= 1) {
+        flashBlocked("Can't delete the rung's only output. Add another first, then remove this one.");
+        return;
+      }
+    }
     const next = deleteAtPath(diagram, selection);
     selection = null;
     emit(next);
+  }
+
+  function handleVariableDrop(path: EditPath, varName: string) {
+    if (!varName) return;
+    emit(setOperand(diagram, path, varName));
+    selection = path;
   }
 
   function addContactInSeries(form: 'NO' | 'NC') {
@@ -185,6 +220,7 @@
               {tagValues}
               {monitoring}
               onSelect={handleSelect}
+              onVariableDrop={handleVariableDrop}
             />
           </g>
         {/each}
@@ -200,6 +236,12 @@
           </text>
         {/if}
       </svg>
+
+      {#if lastBlockMessage}
+        <div class="block-toast" role="status" aria-live="polite">
+          {lastBlockMessage}
+        </div>
+      {/if}
     </div>
 
     {#if selection && selectedElement}
@@ -229,7 +271,16 @@
               value={selectedElement.operand}
               oninput={(e) => commitOperand((e.target as HTMLInputElement).value)}
               placeholder="variable name"
+              list={operandListId}
+              autocomplete="off"
             />
+            {#if variableNames.length > 0}
+              <datalist id={operandListId}>
+                {#each variableNames as v}
+                  <option value={v}></option>
+                {/each}
+              </datalist>
+            {/if}
           </label>
         {:else if selectedElement.kind === 'fb'}
           <label>
@@ -265,10 +316,27 @@
     flex: 1;
     overflow: auto;
     padding: 8px;
+    position: relative;
 
     svg {
       display: block;
     }
+  }
+
+  .block-toast {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--theme-surface, #181818);
+    color: var(--theme-text, #ddd);
+    border: 1px solid var(--theme-warning, #d97706);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: var(--theme-font-basic, sans-serif);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
   }
 
   .empty-hint {

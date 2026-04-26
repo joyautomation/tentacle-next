@@ -675,6 +675,7 @@
 						diagram={draftDiagram}
 						tagValues={tagValuesForLad}
 						monitoring={showInlineValues}
+						{variableNames}
 						onChange={onLadderChange}
 					/>
 				</div>
