@@ -24,7 +24,11 @@ type kvChange struct {
 }
 
 // syncToGit exports current config and commits/pushes to git.
-func syncToGit(b bus.Bus, repo *gitRepo, configPath string, autoPush bool, log *slog.Logger) {
+//
+// nodeID identifies which edge produced the commit; it goes into the commit
+// trailer so a fleet operator can audit which side of the bidirectional sync
+// originated each change.
+func syncToGit(b bus.Bus, repo *gitRepo, configPath, nodeID string, autoPush bool, log *slog.Logger) {
 	resources, err := manifest.Export(b, manifest.ExportOptions{})
 	if err != nil {
 		log.Error("gitops: export failed", "error", err)
@@ -46,7 +50,11 @@ func syncToGit(b bus.Bus, repo *gitRepo, configPath string, autoPush bool, log *
 		return
 	}
 
-	msg := fmt.Sprintf("config: update via tentacle at %s", time.Now().Format(time.RFC3339))
+	source := nodeID
+	if source == "" {
+		source = "edge"
+	}
+	msg := fmt.Sprintf("config: update via tentacle at %s\n\nSource: edge:%s", time.Now().Format(time.RFC3339), source)
 	if err := repo.CommitAll(msg); err != nil {
 		log.Error("gitops: commit failed", "error", err)
 		return
@@ -54,7 +62,7 @@ func syncToGit(b bus.Bus, repo *gitRepo, configPath string, autoPush bool, log *
 	log.Info("gitops: committed config changes")
 
 	if autoPush {
-		if err := repo.Push(); err != nil {
+		if err := repo.PushWithRetry(); err != nil {
 			log.Error("gitops: push failed", "error", err)
 			return
 		}
@@ -149,7 +157,7 @@ func isGitOpsSource(b bus.Bus, bucket, key string) bool {
 }
 
 // debounceLoop collects KV changes and triggers syncToGit after a quiet period.
-func debounceLoop(ctx context.Context, b bus.Bus, repo *gitRepo, cfg gitopsConfig, changes <-chan kvChange, log *slog.Logger) {
+func debounceLoop(ctx context.Context, b bus.Bus, repo *gitRepo, cfg gitopsConfig, nodeID string, changes <-chan kvChange, log *slog.Logger) {
 	configPath := filepath.Join(repo.dir, cfg.Path)
 	debounce := time.Duration(cfg.DebounceS) * time.Second
 
@@ -161,7 +169,7 @@ func debounceLoop(ctx context.Context, b bus.Bus, repo *gitRepo, cfg gitopsConfi
 		select {
 		case <-ctx.Done():
 			if pending {
-				syncToGit(b, repo, configPath, cfg.AutoPush, log)
+				syncToGit(b, repo, configPath, nodeID, cfg.AutoPush, log)
 			}
 			return
 
@@ -175,7 +183,7 @@ func debounceLoop(ctx context.Context, b bus.Bus, repo *gitRepo, cfg gitopsConfi
 
 		case <-timer.C:
 			if pending {
-				syncToGit(b, repo, configPath, cfg.AutoPush, log)
+				syncToGit(b, repo, configPath, nodeID, cfg.AutoPush, log)
 				pending = false
 			}
 		}

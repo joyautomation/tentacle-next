@@ -8,6 +8,7 @@ package gitops
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 
 	"github.com/joyautomation/tentacle/internal/bus"
@@ -16,6 +17,8 @@ import (
 	"github.com/joyautomation/tentacle/internal/heartbeat"
 	"github.com/joyautomation/tentacle/internal/topics"
 )
+
+var osHostname = os.Hostname
 
 const serviceType = "gitops"
 
@@ -113,7 +116,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 
 		// Now export KV → disk to capture any local state not yet in git.
 		// Since apply just converged KV with disk, this should typically be a no-op.
-		syncToGit(b, m.repo, configPath, m.cfg.AutoPush, m.log)
+		syncToGit(b, m.repo, configPath, edgeNodeID(b), m.cfg.AutoPush, m.log)
 	}
 
 	// Set up KV change channel for debounced push-to-git.
@@ -154,7 +157,8 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	}
 
 	// Start background loops.
-	go debounceLoop(ctx, b, m.repo, m.cfg, changes, m.log)
+	nodeID := edgeNodeID(b)
+	go debounceLoop(ctx, b, m.repo, m.cfg, nodeID, changes, m.log)
 	go pollLoop(ctx, b, m.repo, m.cfg, m.log)
 
 	m.log.Info("gitops: module started",
@@ -167,6 +171,27 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	// Block until shutdown.
 	<-ctx.Done()
 	return nil
+}
+
+// edgeNodeID returns "{group}-{node}" from KV (mqtt config), or hostname as a
+// fallback. Embedded in commit trailers so the mantle can audit which side of
+// the bidirectional sync produced each commit.
+func edgeNodeID(b bus.Bus) string {
+	get := func(key string) string {
+		if data, _, err := b.KVGet(topics.BucketTentacleConfig, key); err == nil && len(data) > 0 {
+			return string(data)
+		}
+		return ""
+	}
+	group := get("mqtt.MQTT_GROUP_ID")
+	node := get("mqtt.MQTT_EDGE_NODE")
+	if group != "" && node != "" {
+		return group + "-" + node
+	}
+	if h, err := osHostname(); err == nil {
+		return h
+	}
+	return "unknown"
 }
 
 // Stop cleans up subscriptions and heartbeat.

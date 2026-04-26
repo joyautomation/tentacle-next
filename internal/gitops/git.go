@@ -88,17 +88,45 @@ func (r *gitRepo) HasRemoteChanges() (bool, error) {
 	return strings.TrimSpace(localSHA) != strings.TrimSpace(remoteSHA), nil
 }
 
-// Pull fast-forwards the local branch to match remote.
-// Returns true if new commits were pulled.
+// Pull merges remote into local, preferring remote on conflict (-X theirs).
+// This makes bidirectional sync work: edge's local-only commits are preserved
+// where they don't conflict with mantle's commits, but mantle wins any direct
+// collision (mantle is the central control plane, so this matches operator
+// intent).
+//
+// Returns true if HEAD advanced (either fast-forward or a merge commit).
 func (r *gitRepo) Pull() (bool, error) {
 	before, _ := r.output("rev-parse", "HEAD")
 
-	if err := r.run("pull", "--ff-only", "origin", r.branch); err != nil {
+	// Try fast-forward first — common case, avoids creating merge commits.
+	if err := r.run("pull", "--ff-only", "origin", r.branch); err == nil {
+		after, _ := r.output("rev-parse", "HEAD")
+		return strings.TrimSpace(before) != strings.TrimSpace(after), nil
+	}
+
+	// Fast-forward failed — branches diverged. Merge with "theirs" preference
+	// so mantle's intent wins on any same-line collision while preserving
+	// edge's non-conflicting changes.
+	if err := r.run("pull", "--no-edit", "-X", "theirs", "origin", r.branch); err != nil {
 		return false, fmt.Errorf("pull: %w", err)
 	}
 
 	after, _ := r.output("rev-parse", "HEAD")
 	return strings.TrimSpace(before) != strings.TrimSpace(after), nil
+}
+
+// PushWithRetry pushes local commits to remote. On rejection (race with another
+// pusher), pulls with merge and retries once. Returns nil if there were no
+// local commits to push.
+func (r *gitRepo) PushWithRetry() error {
+	if err := r.run("push", "origin", r.branch); err == nil {
+		return nil
+	}
+	// Push rejected — race with remote update. Merge and retry.
+	if _, err := r.Pull(); err != nil {
+		return fmt.Errorf("push retry pull: %w", err)
+	}
+	return r.run("push", "origin", r.branch)
 }
 
 // HasLocalChanges returns true if the working tree has uncommitted changes.
@@ -125,11 +153,6 @@ func (r *gitRepo) CommitAll(msg string) error {
 	}
 
 	return r.run("commit", "-m", msg)
-}
-
-// Push pushes the local branch to the remote.
-func (r *gitRepo) Push() error {
-	return r.run("push", "origin", r.branch)
 }
 
 // CurrentSHA returns the current HEAD commit SHA (empty string for repos with no commits).
