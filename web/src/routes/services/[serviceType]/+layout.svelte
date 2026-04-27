@@ -154,6 +154,7 @@
     display: flex;
     flex-direction: column;
     min-height: calc(100vh - var(--header-height));
+    position: relative;
   }
 
   .service-nav {
@@ -242,8 +243,13 @@
     font-size: 0.75rem;
   }
 
-  .service-layout.remote {
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--theme-accent) 30%, transparent);
+  .service-layout.remote::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: 2px solid color-mix(in srgb, var(--theme-accent) 35%, transparent);
+    z-index: 5;
   }
 
   .remote-placeholder {
