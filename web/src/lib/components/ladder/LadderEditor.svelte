@@ -381,12 +381,18 @@
     overflow: hidden;
     height: 100%;
     min-height: 240px;
+    /* Fill the workspace's editor pane. Without flex:1 the editor would
+       shrink-wrap to its content (inspector + min-layout SVG) and leave
+       a wide gap of empty pane to the right. */
+    flex: 1;
+    min-width: 0;
   }
 
   .ladder-body {
     display: flex;
     flex: 1;
     overflow: hidden;
+    min-width: 0;
   }
 
   .ladder-canvas {
@@ -394,6 +400,10 @@
     overflow: auto;
     padding: 8px;
     position: relative;
+    /* Allow the canvas to shrink below its SVG content width so the
+       inspector can claim its 240px without forcing a horizontal
+       scrollbar on the rung SVG. */
+    min-width: 0;
   }
 
   .rung-list {
@@ -402,6 +412,10 @@
     /* No gap: rung SVGs butt up so per-rung rail segments form a single
        continuous bus across the program. */
     gap: 0;
+    /* Fill the canvas independently of child SVG widths — otherwise the
+       rung-list shrinks to its widest SVG, creating a feedback loop
+       where layout never gets to use the full canvas. */
+    width: 100%;
   }
 
   .block-toast {
