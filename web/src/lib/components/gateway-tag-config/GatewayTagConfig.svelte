@@ -484,16 +484,16 @@
       }
     }
 
-    // UDT member exclusion changes
+    // UDT member exclusion changes. When no saved template exists yet, the
+    // initial state is "no exclusions" — any toggle off should mark dirty.
     for (const cache of browseCaches ?? []) {
       for (const udt of cache.udts) {
         const resolved = resolveTemplateName(cache.deviceId, udt.name);
         const cfgTmpl = templates.find(t => t.name === resolved);
-        if (!cfgTmpl) continue;
-        const cfgMemberNames = new Set(cfgTmpl.members.map(m => m.name));
+        const cfgMemberNames = cfgTmpl ? new Set(cfgTmpl.members.map(m => m.name)) : null;
         const currentExcluded = excludedUdtMembers[resolved] ?? new Set();
         for (const m of udt.members) {
-          const wasExcluded = !cfgMemberNames.has(m.name);
+          const wasExcluded = cfgMemberNames ? !cfgMemberNames.has(m.name) : false;
           const isExcluded = currentExcluded.has(m.name);
           if (wasExcluded !== isExcluded) return true;
         }
@@ -554,16 +554,17 @@
         }
       }
     }
-    // Exclusion changes
+    // Exclusion changes (no saved template → initial state is "no exclusions")
     for (const cache of browseCaches ?? []) {
       for (const udt of cache.udts) {
         const resolved = resolveTemplateName(cache.deviceId, udt.name);
         const cfgTmpl = templates.find(t => t.name === resolved);
-        if (!cfgTmpl) continue;
-        const cfgMemberNames = new Set(cfgTmpl.members.map(m => m.name));
+        const cfgMemberNames = cfgTmpl ? new Set(cfgTmpl.members.map(m => m.name)) : null;
         const currentExcluded = excludedUdtMembers[resolved] ?? new Set();
         for (const m of udt.members) {
-          if ((!cfgMemberNames.has(m.name)) !== currentExcluded.has(m.name)) {
+          const wasExcluded = cfgMemberNames ? !cfgMemberNames.has(m.name) : false;
+          const isExcluded = currentExcluded.has(m.name);
+          if (wasExcluded !== isExcluded) {
             if (!result.has(resolved)) result.set(resolved, new Set());
             result.get(resolved)!.add(m.name);
           }

@@ -109,4 +109,62 @@ test.describe('Gateway tag config — UDT template members', () => {
     const valueRow = table.locator('tr', { has: page.getByText('value', { exact: true }) });
     await expect(valueRow.locator('input[type="checkbox"]')).toBeChecked();
   });
+
+  test('toggling a member when no template is saved yet pops up the save bar', async ({ page }) => {
+    // Empty saved config — only browse-cache UDTs exist. Replicates the case
+    // where the user is preparing template defaults before publishing any
+    // instances. Toggling a member off should still mark dirty so the user
+    // can save (and then publish an instance to actually persist).
+    const EMPTY_GATEWAY_CONFIG = {
+      gatewayId: 'gateway',
+      devices: [{ deviceId: 'plc1', protocol: 'ethernetip', host: '10.0.0.5', slot: 0 }],
+      variables: [],
+      udtTemplates: [],
+      udtVariables: [],
+      availableProtocols: ['ethernetip'],
+      updatedAt: new Date().toISOString(),
+    };
+
+    await mockConfiguredSystem(page, {
+      extraRoutes: {
+        '**/api/v1/gateways/gateway': (route: Route) => {
+          if (route.request().method() === 'GET') {
+            return route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify(EMPTY_GATEWAY_CONFIG),
+            });
+          }
+          return route.continue();
+        },
+        '**/api/v1/gateways/gateway/browse-cache/plc1': (route: Route) =>
+          route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify(BROWSE_CACHE),
+          }),
+        '**/api/v1/gateways/browse-states': (route: Route) =>
+          route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+      },
+    });
+
+    await page.goto('/services/gateway/tag-config');
+    await page.getByRole('button', { name: 'Template Defaults', exact: true }).click();
+
+    // No save bar yet — clean state.
+    await expect(page.locator('.save-bar')).toHaveCount(0);
+
+    // Toggle a member off.
+    const table = page.locator('.tpl-table');
+    const valueRow = table.locator('tr', { has: page.getByText('value', { exact: true }) });
+    await valueRow.locator('label.toggle-switch').click();
+
+    // Save bar should fly in.
+    await expect(page.locator('.save-bar')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Save Changes/ })).toBeVisible();
+
+    // Toggling back to original state should clear dirty.
+    await valueRow.locator('label.toggle-switch').click();
+    await expect(page.locator('.save-bar')).toHaveCount(0);
+  });
 });
