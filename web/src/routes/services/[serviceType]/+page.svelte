@@ -5,6 +5,12 @@
   import { state as saltState } from '@joyautomation/salt';
   import StoreForwardStatus from '$lib/components/StoreForwardStatus.svelte';
   import SparkplugHostNodes from '$lib/components/SparkplugHostNodes.svelte';
+  import {
+    getServiceName,
+    getServiceTabs,
+    getRemoteConfigStatus,
+  } from '$lib/constants/services';
+  import type { FleetModule } from '$lib/types/fleet';
 
   let { data }: { data: PageData } = $props();
 
@@ -64,6 +70,55 @@
     serviceDescriptions[data.serviceType] ?? 'Tentacle service'
   );
 
+  // Remote-mode derivations: when ?target=group/node is set, the load
+  // function returns `remoteModule` (the gitops desired-state entry for
+  // this serviceType on the remote edge) instead of local `instances`.
+  const isRemote = $derived(!!data.target);
+  const remoteName = $derived(getServiceName(data.serviceType));
+  const remoteStatus = $derived(getRemoteConfigStatus(data.serviceType));
+  const remoteTargetSuffix = $derived(
+    data.target ? `?target=${encodeURIComponent(data.target)}` : '',
+  );
+  const remoteConfigTabs = $derived(
+    getServiceTabs(data.serviceType).filter((t) => t.scope === 'config'),
+  );
+  const remoteFleetBase = $derived(
+    data.target
+      ? `/fleet/nodes/${encodeURIComponent(data.remoteGroup)}/${encodeURIComponent(data.remoteNode)}/services`
+      : '',
+  );
+
+  let remoteToggling = $state(false);
+  let remoteOptimisticRunning: boolean | null = $state(null);
+
+  const remoteRunning = $derived.by(() => {
+    if (remoteOptimisticRunning !== null) return remoteOptimisticRunning;
+    return data.remoteModule?.running ?? false;
+  });
+
+  async function toggleRemote() {
+    if (!data.remoteModule) return;
+    const next = !remoteRunning;
+    remoteToggling = true;
+    remoteOptimisticRunning = next;
+    const res = await apiPut<FleetModule>(
+      `${remoteFleetBase}/${encodeURIComponent(data.serviceType)}`,
+      { running: next },
+    );
+    remoteToggling = false;
+    if (res.error) {
+      remoteOptimisticRunning = !next;
+      saltState.addNotification({ message: res.error.error, type: 'error' });
+      return;
+    }
+    saltState.addNotification({
+      message: `${data.serviceType} marked ${next ? 'enabled' : 'disabled'} (edge syncs within ~5s)`,
+      type: 'success',
+    });
+    await invalidateAll();
+    remoteOptimisticRunning = null;
+  }
+
   let togglingModuleId: string | null = $state(null);
   let optimisticEnabled: Record<string, boolean> = $state({});
 
@@ -105,6 +160,88 @@
 </script>
 
 <div class="service-overview">
+{#if isRemote}
+  <div class="status-header">
+    <div class="status-info">
+      <h1>{remoteName}</h1>
+      <p class="description">{description}</p>
+    </div>
+    {#if data.remoteModule}
+      <span class="status-badge" class:running={remoteRunning} class:stopped={!remoteRunning}>
+        {remoteRunning ? 'Enabled' : 'Disabled'}
+      </span>
+    {:else}
+      <span class="status-badge stopped">Not added</span>
+    {/if}
+  </div>
+
+  {#if data.error}
+    <div class="info-box error">
+      <p>{data.error}</p>
+    </div>
+  {/if}
+
+  {#if data.remoteModule}
+    <div class="enable-row">
+      <span class="enable-label">
+        Enabled
+        {#if !remoteRunning}
+          <span class="disabled-badge">Disabled</span>
+        {/if}
+      </span>
+      <label class="toggle" title={remoteRunning ? 'Disable on edge (keeps config)' : 'Enable on edge'}>
+        <input
+          type="checkbox"
+          checked={remoteRunning}
+          disabled={remoteToggling}
+          onchange={toggleRemote}
+        />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="details" class:disabled={!remoteRunning}>
+      {#if data.remoteModule.version}
+        <div class="detail-row">
+          <span class="label">Version</span>
+          <span class="value">{data.remoteModule.version}</span>
+        </div>
+      {/if}
+      <div class="detail-row">
+        <span class="label">Source</span>
+        <span class="value">gitops desired state</span>
+      </div>
+    </div>
+
+    {#if remoteStatus === 'configurable' && remoteConfigTabs.length > 0}
+      <div class="info-box">
+        <p>
+          Configure this module on the remote edge:
+          {#each remoteConfigTabs as tab, i (tab.path)}
+            {#if i > 0}<span class="sep"> · </span>{/if}
+            <a href="/services/{data.serviceType}/{tab.path}{remoteTargetSuffix}">{tab.label} →</a>
+          {/each}
+        </p>
+      </div>
+    {:else if remoteStatus === 'coming-soon'}
+      <div class="info-box">
+        <p>
+          Standalone configuration UI for <strong>{remoteName}</strong> is coming soon. The module owns its own settings on the edge, but mantle doesn't yet have target-aware endpoints to drive them.
+        </p>
+      </div>
+    {:else if remoteStatus === 'bus-driven'}
+      <div class="info-box">
+        <p>
+          <strong>{remoteName}</strong> has no standalone configuration — its behavior is driven by other modules over the bus. Configure this edge tentacle's <a href="/services/gateway{remoteTargetSuffix}">Gateway</a> instead.
+        </p>
+      </div>
+    {/if}
+  {:else if !data.error}
+    <div class="info-box">
+      <p>This module is not in the desired state for <strong>{data.target}</strong>. Add it from the <a href="/fleet/{encodeURIComponent(data.remoteGroup)}/{encodeURIComponent(data.remoteNode)}">fleet page</a>.</p>
+    </div>
+  {/if}
+{:else}
   <div class="status-header">
     <div class="status-info">
       <h1>{serviceNames[data.serviceType] || data.serviceType}</h1>
@@ -183,6 +320,7 @@
   {#if data.serviceType === 'sparkplug-host'}
     <SparkplugHostNodes />
   {/if}
+{/if}
 </div>
 
 <style lang="scss">
@@ -335,6 +473,8 @@
     border: 1px solid var(--theme-border);
     margin-bottom: 1.5rem;
     p { margin: 0; font-size: 0.875rem; color: var(--theme-text-muted); }
+    a { color: var(--theme-primary); text-decoration: none; &:hover { text-decoration: underline; } }
+    .sep { color: var(--theme-border); margin: 0 0.25rem; }
     &.error {
       border-color: var(--red-500, #ef4444);
       display: flex;

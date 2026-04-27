@@ -41,11 +41,12 @@
 
   const allTabs = $derived(getServiceTabs(serviceType));
 
-  // Tabs visible in the current mode. In remote mode we filter to config-only
-  // because the live tabs read runtime state from the *local* tentacle and
-  // would be misleading (or empty) when configuring a remote one.
+  // Tabs visible in the current mode. In remote mode we hide live tabs (they
+  // read runtime state from the *local* tentacle) but keep the Overview tab
+  // (path === '') because it carries identity + enable/disable, which mantle
+  // can drive remotely via the fleet endpoints.
   const visibleTabs = $derived(
-    target ? allTabs.filter((t) => t.scope === 'config') : allTabs,
+    target ? allTabs.filter((t) => t.scope === 'config' || t.path === '') : allTabs,
   );
 
   // Match the current pathname to a tab, so we can both highlight it and
@@ -56,11 +57,16 @@
     return allTabs.find((t) => t.path === segment) ?? null;
   });
 
-  // In remote mode, if the user lands on a live-scoped page we show a
-  // placeholder rather than the page content (which would either be empty
-  // or, worse, reflect the local mantle's state).
+  // The Overview route renders remote-aware content itself, so it never gets
+  // a layout-level placeholder — even for bus-driven / coming-soon modules,
+  // the operator should still see identity and the enable/disable toggle.
+  const isOverviewRoute = $derived(currentTab?.path === '');
+
+  // In remote mode, if the user lands on a live-scoped page (other than
+  // Overview) we show a placeholder rather than the page content (which would
+  // either be empty or, worse, reflect the local mantle's state).
   const showLivePlaceholder = $derived(
-    target !== null && currentTab !== null && currentTab.scope === 'live',
+    target !== null && currentTab !== null && currentTab.scope === 'live' && !isOverviewRoute,
   );
 
   // First config tab on this module — used as the redirect target from the
@@ -109,7 +115,7 @@
     {/each}
   </div>
 
-  {#if target && remoteConfigStatus === 'bus-driven'}
+  {#if target && remoteConfigStatus === 'bus-driven' && !isOverviewRoute}
     <div class="remote-placeholder">
       <h2>No remote configuration for this module</h2>
       <p>
@@ -119,7 +125,7 @@
         Configure this edge tentacle's <a href="/services/gateway{targetSuffix}">Gateway</a> instead.
       </p>
     </div>
-  {:else if target && remoteConfigStatus === 'coming-soon'}
+  {:else if target && remoteConfigStatus === 'coming-soon' && !isOverviewRoute}
     <div class="remote-placeholder">
       <h2>Remote config not yet wired</h2>
       <p>
