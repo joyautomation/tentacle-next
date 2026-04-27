@@ -142,9 +142,9 @@ export type RungLayout = {
 export const LAYOUT = {
   RAIL_LEFT: 30,
   RAIL_RIGHT_MARGIN: 30,
-  CONTACT_WIDTH: 32,
+  CONTACT_WIDTH: 80,
   CONTACT_HEIGHT: 24,
-  COIL_WIDTH: 40,
+  COIL_WIDTH: 80,
   COIL_HEIGHT: 24,
   FB_MIN_WIDTH: 140,
   FB_HEADER_HEIGHT: 24,
@@ -159,7 +159,7 @@ export const LAYOUT = {
   /** Vertical room reserved below the symbol for the truncated operand label. */
   LABEL_BOTTOM_SPACE: 16,
   /** Visible operand label character budget before middle-truncation. */
-  OPERAND_LABEL_CHARS: 14,
+  OPERAND_LABEL_CHARS: 10,
   TAG_FONT_SIZE: 11,
   LABEL_FONT_SIZE: 10,
 } as const;

@@ -190,16 +190,18 @@
         <title>{node.element.operand || '(no operand)'}</title>
         <!-- Internal wire passes through the symbol (no gap with the rung). -->
         <line x1="0" y1={node.height / 2} x2={node.width} y2={node.height / 2} class="wire-through" />
-        <!-- Contact bars: two vertical posts straddling the centre. -->
-        {#each [10, node.width - 10] as bx}
+        <!-- Contact bars: two vertical posts straddling the centre. The
+             slot width is generous so the tag below has room; the bars
+             themselves stay compact and centred. -->
+        {#each [node.width / 2 - 5, node.width / 2 + 5] as bx}
           <line x1={bx} y1="2" x2={bx} y2={node.height - 2} class="post" />
         {/each}
         <!-- NC mark: diagonal slash between the two posts. -->
         {#if node.element.form === 'NC'}
           <line
-            x1="10"
+            x1={node.width / 2 - 5}
             y1={node.height - 2}
-            x2={node.width - 10}
+            x2={node.width / 2 + 5}
             y2="2"
             class="nc-slash"
           />
@@ -252,17 +254,17 @@
         />
         <title>{node.element.operand || '(no operand)'}</title>
         <!-- Connecting wire stubs reach the arc endpoints from the rung. -->
-        <line x1="0" y1={node.height / 2} x2="8" y2={node.height / 2} class="wire-through" />
-        <line x1={node.width - 8} y1={node.height / 2} x2={node.width} y2={node.height / 2} class="wire-through" />
+        <line x1="0" y1={node.height / 2} x2={node.width / 2 - 8} y2={node.height / 2} class="wire-through" />
+        <line x1={node.width / 2 + 8} y1={node.height / 2} x2={node.width} y2={node.height / 2} class="wire-through" />
         <!-- Coil body: two arcs facing each other forming a (). -->
         <path
           class="coil-arc"
-          d={`M 8 2 Q 0 ${node.height / 2} 8 ${node.height - 2}`}
+          d={`M ${node.width / 2 - 8} 2 Q ${node.width / 2 - 16} ${node.height / 2} ${node.width / 2 - 8} ${node.height - 2}`}
           fill="none"
         />
         <path
           class="coil-arc"
-          d={`M ${node.width - 8} 2 Q ${node.width} ${node.height / 2} ${node.width - 8} ${node.height - 2}`}
+          d={`M ${node.width / 2 + 8} 2 Q ${node.width / 2 + 16} ${node.height / 2} ${node.width / 2 + 8} ${node.height - 2}`}
           fill="none"
         />
         <text class="form-label" x={node.width / 2} y={-2} text-anchor="middle">
