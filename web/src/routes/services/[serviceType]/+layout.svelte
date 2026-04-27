@@ -194,9 +194,9 @@
     padding: 0.125rem 0.5rem;
     font-size: 0.8125rem;
     font-weight: 500;
-    color: var(--theme-primary);
-    background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-primary) 35%, transparent);
+    color: var(--theme-accent);
+    background: color-mix(in srgb, var(--theme-accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent);
     border-radius: var(--rounded-md, 0.375rem);
   }
 
@@ -207,16 +207,16 @@
     padding: 0.625rem 2rem;
     font-size: 0.8125rem;
     color: var(--theme-text);
-    background: color-mix(in srgb, var(--theme-primary) 14%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-primary) 40%, transparent);
+    background: color-mix(in srgb, var(--theme-accent) 14%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-accent) 40%, transparent);
   }
 
   .remote-dot {
     width: 0.5rem;
     height: 0.5rem;
     border-radius: 999px;
-    background: var(--theme-primary);
-    box-shadow: 0 0 0 0.25rem color-mix(in srgb, var(--theme-primary) 25%, transparent);
+    background: var(--theme-accent);
+    box-shadow: 0 0 0 0.25rem color-mix(in srgb, var(--theme-accent) 25%, transparent);
     flex-shrink: 0;
   }
 
@@ -225,7 +225,7 @@
     text-transform: uppercase;
     font-size: 0.7rem;
     letter-spacing: 0.06em;
-    color: var(--theme-primary);
+    color: var(--theme-accent);
   }
 
   .remote-target {
@@ -233,7 +233,7 @@
     font-weight: 500;
     color: var(--theme-text);
     background: var(--theme-surface);
-    border: 1px solid color-mix(in srgb, var(--theme-primary) 30%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent);
     border-radius: var(--rounded-md, 0.375rem);
   }
 
@@ -243,7 +243,7 @@
   }
 
   .service-layout.remote {
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--theme-primary) 30%, transparent);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--theme-accent) 30%, transparent);
   }
 
   .remote-placeholder {

@@ -7,7 +7,6 @@
   import SparkplugHostNodes from '$lib/components/SparkplugHostNodes.svelte';
   import {
     getServiceName,
-    getServiceTabs,
     getRemoteConfigStatus,
   } from '$lib/constants/services';
   import type { FleetModule } from '$lib/types/fleet';
@@ -78,9 +77,6 @@
   const remoteStatus = $derived(getRemoteConfigStatus(data.serviceType));
   const remoteTargetSuffix = $derived(
     data.target ? `?target=${encodeURIComponent(data.target)}` : '',
-  );
-  const remoteConfigTabs = $derived(
-    getServiceTabs(data.serviceType).filter((t) => t.scope === 'config'),
   );
   const remoteFleetBase = $derived(
     data.target
@@ -213,17 +209,7 @@
       </div>
     </div>
 
-    {#if remoteStatus === 'configurable' && remoteConfigTabs.length > 0}
-      <div class="info-box">
-        <p>
-          Configure this module on the remote edge:
-          {#each remoteConfigTabs as tab, i (tab.path)}
-            {#if i > 0}<span class="sep"> · </span>{/if}
-            <a href="/services/{data.serviceType}/{tab.path}{remoteTargetSuffix}">{tab.label} →</a>
-          {/each}
-        </p>
-      </div>
-    {:else if remoteStatus === 'coming-soon'}
+    {#if remoteStatus === 'coming-soon'}
       <div class="info-box">
         <p>
           Standalone configuration UI for <strong>{remoteName}</strong> is coming soon. The module owns its own settings on the edge, but mantle doesn't yet have target-aware endpoints to drive them.
@@ -474,7 +460,6 @@
     margin-bottom: 1.5rem;
     p { margin: 0; font-size: 0.875rem; color: var(--theme-text-muted); }
     a { color: var(--theme-primary); text-decoration: none; &:hover { text-decoration: underline; } }
-    .sep { color: var(--theme-border); margin: 0 0.25rem; }
     &.error {
       border-color: var(--red-500, #ef4444);
       display: flex;
