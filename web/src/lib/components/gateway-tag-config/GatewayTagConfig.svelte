@@ -124,7 +124,11 @@
     }
     workingTemplateOverrides = overrideMap;
 
-    // Working template copies (configured + browse-only, applying overrides)
+    // Working template copies (configured + browse-only, applying overrides).
+    // Union saved + browse-cache members so members the user previously
+    // unchecked (and therefore weren't persisted) remain visible. The
+    // excludedUdtMembers diff below renders them as unchecked so they can
+    // be re-enabled.
     const tMap = new Map<string, GatewayUdtTemplate>();
     for (const t of templates) {
       tMap.set(t.name, JSON.parse(JSON.stringify(t)));
@@ -132,7 +136,8 @@
     for (const cache of browseCaches ?? []) {
       for (const udt of cache.udts) {
         const resolved = resolveTemplateName(cache.deviceId, udt.name);
-        if (!tMap.has(resolved)) {
+        const existing = tMap.get(resolved);
+        if (!existing) {
           tMap.set(resolved, {
             name: resolved,
             version: '1.0',
@@ -142,6 +147,17 @@
               templateRef: m.udtType ?? null,
             })),
           });
+        } else {
+          const existingNames = new Set(existing.members.map(m => m.name));
+          for (const m of udt.members) {
+            if (!existingNames.has(m.name)) {
+              existing.members.push({
+                name: m.name,
+                datatype: mapDatatype(m.datatype),
+                templateRef: m.udtType ?? null,
+              });
+            }
+          }
         }
       }
     }
