@@ -73,21 +73,19 @@
   }
 
   let selection = $state<Selection>(null);
-  // Observe the canvas (not the outer editor) so the SVG shrinks when the
-  // inspector opens — otherwise we overflow into a horizontal scrollbar.
-  let canvasEl: HTMLDivElement | undefined = $state();
+  let containerEl: HTMLDivElement | undefined = $state();
   let containerWidth = $state(800);
 
   const programLayout = $derived(layoutDiagram(diagram, containerWidth));
 
   onMount(() => {
-    if (!canvasEl) return;
+    if (!containerEl) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         containerWidth = entry.contentRect.width;
       }
     });
-    observer.observe(canvasEl);
+    observer.observe(containerEl);
     return () => observer.disconnect();
   });
 
@@ -258,7 +256,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="ladder-editor">
+<div class="ladder-editor" bind:this={containerEl}>
   <LadderToolbar
     {selection}
     onAddRung={addRung}
@@ -271,7 +269,7 @@
 
   <div class="ladder-body">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="ladder-canvas" bind:this={canvasEl} onclick={handleDeselect}>
+    <div class="ladder-canvas" onclick={handleDeselect}>
       <svg
         width={Math.max(containerWidth, programLayout.totalWidth + LAYOUT.RAIL_RIGHT_MARGIN)}
         height={Math.max(160, programLayout.totalHeight + 40)}
