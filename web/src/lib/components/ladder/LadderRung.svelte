@@ -3,16 +3,17 @@
     EditPath,
     LayoutNode,
     Rung,
-    RungLayout,
     Selection,
     TagValues,
   } from './types.js';
   import { LAYOUT } from './types.js';
+  import { layoutRungInCanvas } from './layout.js';
 
   interface Props {
     rung: Rung;
     rungIndex: number;
-    layout: RungLayout;
+    /** Width available in the rung-list container (drives flex-grow). */
+    availableWidth: number;
     selection: Selection;
     tagValues?: TagValues;
     monitoring?: boolean;
@@ -23,13 +24,17 @@
   let {
     rung,
     rungIndex,
-    layout,
+    availableWidth,
     selection,
     tagValues = {},
     monitoring = false,
     onSelect,
     onVariableDrop,
   }: Props = $props();
+
+  const computed = $derived(layoutRungInCanvas(rung, rungIndex, availableWidth));
+  const layout = $derived(computed.layout);
+  const rails = $derived(computed.rails);
 
   // Tracks which node is currently being hovered over with a variable
   // drag — drives the .drop-target style so the user sees where the drop
@@ -121,7 +126,30 @@
   }
 </script>
 
-<g class="rung" data-rung={rungIndex}>
+<svg
+  class="rung-svg"
+  width={layout.totalWidth}
+  height={layout.totalHeight}
+  viewBox={`0 0 ${layout.totalWidth} ${layout.totalHeight}`}
+>
+  <!-- Per-rung rails. When rungs stack with no gap they butt up so the
+       rails read as one continuous bus. -->
+  <line
+    class="rail"
+    x1={rails.leftX}
+    y1={rails.topY}
+    x2={rails.leftX}
+    y2={rails.bottomY}
+  />
+  <line
+    class="rail"
+    x1={rails.rightX}
+    y1={rails.topY}
+    x2={rails.rightX}
+    y2={rails.bottomY}
+  />
+
+  <g class="rung" data-rung={rungIndex}>
   <!-- Rung number gutter -->
   <text
     class="rung-number"
@@ -326,9 +354,20 @@
       </g>
     {/if}
   {/each}
-</g>
+  </g>
+</svg>
 
 <style lang="scss">
+  .rung-svg {
+    display: block;
+  }
+
+  .rail {
+    stroke: var(--theme-text, #ddd);
+    stroke-width: 2.5;
+    stroke-linecap: square;
+  }
+
   .rung-number {
     fill: var(--theme-text-muted, #888);
     font-size: 10px;

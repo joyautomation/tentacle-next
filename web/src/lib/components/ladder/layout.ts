@@ -381,6 +381,48 @@ export function layoutRung(
 }
 
 /**
+ * Lay out a single rung as a self-contained unit, ready for its own SVG.
+ *
+ * Each rung renders independently in the editor's flex column, so it
+ * needs to know its own rail x-coordinates. When `availableWidth` is
+ * given, the right rail is pushed out to fill the canvas (matching
+ * RSLogix-style flex-grow); otherwise it sits tight against the rung's
+ * content. The returned layout already has the rung-wire extension to
+ * the right rail patched in.
+ */
+export function layoutRungInCanvas(
+  rung: Rung,
+  rungIdx: number,
+  availableWidth?: number,
+): {
+  layout: RungLayout;
+  rails: { leftX: number; rightX: number; topY: number; bottomY: number };
+} {
+  const probe = layoutRung(rung, rungIdx);
+  const tightRightX =
+    Math.max(probe.contentRight, LAYOUT.RAIL_LEFT + 120) + LAYOUT.RAIL_RIGHT_MARGIN;
+  const rightX =
+    availableWidth !== undefined
+      ? Math.max(tightRightX, availableWidth - LAYOUT.RAIL_RIGHT_MARGIN)
+      : tightRightX;
+  const outputsRight = rightX - LAYOUT.WIRE_GAP;
+  const layout = layoutRung(rung, rungIdx, outputsRight);
+
+  layout.wires.push({
+    x1: layout.contentRight,
+    y1: layout.wireY,
+    x2: rightX,
+    y2: layout.wireY,
+  });
+  layout.totalWidth = rightX;
+
+  return {
+    layout,
+    rails: { leftX: LAYOUT.RAIL_LEFT, rightX, topY: 0, bottomY: layout.totalHeight },
+  };
+}
+
+/**
  * Compute layouts for all rungs in a diagram, stacked vertically.
  * Aligns every rung to a shared right rail x and emits the two long
  * vertical power rails so the renderer can draw them.

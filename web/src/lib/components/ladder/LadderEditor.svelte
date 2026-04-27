@@ -9,12 +9,10 @@
     type Rung,
     type Selection,
     type TagValues,
-    LAYOUT,
     newCoil,
     newContact,
     newRung,
   } from './types.js';
-  import { layoutDiagram } from './layout.js';
   import {
     deleteAtPath,
     getElementAt,
@@ -73,19 +71,20 @@
   }
 
   let selection = $state<Selection>(null);
-  let containerEl: HTMLDivElement | undefined = $state();
-  let containerWidth = $state(800);
-
-  const programLayout = $derived(layoutDiagram(diagram, containerWidth));
+  // Observe the rung-list (the actual flex column that holds the rung
+  // SVGs). When the inspector opens it shrinks; each rung re-lays out
+  // against the new width without overflowing the canvas.
+  let rungListEl: HTMLDivElement | undefined = $state();
+  let rungListWidth = $state(800);
 
   onMount(() => {
-    if (!containerEl) return;
+    if (!rungListEl) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        containerWidth = entry.contentRect.width;
+        rungListWidth = entry.contentRect.width;
       }
     });
-    observer.observe(containerEl);
+    observer.observe(rungListEl);
     return () => observer.disconnect();
   });
 
@@ -256,7 +255,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="ladder-editor" bind:this={containerEl}>
+<div class="ladder-editor">
   <LadderToolbar
     {selection}
     onAddRung={addRung}
@@ -270,53 +269,24 @@
   <div class="ladder-body">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="ladder-canvas" onclick={handleDeselect}>
-      <svg
-        width={Math.max(containerWidth, programLayout.totalWidth + LAYOUT.RAIL_RIGHT_MARGIN)}
-        height={Math.max(160, programLayout.totalHeight + 40)}
-        viewBox={`0 0 ${Math.max(containerWidth, programLayout.totalWidth + LAYOUT.RAIL_RIGHT_MARGIN)} ${Math.max(160, programLayout.totalHeight + 40)}`}
-      >
-        <!-- Power rails span the full diagram height. -->
-        <line
-          class="rail"
-          x1={programLayout.rails.leftX}
-          y1={programLayout.rails.topY}
-          x2={programLayout.rails.leftX}
-          y2={programLayout.rails.bottomY}
-        />
-        <line
-          class="rail"
-          x1={programLayout.rails.rightX}
-          y1={programLayout.rails.topY}
-          x2={programLayout.rails.rightX}
-          y2={programLayout.rails.bottomY}
-        />
-
-        {#each programLayout.rungs as r, idx}
-          <g transform={`translate(0, ${r.yOffset})`}>
-            <LadderRung
-              rung={diagram.rungs[idx]}
-              rungIndex={idx}
-              layout={r.layout}
-              {selection}
-              {tagValues}
-              {monitoring}
-              onSelect={handleSelect}
-              onVariableDrop={handleVariableDrop}
-            />
-          </g>
+      <div class="rung-list" bind:this={rungListEl}>
+        {#each diagram.rungs as rung, idx (idx)}
+          <LadderRung
+            {rung}
+            rungIndex={idx}
+            availableWidth={rungListWidth}
+            {selection}
+            {tagValues}
+            {monitoring}
+            onSelect={handleSelect}
+            onVariableDrop={handleVariableDrop}
+          />
         {/each}
 
         {#if diagram.rungs.length === 0}
-          <text
-            x={containerWidth / 2}
-            y={80}
-            text-anchor="middle"
-            class="empty-hint"
-          >
-            Click "Add Rung" to start
-          </text>
+          <p class="empty-hint">Click "Add Rung" to start</p>
         {/if}
-      </svg>
+      </div>
 
       {#if lastBlockMessage}
         <div class="block-toast" role="status" aria-live="polite">
@@ -424,16 +394,14 @@
     overflow: auto;
     padding: 8px;
     position: relative;
+  }
 
-    svg {
-      display: block;
-    }
-
-    :global(.rail) {
-      stroke: var(--theme-text, #ddd);
-      stroke-width: 2.5;
-      stroke-linecap: square;
-    }
+  .rung-list {
+    display: flex;
+    flex-direction: column;
+    /* No gap: rung SVGs butt up so per-rung rail segments form a single
+       continuous bus across the program. */
+    gap: 0;
   }
 
   .block-toast {
@@ -453,9 +421,11 @@
   }
 
   .empty-hint {
-    fill: var(--theme-text-muted, #888);
+    color: var(--theme-text-muted, #888);
     font-size: 13px;
     font-family: var(--theme-font-basic, sans-serif);
+    text-align: center;
+    margin: 60px 0;
   }
 
   .inspector {
