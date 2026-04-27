@@ -21,23 +21,6 @@
   let busy = $state<Record<string, boolean>>({});
   let confirmRemove = $state<string | null>(null);
 
-  async function toggleService(svc: FleetModule) {
-    busy = { ...busy, [svc.id]: true };
-    const res = await apiPut<FleetModule>(`${fleetBase}/${encodeURIComponent(svc.id)}`, {
-      running: !svc.running,
-    });
-    busy = { ...busy, [svc.id]: false };
-    if (res.error) {
-      saltState.addNotification({ message: `Failed to toggle ${svc.id}: ${res.error.error}`, type: 'error' });
-      return;
-    }
-    saltState.addNotification({
-      message: `${svc.id} marked ${res.data?.running ? 'running' : 'stopped'} (edge syncs within ~5s)`,
-      type: 'success',
-    });
-    await invalidateAll();
-  }
-
   async function installService(serviceType: string) {
     busy = { ...busy, [serviceType]: true };
     const res = await apiPut<FleetModule>(`${fleetBase}/${encodeURIComponent(serviceType)}`, {
@@ -222,18 +205,6 @@
 
                 <div class="module-actions">
                   {#if inst}
-                    <label class="toggle" title="Disable to keep config but stop the module">
-                      <input
-                        type="checkbox"
-                        checked={inst.running}
-                        disabled={isBusy}
-                        onchange={() => toggleService(inst)}
-                      />
-                      <span class="toggle-label" class:running={inst.running}>
-                        {inst.running ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </label>
-
                     {#if isConfigurable}
                       <a class="ghost-btn" href={configureHref(row.serviceType)}>Configure</a>
                     {:else if isComingSoon}
@@ -460,26 +431,6 @@
     display: flex;
     gap: 0.375rem;
     justify-content: flex-end;
-  }
-
-  .toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    cursor: pointer;
-    user-select: none;
-
-    input { cursor: pointer; }
-  }
-
-  .toggle-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--theme-text-muted);
-
-    &.running { color: var(--badge-green-text, #16a34a); }
   }
 
   .soon-tag {
