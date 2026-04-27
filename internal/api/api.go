@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/version"
 	"github.com/joyautomation/tentacle/internal/web"
 	ttypes "github.com/joyautomation/tentacle/types"
 )
@@ -346,7 +347,10 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func (m *Module) handleGetMode(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"mode": m.mode})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"mode": m.mode,
+		"role": version.Role,
+	})
 }
 
 func newRequestID() string { return uuid.New().String() }

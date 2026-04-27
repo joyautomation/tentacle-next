@@ -18,9 +18,18 @@ echo "==> Building web assets..."
 (cd web && npm run build)
 
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
-echo "==> Building tentacle (version: $VERSION)..."
+
+# Worktrees named tentacle-next-mantle (or anything matching *mantle*) get the
+# mantle build tag layered on top of "all" so role_mantle.go fires and the
+# binary self-identifies as mantle to the UI.
+BUILD_TAGS="all"
+if [[ "$REPO_DIR" == *mantle* ]]; then
+  BUILD_TAGS="all,mantle"
+fi
+
+echo "==> Building tentacle (version: $VERSION, tags: $BUILD_TAGS)..."
 CGO_ENABLED=1 CGO_LDFLAGS="-L/tmp/libplctag-check/build/bin_dist" \
-  go build -tags all -ldflags "-X github.com/joyautomation/tentacle/internal/version.Version=$VERSION" -o "$BINARY" ./cmd/tentacle
+  go build -tags "$BUILD_TAGS" -ldflags "-X github.com/joyautomation/tentacle/internal/version.Version=$VERSION" -o "$BINARY" ./cmd/tentacle
 
 echo "==> Stopping tentacle service..."
 incus exec "$CONTAINER" -- systemctl stop tentacle

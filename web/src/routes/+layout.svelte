@@ -12,7 +12,8 @@
   import { goto, onNavigate } from "$app/navigation";
   import { themeState, type Theme } from "./theme.svelte";
   import { api } from "$lib/api/client";
-  import { isMonolith } from "$lib/stores/mode";
+  import { isMonolith, role, brandName } from "$lib/stores/mode";
+  import { get } from "svelte/store";
 
   interface Service {
     serviceType: string;
@@ -83,12 +84,15 @@
     async function init() {
       try {
         const [modeResult, versionResult] = await Promise.all([
-          api<{ mode: string }>('/mode'),
+          api<{ mode: string; role?: string }>('/mode'),
           api<{ version: string }>('/system/version'),
         ]);
         if (modeResult.data) {
           mode = modeResult.data.mode;
           apiConnected = true;
+          const r = modeResult.data.role === 'mantle' ? 'mantle' : 'tentacle';
+          role.set(r);
+          document.title = r === 'mantle' ? 'Mantle UI' : 'Tentacle UI';
         }
         if (versionResult.data) {
           appVersion = versionResult.data.version;
@@ -101,6 +105,24 @@
 
       if (apiConnected) {
         await fetchModules();
+
+        // Sanity-hint only — role drives identity, but if the running module
+        // set strongly disagrees the operator probably picked the wrong
+        // build. Silent in the UI; warning in the console for diagnosis.
+        const mantleModules = new Set(['gitserver', 'mqtt-broker', 'sparkplug-host']);
+        const runningMantle = desiredServices
+          .filter((d) => d.running)
+          .some((d) => mantleModules.has(d.moduleId));
+        const r = get(role);
+        if (r === 'tentacle' && runningMantle) {
+          console.warn(
+            'role=tentacle but mantle-only modules (gitserver/mqtt-broker/sparkplug-host) are running — did you mean to build with -tags mantle?',
+          );
+        } else if (r === 'mantle' && desiredServices.length > 0 && !runningMantle) {
+          console.warn(
+            'role=mantle but no mantle-only modules are in desired state — this binary may not be doing anything mantle-shaped.',
+          );
+        }
 
         // First-boot redirect: if no services are configured,
         // redirect to the setup wizard (once per session)
@@ -150,7 +172,7 @@
     <Bars3 size="1.25rem" />
   </button>
   <a href="/" class="logo">
-    <img src="/logo.png" alt="Tentacle" />
+    <img src="/logo.png" alt={$brandName} />
   </a>
   <nav class="header-nav">
   </nav>
