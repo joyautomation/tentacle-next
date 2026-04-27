@@ -103,6 +103,18 @@
     return String(tv.value);
   }
 
+  // Tagnames are shown beneath each element, but the visible width is
+  // narrow — middle-truncate long names and hand the full string to a
+  // <title> tooltip so the user can hover to see the rest.
+  function truncateOperand(name: string): string {
+    if (!name) return '?';
+    const max = LAYOUT.OPERAND_LABEL_CHARS;
+    if (name.length <= max) return name;
+    const head = Math.ceil((max - 1) / 2);
+    const tail = Math.floor((max - 1) / 2);
+    return `${name.slice(0, head)}…${name.slice(name.length - tail)}`;
+  }
+
   function handleNodeClick(e: MouseEvent, node: LayoutNode) {
     e.stopPropagation();
     onSelect(node.path);
@@ -166,40 +178,52 @@
         ondragleave={() => handleDragLeave(node)}
         ondrop={(e) => handleDrop(e, node)}
       >
-        <!-- Contact body: two vertical bars at the ends, gap in the middle. -->
-        <rect class="hit" x="0" y="0" width={node.width} height={node.height} rx="2" />
-        <line x1="14" y1="6" x2="14" y2={node.height - 6} class="post" />
-        <line x1={node.width - 14} y1="6" x2={node.width - 14} y2={node.height - 6} class="post" />
-        <!-- NC mark: diagonal slash through the gap. -->
+        <!-- Hit/highlight rect spans the symbol + tag area below. -->
+        <rect
+          class="hit"
+          x="0"
+          y={-LAYOUT.LABEL_TOP_SPACE}
+          width={node.width}
+          height={node.height + LAYOUT.LABEL_TOP_SPACE + LAYOUT.LABEL_BOTTOM_SPACE}
+          rx="2"
+        />
+        <title>{node.element.operand || '(no operand)'}</title>
+        <!-- Internal wire passes through the symbol (no gap with the rung). -->
+        <line x1="0" y1={node.height / 2} x2={node.width} y2={node.height / 2} class="wire-through" />
+        <!-- Contact bars: two vertical posts straddling the centre. -->
+        {#each [10, node.width - 10] as bx}
+          <line x1={bx} y1="2" x2={bx} y2={node.height - 2} class="post" />
+        {/each}
+        <!-- NC mark: diagonal slash between the two posts. -->
         {#if node.element.form === 'NC'}
           <line
-            x1="14"
-            y1={node.height - 4}
-            x2={node.width - 14}
-            y2="4"
+            x1="10"
+            y1={node.height - 2}
+            x2={node.width - 10}
+            y2="2"
             class="nc-slash"
           />
         {/if}
         <text
-          class="operand"
-          x={node.width / 2}
-          y={node.height / 2 + 4}
-          text-anchor="middle"
-        >
-          {node.element.operand || '?'}
-        </text>
-        <text
           class="form-label"
           x={node.width / 2}
-          y={-4}
+          y={-2}
           text-anchor="middle"
         >
           {node.element.form}
         </text>
+        <text
+          class="operand"
+          x={node.width / 2}
+          y={node.height + 12}
+          text-anchor="middle"
+        >
+          {truncateOperand(node.element.operand)}
+        </text>
         {#if monitoring}
           {@const v = valueText(node.element.operand)}
           {#if v !== null}
-            <text class="live-value" x={node.width / 2} y={node.height + 12} text-anchor="middle">
+            <text class="live-value" x={node.width / 2} y={node.height + 24} text-anchor="middle">
               {v}
             </text>
           {/if}
@@ -218,23 +242,34 @@
         ondragleave={() => handleDragLeave(node)}
         ondrop={(e) => handleDrop(e, node)}
       >
-        <rect class="hit" x="0" y="0" width={node.width} height={node.height} rx="2" />
+        <rect
+          class="hit"
+          x="0"
+          y={-LAYOUT.LABEL_TOP_SPACE}
+          width={node.width}
+          height={node.height + LAYOUT.LABEL_TOP_SPACE + LAYOUT.LABEL_BOTTOM_SPACE}
+          rx="2"
+        />
+        <title>{node.element.operand || '(no operand)'}</title>
+        <!-- Connecting wire stubs reach the arc endpoints from the rung. -->
+        <line x1="0" y1={node.height / 2} x2="8" y2={node.height / 2} class="wire-through" />
+        <line x1={node.width - 8} y1={node.height / 2} x2={node.width} y2={node.height / 2} class="wire-through" />
         <!-- Coil body: two arcs facing each other forming a (). -->
         <path
           class="coil-arc"
-          d={`M 12 6 Q 4 ${node.height / 2} 12 ${node.height - 6}`}
+          d={`M 8 2 Q 0 ${node.height / 2} 8 ${node.height - 2}`}
           fill="none"
         />
         <path
           class="coil-arc"
-          d={`M ${node.width - 12} 6 Q ${node.width - 4} ${node.height / 2} ${node.width - 12} ${node.height - 6}`}
+          d={`M ${node.width - 8} 2 Q ${node.width} ${node.height / 2} ${node.width - 8} ${node.height - 2}`}
           fill="none"
         />
-        <text class="operand" x={node.width / 2} y={node.height / 2 + 4} text-anchor="middle">
-          {node.element.operand || '?'}
-        </text>
-        <text class="form-label" x={node.width / 2} y={-4} text-anchor="middle">
+        <text class="form-label" x={node.width / 2} y={-2} text-anchor="middle">
           {node.element.form}
+        </text>
+        <text class="operand" x={node.width / 2} y={node.height + 12} text-anchor="middle">
+          {truncateOperand(node.element.operand)}
         </text>
       </g>
     {:else}
@@ -314,6 +349,11 @@
     stroke-width: 1.5;
   }
 
+  .wire-through {
+    stroke: var(--theme-text-muted, #888);
+    stroke-width: 1.5;
+  }
+
   .node {
     cursor: pointer;
   }
@@ -377,7 +417,8 @@
 
   .energized .post,
   .energized .nc-slash,
-  .energized .coil-arc {
+  .energized .coil-arc,
+  .energized .wire-through {
     stroke: var(--green-500, #22c55e);
   }
 

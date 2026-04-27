@@ -80,8 +80,8 @@ function layoutLogic(
         wires: [],
         branchLines: [],
         width: w,
-        ascent: half,
-        descent: half,
+        ascent: half + LAYOUT.LABEL_TOP_SPACE,
+        descent: half + LAYOUT.LABEL_BOTTOM_SPACE,
         connectY: centerY,
       };
     }
@@ -223,8 +223,8 @@ function layoutOutput(
       }],
       wires: [],
       width: w,
-      ascent: half,
-      descent: half,
+      ascent: half + LAYOUT.LABEL_TOP_SPACE,
+      descent: half + LAYOUT.LABEL_BOTTOM_SPACE,
       connectY: centerY,
     };
   }
@@ -290,16 +290,25 @@ function layoutOutput(
 /**
  * Compute layout for a single rung. Rungs are positioned starting at y=0
  * (caller adds vertical offset between rungs).
+ *
+ * Logic is left-justified at RAIL_LEFT; outputs are right-justified
+ * against `outputsRight`. The connecting wire fills whatever gap remains
+ * between them. When `outputsRight` is omitted, outputs pack immediately
+ * after the logic with WIRE_GAP padding (the legacy compact form).
  */
-export function layoutRung(rung: Rung, rungIdx: number): RungLayout {
-  // Probe pass: measure the rung at a placeholder centerline so we know
-  // how far above the wire we have to push for parallels with branches
-  // above the main path.
-  const probe = layoutLogic(rung.logic, 0, 0, rungIdx, []);
+export function layoutRung(
+  rung: Rung,
+  rungIdx: number,
+  outputsRight?: number,
+): RungLayout {
+  // Probe pass: measure the rung's vertical extents so we know how far
+  // above the wire we have to push for parallels with branches above the
+  // main path, and so we can compute the outputs total width.
+  const probeLogic = layoutLogic(rung.logic, 0, 0, rungIdx, []);
   const probeOutputs = (rung.outputs ?? []).map((o, i) => layoutOutput(o, 0, 0, rungIdx, i));
 
-  let ascent = probe.ascent;
-  let descent = probe.descent;
+  let ascent = probeLogic.ascent;
+  let descent = probeLogic.descent;
   for (const po of probeOutputs) {
     if (po.ascent > ascent) ascent = po.ascent;
     if (po.descent > descent) descent = po.descent;
@@ -310,22 +319,40 @@ export function layoutRung(rung: Rung, rungIdx: number): RungLayout {
   const wires: LayoutWire[] = [];
   const branchLines: LayoutBranchLine[] = [];
 
-  let cursor = LAYOUT.RAIL_LEFT;
   // Left rail tap.
-  wires.push({ x1: 0, y1: wireY, x2: cursor, y2: wireY });
+  wires.push({ x1: 0, y1: wireY, x2: LAYOUT.RAIL_LEFT, y2: wireY });
 
-  const logic = layoutLogic(rung.logic, cursor, wireY, rungIdx, []);
+  const logic = layoutLogic(rung.logic, LAYOUT.RAIL_LEFT, wireY, rungIdx, []);
   nodes.push(...logic.nodes);
   wires.push(...logic.wires);
   branchLines.push(...logic.branchLines);
-  cursor += logic.width;
 
-  // Wire gap before outputs.
-  if ((rung.outputs?.length ?? 0) > 0) {
-    wires.push({ x1: cursor, y1: wireY, x2: cursor + LAYOUT.WIRE_GAP, y2: wireY });
-    cursor += LAYOUT.WIRE_GAP;
+  const logicEnd = LAYOUT.RAIL_LEFT + logic.width;
+
+  // Compute outputs total width (sum + inter-output WIRE_GAPs).
+  let outputsTotalWidth = 0;
+  probeOutputs.forEach((po, i) => {
+    if (i > 0) outputsTotalWidth += LAYOUT.WIRE_GAP;
+    outputsTotalWidth += po.width;
+  });
+
+  // Decide where the outputs block starts. If a target right edge is
+  // given, anchor against it; otherwise pack tight after the logic.
+  const fallbackOutputsStart = logicEnd + (probeOutputs.length > 0 ? LAYOUT.WIRE_GAP : 0);
+  let outputsStart: number;
+  if (outputsRight !== undefined) {
+    const desiredStart = outputsRight - outputsTotalWidth;
+    outputsStart = Math.max(desiredStart, fallbackOutputsStart);
+  } else {
+    outputsStart = fallbackOutputsStart;
   }
 
+  if (probeOutputs.length > 0) {
+    // Wire connects logic end → outputs start (whatever the gap is).
+    wires.push({ x1: logicEnd, y1: wireY, x2: outputsStart, y2: wireY });
+  }
+
+  let cursor = outputsStart;
   (rung.outputs ?? []).forEach((output, i) => {
     if (i > 0) {
       wires.push({ x1: cursor, y1: wireY, x2: cursor + LAYOUT.WIRE_GAP, y2: wireY });
@@ -339,7 +366,7 @@ export function layoutRung(rung: Rung, rungIdx: number): RungLayout {
 
   // Right-rail tap is added in layoutDiagram once the shared right-rail
   // x-coordinate is known across all rungs.
-  const contentRight = cursor;
+  const contentRight = probeOutputs.length > 0 ? cursor : logicEnd;
   const totalHeight = wireY + descent + LAYOUT.RUNG_PADDING_Y;
 
   return {
@@ -357,26 +384,53 @@ export function layoutRung(rung: Rung, rungIdx: number): RungLayout {
  * Compute layouts for all rungs in a diagram, stacked vertically.
  * Aligns every rung to a shared right rail x and emits the two long
  * vertical power rails so the renderer can draw them.
+ *
+ * `availableWidth`, when provided, lets rungs flex-grow to fill the
+ * editor canvas: outputs justify against the right rail and the wire
+ * between contacts and outputs stretches to fill the gap. Without it
+ * (e.g. tests / static rendering) the layout falls back to the tight
+ * legacy form.
  */
-export function layoutDiagram(diagram: Diagram): {
+export function layoutDiagram(
+  diagram: Diagram,
+  availableWidth?: number,
+): {
   rungs: { layout: RungLayout; yOffset: number }[];
   rails: { leftX: number; rightX: number; topY: number; bottomY: number };
   totalWidth: number;
   totalHeight: number;
 } {
-  const rungs: { layout: RungLayout; yOffset: number }[] = [];
-  let yOffset = 0;
-  let maxContentRight = 0;
-  diagram.rungs.forEach((r, i) => {
-    const layout = layoutRung(r, i);
-    rungs.push({ layout, yOffset });
-    if (layout.contentRight > maxContentRight) maxContentRight = layout.contentRight;
-    yOffset += layout.totalHeight + LAYOUT.RUNG_GAP;
-  });
+  // Probe pass: lay each rung out tight to discover its content right
+  // edge. The next pass uses these to choose a shared rightX that all
+  // rungs anchor their outputs against.
+  const probes = diagram.rungs.map((r, i) => layoutRung(r, i));
+  const maxContentRight = probes.reduce(
+    (m, p) => (p.contentRight > m ? p.contentRight : m),
+    0,
+  );
 
   // Shared right rail. Padded so even an empty rung has a visible bus.
-  const rightX = Math.max(maxContentRight, LAYOUT.RAIL_LEFT + 120) + LAYOUT.RAIL_RIGHT_MARGIN;
+  // When availableWidth is provided, prefer the outer canvas edge so
+  // outputs justify all the way right.
+  const tightRightX = Math.max(maxContentRight, LAYOUT.RAIL_LEFT + 120) + LAYOUT.RAIL_RIGHT_MARGIN;
+  const targetRightX = availableWidth !== undefined
+    ? Math.max(tightRightX, availableWidth - LAYOUT.RAIL_RIGHT_MARGIN)
+    : tightRightX;
+  const rightX = targetRightX;
   const leftX = LAYOUT.RAIL_LEFT;
+
+  // The actual rightmost edge of an output sits a small inset before the
+  // right rail so the connecting wire is visible (the rail isn't drawn
+  // through the output itself).
+  const outputsRight = rightX - LAYOUT.WIRE_GAP;
+
+  const rungs: { layout: RungLayout; yOffset: number }[] = [];
+  let yOffset = 0;
+  diagram.rungs.forEach((r, i) => {
+    const layout = layoutRung(r, i, outputsRight);
+    rungs.push({ layout, yOffset });
+    yOffset += layout.totalHeight + LAYOUT.RUNG_GAP;
+  });
 
   // Patch each rung's wire to extend from its content to the shared rail
   // and tag totalWidth so the SVG sizes correctly.

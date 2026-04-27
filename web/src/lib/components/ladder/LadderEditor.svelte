@@ -76,7 +76,7 @@
   let containerEl: HTMLDivElement | undefined = $state();
   let containerWidth = $state(800);
 
-  const programLayout = $derived(layoutDiagram(diagram));
+  const programLayout = $derived(layoutDiagram(diagram, containerWidth));
 
   onMount(() => {
     if (!containerEl) return;
@@ -271,9 +271,9 @@
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="ladder-canvas" onclick={handleDeselect}>
       <svg
-        width={Math.max(containerWidth, programLayout.totalWidth + 40)}
+        width={Math.max(containerWidth, programLayout.totalWidth + LAYOUT.RAIL_RIGHT_MARGIN)}
         height={Math.max(160, programLayout.totalHeight + 40)}
-        viewBox={`0 0 ${Math.max(containerWidth, programLayout.totalWidth + 40)} ${Math.max(160, programLayout.totalHeight + 40)}`}
+        viewBox={`0 0 ${Math.max(containerWidth, programLayout.totalWidth + LAYOUT.RAIL_RIGHT_MARGIN)} ${Math.max(160, programLayout.totalHeight + 40)}`}
       >
         <!-- Power rails span the full diagram height. -->
         <line
