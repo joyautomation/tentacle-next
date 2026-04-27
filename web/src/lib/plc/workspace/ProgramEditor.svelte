@@ -421,7 +421,9 @@
 			serverStSource = draftStSource;
 			serverTags = draftTags.slice();
 			if (language === 'ladder') {
-				serverDiagram = structuredClone(draftDiagram);
+				// $state.snapshot, not structuredClone — Svelte 5 state proxies
+				// throw DataCloneError under structuredClone.
+				serverDiagram = $state.snapshot(draftDiagram) as Diagram;
 			}
 			const renamed = !isNew && bodyName !== name;
 			if (isNew || renamed) {
@@ -444,7 +446,7 @@
 		draftStSource = serverStSource;
 		draftTags = serverTags.slice();
 		if (language === 'ladder') {
-			draftDiagram = structuredClone(serverDiagram);
+			draftDiagram = $state.snapshot(serverDiagram) as Diagram;
 		}
 	}
 
