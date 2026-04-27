@@ -216,8 +216,11 @@
           rx="2"
         />
         <title>{node.element.operand || '(no operand)'}</title>
-        <!-- Internal wire passes through the symbol (no gap with the rung). -->
-        <line x1="0" y1={node.height / 2} x2={node.width} y2={node.height / 2} class="wire-through" />
+        <!-- Wire stubs left and right of the bars — break in the middle
+             so the contact reads as a real interruption in the wire,
+             not a continuous line passing behind the symbol. -->
+        <line x1="0" y1={node.height / 2} x2={node.width / 2 - 5} y2={node.height / 2} class="wire-through" />
+        <line x1={node.width / 2 + 5} y1={node.height / 2} x2={node.width} y2={node.height / 2} class="wire-through" />
         <!-- Contact bars: two vertical posts straddling the centre. The
              slot width is generous so the tag below has room; the bars
              themselves stay compact and centred. -->

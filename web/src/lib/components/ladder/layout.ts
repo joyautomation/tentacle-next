@@ -319,8 +319,9 @@ export function layoutRung(
   const wires: LayoutWire[] = [];
   const branchLines: LayoutBranchLine[] = [];
 
-  // Left rail tap.
-  wires.push({ x1: 0, y1: wireY, x2: LAYOUT.RAIL_LEFT, y2: wireY });
+  // No left rail tap: the rail itself is drawn at x=RAIL_LEFT and the
+  // first logic element starts there, so they connect without a wire
+  // extending into the gutter.
 
   const logic = layoutLogic(rung.logic, LAYOUT.RAIL_LEFT, wireY, rungIdx, []);
   nodes.push(...logic.nodes);
@@ -405,15 +406,21 @@ export function layoutRungInCanvas(
     availableWidth !== undefined
       ? Math.max(tightRightX, availableWidth - LAYOUT.RAIL_RIGHT_MARGIN)
       : tightRightX;
-  const outputsRight = rightX - LAYOUT.WIRE_GAP;
+  // Outputs sit flush with the right rail: the last output's right edge
+  // = rightX. The element's own internal wire-stub bridges to the rail
+  // exactly. No extra wire stub past the rail (which would render half
+  // a stroke past the SVG edge as visible overflow).
+  const outputsRight = rightX;
   const layout = layoutRung(rung, rungIdx, outputsRight);
 
-  layout.wires.push({
-    x1: layout.contentRight,
-    y1: layout.wireY,
-    x2: rightX,
-    y2: layout.wireY,
-  });
+  if (layout.contentRight < rightX) {
+    layout.wires.push({
+      x1: layout.contentRight,
+      y1: layout.wireY,
+      x2: rightX,
+      y2: layout.wireY,
+    });
+  }
   layout.totalWidth = rightX;
 
   return {
