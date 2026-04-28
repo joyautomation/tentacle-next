@@ -64,15 +64,45 @@ host:
     observe_seconds: 30
     result_timeout: 30
 
-  # Tests that need a co-operating edge node would also need a publisher running
-  # against the same broker (the TCK ships a 'utilities' fake node that the web
-  # console drives — for CI we use cmd/sparkplug-smoke as the partner). Wire
-  # these up after the basic session test is green.
-  # - name: SendCommandTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-  # - name: ReceiveDataTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-  # - name: EdgeSessionTerminationTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-  # - name: MessageOrderingTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  - name: SessionTerminationTest
+    params: ["{host_id}"]
+    observe_seconds: 30
+    result_timeout: 30
+
+  # The tests below require a co-operating edge node publishing on the same
+  # broker. Drive run_tck.py with --partner-cmd "$PWD/tentacle-sparkplug" and
+  # --fixture-cmd "$PWD/tck-fixture --device <id>" so the host has a real
+  # peer to observe.
+  - name: SendCommandTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    observe_seconds: 30
+    result_timeout: 30
+    # Disabled: requires the host to publish NCMD/DCMD on demand. The TCK
+    # sends three SPARKPLUG_TCK/CONSOLE_PROMPT messages asking a human to
+    # "Send an edge command", "Send a device rebirth command", "Send a
+    # device command" via the host UI. Our sparkplug-host module currently
+    # has no command-publishing API and no NATS RPC subject to trigger it,
+    # so a headless run can't drive the test to completion. Re-enable once
+    # the host gains a Publish{N,D}CMD method exposed over NATS.
+    skip: true
+    skip_reason: "requires host NCMD/DCMD publish API + CONSOLE_PROMPT driver (not yet implemented)"
+
+  - name: EdgeSessionTerminationTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    observe_seconds: 30
+    result_timeout: 30
+    # Disabled: TCK uses CONSOLE_PROMPT to ask a human to terminate the
+    # edge node and a single device cleanly/uncleanly. Headless runner
+    # can't drive partner-edge lifecycle from the prompt yet.
+    skip: true
+    skip_reason: "requires CONSOLE_PROMPT-driven partner edge termination"
+
+  - name: MessageOrderingTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}", "5"]
+    observe_seconds: 30
+    result_timeout: 30
+    # Disabled: requires the partner edge to publish messages with bad
+    # sequence numbers / wrong order to exercise the host's reorder and
+    # rebirth-on-gap logic. Our partner edge has no test-mode for this.
+    skip: true
+    skip_reason: "requires partner edge with out-of-order publish test mode"

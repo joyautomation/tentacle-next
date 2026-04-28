@@ -180,16 +180,19 @@ class TCKDriver:
         result_timeout: float,
         impl_cmd: str | None = None,
         impl_log: str = "impl.log",
+        partner_cmd: str | None = None,
+        partner_log: str = "partner.log",
         fixture_cmd: str | None = None,
         fixture_log: str = "fixture.log",
     ) -> dict:
         """
         Run one TCK test:
           1. publish NEW_TEST
-          2. (optional) start impl-under-test as a subprocess so its first
-             connect+NBIRTH is observed by the TCK
+          2. (optional) start impl-under-test, then a partner co-process
+             (e.g. an edge node alongside a host impl) and a fixture
+             (NATS data pump). Each is launched with a short stagger.
           3. wait observe_seconds while the impl interacts with the TCK
-          4. stop the impl (NDEATH from its will message)
+          4. stop fixture, partner, impl in reverse order
           5. publish END_TEST
           6. wait up to `result_timeout` for the multi-line RESULT summary
           7. parse per-assertion verdicts
@@ -204,32 +207,38 @@ class TCKDriver:
         print(f">> {new_test}", flush=True)
         self._publish(CONTROL_TOPIC, new_test)
 
-        impl_proc = None
-        if impl_cmd:
-            print(f">> launching impl: {impl_cmd}", flush=True)
-            impl_proc = subprocess.Popen(
-                shlex.split(impl_cmd),
-                stdout=open(impl_log, "wb"),
+        def launch(label: str, cmd: str, log_path: str):
+            print(f">> launching {label}: {cmd}", flush=True)
+            return subprocess.Popen(
+                shlex.split(cmd),
+                stdout=open(log_path, "wb"),
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+
+        impl_proc = launch("impl", impl_cmd, impl_log) if impl_cmd else None
+
+        partner_proc = None
+        if partner_cmd:
+            # Stagger: impl finishes its first connect/NBIRTH (or host BIRTH)
+            # before the partner starts publishing.
+            time.sleep(2)
+            partner_proc = launch("partner", partner_cmd, partner_log)
 
         fixture_proc = None
         if fixture_cmd:
-            # Slight delay so the impl finishes its connect+NBIRTH before the
-            # fixture starts driving DBIRTH-eligible variables.
+            # Stagger again: partner edge node should be subscribed/birthed
+            # before the fixture pumps DBIRTH-eligible NATS data.
             time.sleep(2)
-            print(f">> launching fixture: {fixture_cmd}", flush=True)
-            fixture_proc = subprocess.Popen(
-                shlex.split(fixture_cmd),
-                stdout=open(fixture_log, "wb"),
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
+            fixture_proc = launch("fixture", fixture_cmd, fixture_log)
 
         time.sleep(observe_seconds)
 
-        for proc, label in ((fixture_proc, "fixture"), (impl_proc, "impl")):
+        for proc, label in (
+            (fixture_proc, "fixture"),
+            (partner_proc, "partner"),
+            (impl_proc, "impl"),
+        ):
             if proc is None:
                 continue
             print(f">> stopping {label}", flush=True)
@@ -311,12 +320,24 @@ def main():
         help="file to capture impl stdout+stderr",
     )
     ap.add_argument(
+        "--partner-cmd",
+        default=os.environ.get("TCK_PARTNER_CMD"),
+        help="optional co-process launched alongside the impl (e.g. an edge "
+             "node when running the host profile). Started 2s after the impl "
+             "and stopped before it.",
+    )
+    ap.add_argument(
+        "--partner-log",
+        default=os.environ.get("TCK_PARTNER_LOG", "partner.log"),
+        help="file to capture partner stdout+stderr",
+    )
+    ap.add_argument(
         "--fixture-cmd",
         default=os.environ.get("TCK_FIXTURE_CMD"),
-        help="optional fixture process launched after the impl. For the edge profile, "
-             "use cmd/tck-fixture which publishes synthetic gateway data to NATS so the "
-             "bridge emits DBIRTH/DDATA. Without it, ~20 device-related TCK assertions "
-             "report NOT EXECUTED.",
+        help="optional fixture process launched after the impl (and partner). "
+             "For the edge profile, use cmd/tck-fixture which publishes synthetic "
+             "gateway data to NATS so the bridge emits DBIRTH/DDATA. Without it, "
+             "~20 device-related TCK assertions report NOT EXECUTED.",
     )
     ap.add_argument(
         "--fixture-log",
@@ -355,6 +376,7 @@ def main():
         r = driver.run_test(
             args.profile, name, params, observe, result_to,
             impl_cmd=args.impl_cmd, impl_log=args.impl_log,
+            partner_cmd=args.partner_cmd, partner_log=args.partner_log,
             fixture_cmd=args.fixture_cmd, fixture_log=args.fixture_log,
         )
         v = r["verdict"]
