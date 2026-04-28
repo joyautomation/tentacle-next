@@ -36,6 +36,8 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v3
         if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          gradle-version: "8.10"
 
       - name: Build TCK extension
         if: steps.cache.outputs.cache-hit != 'true'
