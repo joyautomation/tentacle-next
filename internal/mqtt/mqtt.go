@@ -171,10 +171,22 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 			configDebounce.Stop()
 		}
 		configDebounce = time.AfterFunc(1*time.Second, func() {
+			newCfg := loadConfig(b)
+			// Skip the restart on no-op writes (initial KV replay,
+			// re-saving identical values). Without this guard the
+			// watcher fires on startup as soon as it replays the
+			// keys we just wrote in saveConfig — which would force
+			// a Sparkplug NDEATH/NBIRTH cycle and a bdSeq increment
+			// inside every test the TCK runs.
+			m.bridge.mu.RLock()
+			currentCfg := m.bridge.config
+			m.bridge.mu.RUnlock()
+			if newCfg == currentCfg {
+				return
+			}
 			m.log.Info("mqtt: config changed, restarting bridge")
 			m.bridge.Stop()
 
-			newCfg := loadConfig(b)
 			m.bridge = NewBridge(b, m.moduleID, newCfg, m.log)
 			if err := m.bridge.Start(); err != nil {
 				m.log.Error("mqtt: failed to restart bridge", "error", err)

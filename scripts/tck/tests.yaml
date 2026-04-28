@@ -20,17 +20,30 @@ edge:
     # How long to wait for the multi-line RESULT summary after END_TEST.
     result_timeout: 30
 
-  # Add as the implementation matures and each test becomes green:
-  # - name: SessionTerminationTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-  # - name: SendDataTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-  # - name: SendComplexDataTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-  # - name: ReceiveCommandTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-  # - name: PrimaryHostTest
-  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  - name: SessionTerminationTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    observe_seconds: 30
+    result_timeout: 30
+
+  - name: SendDataTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    observe_seconds: 30
+    result_timeout: 30
+
+  - name: SendComplexDataTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    observe_seconds: 30
+    result_timeout: 30
+
+  - name: ReceiveCommandTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    observe_seconds: 30
+    result_timeout: 30
+
+  - name: PrimaryHostTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    observe_seconds: 30
+    result_timeout: 30
 
 # ----- Host Application profile -----
 # Tests the mantle sparkplug-host module as a Sparkplug B Host Application.

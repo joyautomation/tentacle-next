@@ -121,5 +121,6 @@ func loadConfig(b bus.Bus) itypes.MqttBridgeConfig {
 		TLSCertPath:     get("MQTT_TLS_CERT_PATH", ""),
 		TLSKeyPath:      get("MQTT_TLS_KEY_PATH", ""),
 		TLSCaPath:       get("MQTT_TLS_CA_PATH", ""),
+		BdSeqFile:       get("MQTT_BDSEQ_FILE", ""),
 	}
 }

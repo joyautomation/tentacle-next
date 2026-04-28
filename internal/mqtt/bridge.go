@@ -284,6 +284,15 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 	}
 	metric := br.valueToMetric(pv, msg.Value, nowMs)
 
+	// New variables MUST first appear in DBIRTH. Publishing DDATA before the
+	// metric is birthed violates Sparkplug B `principles-birth-certificates-
+	// order` and the TCK rejects it. Schedule a rebirth — once the next DBIRTH
+	// includes this variable, future updates flow as DDATA.
+	if isNew {
+		br.scheduleRebirth()
+		return
+	}
+
 	// Buffer data when broker is unreachable or store-forward is offline
 	if br.sf.State() == SFOffline || br.node.State() != StateBorn {
 		payload := &sparkplug.Payload{
@@ -300,12 +309,6 @@ func (br *Bridge) handleDataMessage(subject string, rawData []byte) {
 		return
 	}
 	br.sf.RecordPublish(1)
-
-	// New variables need a rebirth so they appear in DBIRTH — without it,
-	// Ignition ignores the DDATA because the metric is unknown.
-	if isNew {
-		br.scheduleRebirth()
-	}
 }
 
 // shouldPublishUDT checks per-member deadbands for UDT values.

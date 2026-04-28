@@ -57,7 +57,16 @@ PROMPT_TOPIC = "SPARKPLUG_TCK/CONSOLE_PROMPT"
 
 PUBLISH_ACK_TIMEOUT = 10.0  # seconds; never block forever on a publish
 
-ASSERTION_LINE = re.compile(r"^\s*([a-zA-Z0-9_\-]+)\s*:\s*(PASS|FAIL|NOT EXECUTED)\s*;?\s*$")
+# Each line of the TCK summary is `[<class-prefix>:]<assertion-id>: <verdict>[ ...];`
+# where <class-prefix> is e.g. `Monitor:` for assertions raised by the
+# upstream Monitor harness. The class prefix counts as part of the name
+# (it disambiguates monitor- from impl-raised assertions of the same id),
+# so we match optionally and keep it in the name.
+# We explicitly skip the `OVERALL: FAIL/PASS;` trailer — we derive overall
+# verdict ourselves.
+ASSERTION_LINE = re.compile(
+    r"^\s*((?:Monitor:)?[a-zA-Z0-9_\-]+)\s*:\s+(PASS|FAIL|NOT EXECUTED)\b"
+)
 
 
 def parse_mqtt_url(url: str) -> tuple[str, int]:
@@ -77,8 +86,12 @@ def parse_summary(payload: str) -> tuple[dict[str, str], str]:
     results: dict[str, str] = {}
     for line in payload.splitlines():
         m = ASSERTION_LINE.match(line)
-        if m:
-            results[m.group(1)] = m.group(2).strip()
+        if not m:
+            continue
+        name = m.group(1)
+        if name == "OVERALL":
+            continue
+        results[name] = m.group(2).strip()
     if not results:
         return {}, "NO_RESULTS"
     if any(v == "FAIL" for v in results.values()):

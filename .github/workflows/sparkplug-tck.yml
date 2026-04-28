@@ -124,6 +124,10 @@ jobs:
           MQTT_EDGE_NODE: EdgeNode1
           MQTT_USE_TEMPLATES: "true"
           MQTT_PRIMARY_HOST_ID: MantleHost
+          # Persist bdSeq across the impl process restarts the driver does
+          # between tests — otherwise the TCK Monitor (which spans all tests)
+          # sees bdSeq reset to 0 and fails the increment-by-one assertions.
+          MQTT_BDSEQ_FILE: "${{ github.workspace }}/bdseq.state"
         run: |
           python scripts/tck/run_tck.py \
             --profile edge \

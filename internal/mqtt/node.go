@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,13 +60,44 @@ type SparkplugNode struct {
 }
 
 // NewSparkplugNode creates a new edge node but does not connect.
+//
+// Sparkplug requires bdSeq to start at zero and increment by one on every new
+// MQTT CONNECT packet — including across process restarts. When BdSeqFile is
+// configured, the saved value is treated as "the bdSeq used by the previous
+// MQTT CONNECT"; this constructor advances it by one so the next Connect()
+// uses the correct next value. Without BdSeqFile, bdSeq always starts at 0
+// (fine for dev; fails TCK Monitor assertions across multi-test runs).
+//
+// The file is written by Connect() right after a successful connection — so
+// the on-disk value always reflects the most recent bdSeq actually used on
+// the wire, never a speculative one.
 func NewSparkplugNode(cfg itypes.MqttBridgeConfig, log *slog.Logger) *SparkplugNode {
+	bdSeq := uint64(0)
+	if cfg.BdSeqFile != "" {
+		if data, err := os.ReadFile(cfg.BdSeqFile); err == nil {
+			s := strings.TrimSpace(string(data))
+			if v, err := strconv.ParseUint(s, 10, 64); err == nil {
+				bdSeq = (v + 1) % 256
+			}
+		}
+	}
 	return &SparkplugNode{
 		config:        cfg,
 		log:           log,
 		state:         StateDisconnected,
+		bdSeq:         bdSeq,
 		deviceMetrics: make(map[string][]sparkplug.Metric),
 	}
+}
+
+// writeBdSeq atomically persists bdSeq to a file. Uses a temp+rename so a
+// crash mid-write doesn't corrupt the saved value.
+func writeBdSeq(path string, bdSeq uint64) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strconv.FormatUint(bdSeq, 10)), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // State returns the current node state.
@@ -141,9 +174,11 @@ func (n *SparkplugNode) Connect() error {
 		return fmt.Errorf("node is already connected (state=%d)", n.state)
 	}
 
-	// Build NDEATH payload for the will message
+	// Build NDEATH payload for the will message. Per Sparkplug B, NDEATH MUST
+	// NOT include a sequence number and the only metric MUST be the bdSeq.
 	ndeathPayload := &sparkplug.Payload{
 		Timestamp: uint64(time.Now().UnixMilli()),
+		OmitSeq:   true,
 		Metrics: []sparkplug.Metric{
 			sparkplug.NewUInt64Metric("bdSeq", n.bdSeq),
 		},
@@ -162,7 +197,8 @@ func (n *SparkplugNode) Connect() error {
 		SetCleanSession(true).
 		SetAutoReconnect(true).
 		SetConnectTimeout(30 * time.Second).
-		SetWill(willTopic, string(willBytes), 0, false).
+		// Sparkplug B requires Will Message at QoS 1, not retained.
+		SetWill(willTopic, string(willBytes), 1, false).
 		SetOnConnectHandler(n.onConnect).
 		SetConnectionLostHandler(func(c pahomqtt.Client, err error) {
 			n.log.Warn("mqtt: connection lost", "error", err)
@@ -201,6 +237,15 @@ func (n *SparkplugNode) Connect() error {
 
 	n.client = client
 	n.setStateLocked(StateDead)
+
+	// Persist the bdSeq we just used on the wire. The next process to read
+	// this file will use (saved + 1), giving the TCK Monitor an unbroken
+	// 0,1,2,3,... sequence across restarts.
+	if n.config.BdSeqFile != "" {
+		if err := writeBdSeq(n.config.BdSeqFile, n.bdSeq); err != nil {
+			n.log.Warn("mqtt: failed to persist bdSeq", "path", n.config.BdSeqFile, "error", err)
+		}
+	}
 
 	n.log.Info("mqtt: connected to broker", "broker", n.config.BrokerURL)
 	return nil
@@ -422,9 +467,11 @@ func (n *SparkplugNode) Disconnect() {
 	}
 
 	if n.state == StateBorn {
-		// Publish NDEATH
+		// Publish NDEATH at QoS 1, not retained. Per Sparkplug B, NDEATH
+		// MUST NOT include seq and the only metric MUST be bdSeq.
 		payload := &sparkplug.Payload{
 			Timestamp: uint64(time.Now().UnixMilli()),
+			OmitSeq:   true,
 			Metrics: []sparkplug.Metric{
 				sparkplug.NewUInt64Metric("bdSeq", n.bdSeq),
 			},
@@ -432,11 +479,14 @@ func (n *SparkplugNode) Disconnect() {
 		data, err := sparkplug.EncodePayload(payload)
 		if err == nil {
 			topic := n.topic("NDEATH")
-			token := n.client.Publish(topic, 0, false, data)
+			token := n.client.Publish(topic, 1, false, data)
 			token.Wait()
 		}
 
-		// Increment bdSeq (wraps at 256)
+		// Increment in-memory bdSeq in case this node instance reconnects.
+		// Don't write the file here — it always reflects the bdSeq used by
+		// the most recent successful Connect(). The next process starts
+		// reads that value and advances by one in NewSparkplugNode.
 		n.bdSeq = (n.bdSeq + 1) % 256
 	}
 
@@ -447,11 +497,11 @@ func (n *SparkplugNode) Disconnect() {
 }
 
 // Rebirth triggers a full rebirth sequence (NDEATH → NBIRTH + all DBIRTH).
+// Per Sparkplug B, Rebirth is a logical session restart that does NOT involve
+// a new MQTT CONNECT — bdSeq tracks MQTT CONNECT packets, not Sparkplug
+// births, so it must stay the same across a Rebirth.
 func (n *SparkplugNode) Rebirth() {
 	n.mu.Lock()
-	if n.state == StateBorn {
-		n.bdSeq = (n.bdSeq + 1) % 256
-	}
 	n.setStateLocked(StateDead)
 	n.mu.Unlock()
 

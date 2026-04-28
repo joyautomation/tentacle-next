@@ -84,6 +84,34 @@ func publish(nc *nats.Conn, moduleID, deviceID string, counter int64) {
 	send("toggle", "boolean", counter%2 == 0)
 	send("temperature", "number", 20.0+float64(counter%10))
 	send("label", "string", "tck-fixture")
+
+	// UDT instance — exercises Sparkplug Template definition + instance assertions.
+	udtTmpl := &types.UdtTemplateDefinition{
+		Name:    "Pump",
+		Version: "1.0",
+		Members: []types.UdtMemberDefinition{
+			{Name: "rpm", Datatype: "number"},
+			{Name: "running", Datatype: "boolean"},
+			{Name: "model", Datatype: "string"},
+		},
+	}
+	udtMsg := types.PlcDataMessage{
+		ModuleID:    moduleID,
+		DeviceID:    deviceID,
+		VariableID:  "pump1",
+		Datatype:    "udt",
+		Timestamp:   now,
+		UdtTemplate: udtTmpl,
+		Value: map[string]interface{}{
+			"rpm":     1200.0 + float64(counter%5),
+			"running": counter%4 != 0,
+			"model":   "P-100",
+		},
+	}
+	udtData, _ := json.Marshal(udtMsg)
+	if err := nc.Publish(topics.Data(moduleID, deviceID, "pump1"), udtData); err != nil {
+		slog.Warn("publish udt failed", "error", err)
+	}
 }
 
 func envOr(key, fallback string) string {
