@@ -276,7 +276,13 @@ def load_test_plan(path: Path, profile: str) -> list[dict]:
     plan = data.get(profile)
     if not plan:
         raise SystemExit(f"no tests defined for profile '{profile}' in {path}")
-    return plan
+    kept = []
+    for t in plan:
+        if t.get("skip"):
+            print(f">> skipping {profile}/{t['name']}: {t.get('skip_reason', 'no reason given')}")
+            continue
+        kept.append(t)
+    return kept
 
 
 def main():

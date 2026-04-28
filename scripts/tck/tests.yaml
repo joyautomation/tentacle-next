@@ -44,6 +44,17 @@ edge:
     params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
     observe_seconds: 30
     result_timeout: 30
+    # Disabled: TCK Monitor bug. PrimaryHostTest's own HostApplication
+    # utility deliberately publishes a STATE message with a hardcoded
+    # bad timestamp (16671135 ms — see HostApplication.hostSendOldOnline)
+    # to exercise the edge node's wrongTimestamp branch. The Monitor's
+    # global STATE handler validates every BIRTH payload it sees and
+    # flags Monitor:host-topic-phid-birth-payload as FAIL when it
+    # encounters that injection — even though our edge node correctly
+    # ignores the bad message. Cannot pass without an upstream TCK fix.
+    # See: https://github.com/eclipse-sparkplug/sparkplug/issues (TODO link)
+    skip: true
+    skip_reason: "TCK Monitor flags TCK's own injected bad-timestamp STATE; upstream fix required"
 
 # ----- Host Application profile -----
 # Tests the mantle sparkplug-host module as a Sparkplug B Host Application.
