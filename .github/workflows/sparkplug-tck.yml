@@ -34,6 +34,9 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - uses: gradle/actions/setup-gradle@v3
+        if: steps.cache.outputs.cache-hit != 'true'
+
       - name: Build TCK extension
         if: steps.cache.outputs.cache-hit != 'true'
         run: TCK_REF="${TCK_REF}" scripts/tck/build-tck-extension.sh "$PWD/tck-ext"
