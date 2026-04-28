@@ -51,6 +51,16 @@ type SparkplugNode struct {
 	// STATE topic callback (for store-forward)
 	onHostState func(hostID string, online bool)
 
+	// Primary-host gating per Sparkplug B `phid-wait` family.
+	// hostOnline is the latest STATE for PrimaryHostID. hostStateTimestamp
+	// is the largest timestamp observed; STATE messages with smaller
+	// timestamps are ignored per `phid-wait-timestamp`. Birthed records
+	// whether NBIRTH has been published in the current MQTT session — used
+	// to gate the auto-Birth in onConnect when a primary host is configured.
+	hostOnline         bool
+	hostStateTimestamp int64
+	birthed            bool
+
 	// Fired whenever state changes. Runs asynchronously; callers should
 	// re-read State() rather than relying on the argument ordering.
 	onStateChange func(state NodeState)
@@ -279,12 +289,25 @@ func (n *SparkplugNode) onConnect(c pahomqtt.Client) {
 		c.Subscribe(stateTopicV3, 0, n.handleStateV3)
 	}
 
-	// Auto-publish NBIRTH on (re)connect
 	n.mu.Lock()
 	n.setStateLocked(StateDead)
+	// Reset session-scoped birth state and host-state record so the next
+	// online STATE (or immediate Birth() when no primary host is required)
+	// publishes NBIRTH/DBIRTH exactly once per connect.
+	n.birthed = false
+	n.hostOnline = false
+	n.hostStateTimestamp = 0
+	requireHost := n.config.PrimaryHostID != ""
 	n.mu.Unlock()
 
-	n.Birth()
+	// Per Sparkplug B `message-flow-edge-node-birth-publish-phid-wait`,
+	// when the edge node is configured to wait for a primary host, NBIRTH
+	// MUST be deferred until an online STATE arrives. STATE messages are
+	// retained, so the broker delivers the latest one as soon as we
+	// subscribe above; the STATE handler then triggers Birth().
+	if !requireHost {
+		n.Birth()
+	}
 }
 
 // Birth publishes the NBIRTH message with all registered metrics.
@@ -302,6 +325,16 @@ func (n *SparkplugNode) Birth() {
 	defer n.mu.Unlock()
 
 	if n.state == StateDisconnected || n.client == nil {
+		return
+	}
+
+	// PHID gating: when configured to wait for a primary host, never publish
+	// NBIRTH unless the latest STATE we have for that host says online. This
+	// covers Rebirth() paths driven by data arrival or template registration —
+	// not just the initial onConnect path — so the Sparkplug B
+	// `message-flow-edge-node-birth-publish-phid-wait` family stays satisfied
+	// even when fixture data races the STATE handler.
+	if n.config.PrimaryHostID != "" && !n.hostOnline {
 		return
 	}
 
@@ -336,6 +369,7 @@ func (n *SparkplugNode) Birth() {
 	}
 
 	n.setStateLocked(StateBorn)
+	n.birthed = true
 	n.log.Info("mqtt: NBIRTH published", "metrics", len(metrics), "bdSeq", n.bdSeq)
 
 	// Publish DBIRTH for each device
@@ -561,30 +595,78 @@ func (n *SparkplugNode) handleCommand(msg pahomqtt.Message, deviceID string) {
 // handleStateLegacy handles Sparkplug B 2.0 STATE/{hostId} messages (string payload).
 func (n *SparkplugNode) handleStateLegacy(c pahomqtt.Client, msg pahomqtt.Message) {
 	online := string(msg.Payload()) == "ONLINE"
-	n.mu.RLock()
-	cb := n.onHostState
-	n.mu.RUnlock()
-
-	if cb != nil {
-		hostID := parseHostID(msg.Topic())
-		cb(hostID, online)
-	}
+	hostID := parseHostID(msg.Topic())
+	// Legacy payload has no timestamp; treat current wall clock as the
+	// timestamp so the same monotonic-check path applies.
+	n.processHostState(hostID, online, time.Now().UnixMilli())
 }
 
 // handleStateV3 handles Sparkplug B 3.0 spBv1.0/STATE/{hostId} messages (JSON payload).
 func (n *SparkplugNode) handleStateV3(c pahomqtt.Client, msg pahomqtt.Message) {
-	// Simple check — payload contains "online":true or "online":false
 	payload := string(msg.Payload())
 	online := containsOnlineTrue(payload)
+	timestamp := parseStateTimestamp(payload)
+	hostID := parseHostIDV3(msg.Topic())
+	n.processHostState(hostID, online, timestamp)
+}
 
-	n.mu.RLock()
+// processHostState applies a single STATE update for the configured primary
+// host. It enforces the Sparkplug B `phid-wait*` family (host id, online
+// flag, monotonic timestamp), triggers Birth() when the primary host comes
+// online for the first time in the current MQTT session, and disconnects
+// the broker when an online host transitions to offline so the bridge can
+// reconnect (`operational-behavior-edge-node-termination-host-offline-
+// reconnect`).
+func (n *SparkplugNode) processHostState(hostID string, online bool, timestamp int64) {
+	n.mu.Lock()
+	if n.config.PrimaryHostID != "" && hostID != n.config.PrimaryHostID {
+		n.mu.Unlock()
+		return
+	}
+	if timestamp < n.hostStateTimestamp {
+		// Per `phid-wait-timestamp` / `host-offline-timestamp`, ignore
+		// STATE messages with timestamps older than the latest already
+		// applied — they are stale retained-message replays.
+		n.mu.Unlock()
+		return
+	}
+	n.hostStateTimestamp = timestamp
+	wasOnline := n.hostOnline
+	n.hostOnline = online
+	birthed := n.birthed
 	cb := n.onHostState
-	n.mu.RUnlock()
+	client := n.client
+	requireHost := n.config.PrimaryHostID != ""
+	n.mu.Unlock()
 
 	if cb != nil {
-		hostID := parseHostIDV3(msg.Topic())
 		cb(hostID, online)
 	}
+
+	if !requireHost {
+		return
+	}
+
+	switch {
+	case online && !birthed:
+		// First online STATE in this session — publish NBIRTH/DBIRTH.
+		n.Birth()
+	case !online && wasOnline && birthed && client != nil:
+		// Primary host went offline after we'd birthed: terminate the
+		// MQTT session so the broker fires our LWT NDEATH, then let
+		// the bridge's reconnect loop bring us back up. We publish
+		// NDEATH explicitly first so the TCK records an intentional
+		// disconnect.
+		n.log.Info("mqtt: primary host went offline, disconnecting")
+		go n.disconnectForHostOffline()
+	}
+}
+
+// disconnectForHostOffline publishes NDEATH and tears the MQTT session
+// down. It runs off the STATE-handler goroutine so paho's callback
+// machinery doesn't deadlock with the publish/disconnect calls.
+func (n *SparkplugNode) disconnectForHostOffline() {
+	n.Disconnect()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -658,6 +740,34 @@ func splitTopic(topic string) []string {
 		}
 	}
 	return result
+}
+
+// parseStateTimestamp pulls the "timestamp" number out of a Sparkplug B
+// 3.0 STATE JSON payload. Returns 0 when no timestamp is present (the
+// caller treats 0 as "no record yet", which compares equal/greater than
+// the initial hostStateTimestamp=0 and so passes the monotonic check).
+func parseStateTimestamp(s string) int64 {
+	const key = "\"timestamp\""
+	idx := strings.Index(s, key)
+	if idx < 0 {
+		return 0
+	}
+	idx += len(key)
+	for idx < len(s) && (s[idx] == ' ' || s[idx] == ':' || s[idx] == '\t') {
+		idx++
+	}
+	end := idx
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == idx {
+		return 0
+	}
+	v, err := strconv.ParseInt(s[idx:end], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 // containsOnlineTrue is a simple check for {"online":true} in a JSON string.

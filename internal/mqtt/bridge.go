@@ -45,7 +45,8 @@ type Bridge struct {
 	// Drain ticker
 	drainStop chan struct{}
 
-	enabled bool
+	enabled  bool
+	stopping bool
 
 	// Inputs to the store-forward state reconciler. hostOnline starts true
 	// when no primary host is configured (we publish whenever the node is
@@ -127,35 +128,42 @@ func (br *Bridge) Start() error {
 	return nil
 }
 
-// reconnectLoop retries the broker connection periodically after initial
-// connection failure. The SF state is driven by the node state change
-// callback — this loop just keeps trying until the client exists.
+// reconnectLoop retries the broker connection until either the node is
+// connected again or the bridge is stopping. Used after initial connect
+// failure and after a host-offline-driven Disconnect — the TCK expects
+// the edge node to re-establish the session promptly, so the first
+// retry happens after a short delay rather than the long idle interval.
 func (br *Bridge) reconnectLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
+	delay := 1 * time.Second
 	for {
+		if br.isStopping() {
+			return
+		}
 		select {
 		case <-br.drainStop:
 			return
-		case <-ticker.C:
-			if br.node.State() != StateDisconnected {
-				return // already connected (e.g. via paho auto-reconnect)
-			}
-			br.log.Info("mqtt: attempting to reconnect to broker")
-			if err := br.node.Connect(); err != nil {
-				br.log.Warn("mqtt: reconnect failed", "error", err)
-				continue
-			}
-			br.loadInitialVariables()
-			return
+		case <-time.After(delay):
 		}
+		if br.node.State() != StateDisconnected {
+			return // already connected (e.g. via paho auto-reconnect)
+		}
+		br.log.Info("mqtt: attempting to reconnect to broker")
+		if err := br.node.Connect(); err != nil {
+			br.log.Warn("mqtt: reconnect failed", "error", err)
+			if delay < 30*time.Second {
+				delay *= 2
+			}
+			continue
+		}
+		br.loadInitialVariables()
+		return
 	}
 }
 
 // Stop disconnects from MQTT and cleans up.
 func (br *Bridge) Stop() {
 	br.mu.Lock()
+	br.stopping = true
 	for _, sub := range br.dataSubs {
 		_ = sub.Unsubscribe()
 	}
@@ -574,8 +582,26 @@ func (br *Bridge) handleHostState(hostID string, online bool) {
 // (Disconnected ↔ Dead ↔ Born). It drives the store-forward state so the
 // buffer flips offline the moment we lose our publish session — not only
 // when a primary host STATE message says so.
-func (br *Bridge) handleNodeStateChange(_ NodeState) {
+func (br *Bridge) handleNodeStateChange(s NodeState) {
 	br.reconcileSFState()
+	// When the node tears the session down because the primary host went
+	// offline, kick off a reconnect attempt — Sparkplug B
+	// `operational-behavior-edge-node-termination-host-offline-reconnect`
+	// requires the edge node to start session establishment over again.
+	// (Paho only auto-reconnects on transport loss, not after an explicit
+	// Disconnect call.)
+	if s == StateDisconnected && br.config.PrimaryHostID != "" && !br.isStopping() {
+		go br.reconnectLoop()
+	}
+}
+
+// isStopping reports whether Stop() has begun tearing the bridge down. We use
+// it to gate the host-offline reconnect goroutine — no point reconnecting if
+// the surrounding module is already shutting down.
+func (br *Bridge) isStopping() bool {
+	br.mu.RLock()
+	defer br.mu.RUnlock()
+	return br.stopping
 }
 
 // reconcileSFState combines node + host inputs into the SF state. Online
