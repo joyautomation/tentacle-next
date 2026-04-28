@@ -15,7 +15,10 @@
 edge:
   - name: SessionEstablishmentTest
     params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-    timeout: 120
+    # Time we let the impl interact with the TCK before sending END_TEST.
+    observe_seconds: 30
+    # How long to wait for the multi-line RESULT summary after END_TEST.
+    result_timeout: 30
 
   # Add as the implementation matures and each test becomes green:
   # - name: SessionTerminationTest
@@ -34,7 +37,8 @@ edge:
 host:
   - name: SessionEstablishmentTest
     params: ["{host_id}"]
-    timeout: 120
+    observe_seconds: 30
+    result_timeout: 30
 
   # Tests that need a co-operating edge node would also need a publisher running
   # against the same broker (the TCK ships a 'utilities' fake node that the web
