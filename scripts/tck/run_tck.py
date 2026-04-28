@@ -167,6 +167,8 @@ class TCKDriver:
         result_timeout: float,
         impl_cmd: str | None = None,
         impl_log: str = "impl.log",
+        fixture_cmd: str | None = None,
+        fixture_log: str = "fixture.log",
     ) -> dict:
         """
         Run one TCK test:
@@ -199,19 +201,34 @@ class TCKDriver:
                 start_new_session=True,
             )
 
+        fixture_proc = None
+        if fixture_cmd:
+            # Slight delay so the impl finishes its connect+NBIRTH before the
+            # fixture starts driving DBIRTH-eligible variables.
+            time.sleep(2)
+            print(f">> launching fixture: {fixture_cmd}", flush=True)
+            fixture_proc = subprocess.Popen(
+                shlex.split(fixture_cmd),
+                stdout=open(fixture_log, "wb"),
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
         time.sleep(observe_seconds)
 
-        if impl_proc is not None:
-            print(">> stopping impl", flush=True)
+        for proc, label in ((fixture_proc, "fixture"), (impl_proc, "impl")):
+            if proc is None:
+                continue
+            print(f">> stopping {label}", flush=True)
             try:
-                os.killpg(impl_proc.pid, signal.SIGTERM)
+                os.killpg(proc.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
             try:
-                impl_proc.wait(timeout=10)
+                proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 try:
-                    os.killpg(impl_proc.pid, signal.SIGKILL)
+                    os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
 
@@ -274,6 +291,19 @@ def main():
         default=os.environ.get("TCK_IMPL_LOG", "impl.log"),
         help="file to capture impl stdout+stderr",
     )
+    ap.add_argument(
+        "--fixture-cmd",
+        default=os.environ.get("TCK_FIXTURE_CMD"),
+        help="optional fixture process launched after the impl. For the edge profile, "
+             "use cmd/tck-fixture which publishes synthetic gateway data to NATS so the "
+             "bridge emits DBIRTH/DDATA. Without it, ~20 device-related TCK assertions "
+             "report NOT EXECUTED.",
+    )
+    ap.add_argument(
+        "--fixture-log",
+        default=os.environ.get("TCK_FIXTURE_LOG", "fixture.log"),
+        help="file to capture fixture stdout+stderr",
+    )
     args = ap.parse_args()
 
     plan = load_test_plan(Path(args.plan), args.profile)
@@ -306,6 +336,7 @@ def main():
         r = driver.run_test(
             args.profile, name, params, observe, result_to,
             impl_cmd=args.impl_cmd, impl_log=args.impl_log,
+            fixture_cmd=args.fixture_cmd, fixture_log=args.fixture_log,
         )
         v = r["verdict"]
         a = r["assertions"]
