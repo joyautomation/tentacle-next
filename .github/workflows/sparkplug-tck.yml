@@ -214,8 +214,11 @@ jobs:
           done
 
       - if: steps.detect.outputs.present == '1'
-        name: Build sparkplug host
-        run: go build -tags sparkplughost -o ./tentacle-sparkplug-host ./cmd/tentacle-sparkplug-host
+        name: Build sparkplug host + partner edge + fixture
+        run: |
+          go build -tags sparkplughost -o ./tentacle-sparkplug-host ./cmd/tentacle-sparkplug-host
+          go build -tags mqtt -o ./tentacle-sparkplug ./cmd/tentacle-sparkplug
+          go build -o ./tck-fixture ./cmd/tck-fixture
 
       - if: steps.detect.outputs.present == '1'
         name: Run TCK (host profile)
@@ -228,12 +231,19 @@ jobs:
           SPARKPLUG_HOST_BROKER_URL: tcp://localhost:1883
           SPARKPLUG_HOST_PRIMARY_HOST_ID: MantleHost
           SPARKPLUG_HOST_GROUP: "+"
+          # Partner edge node config (consumed by tentacle-sparkplug).
+          MQTT_PRIMARY_HOST_ID: MantleHost
+          MQTT_BDSEQ_FILE: /tmp/bdseq.state
         run: |
           python scripts/tck/run_tck.py \
             --profile host \
             --report tck-host.json \
             --impl-cmd "$PWD/tentacle-sparkplug-host" \
-            --impl-log sparkplug-host.log
+            --impl-log sparkplug-host.log \
+            --partner-cmd "$PWD/tentacle-sparkplug" \
+            --partner-log sparkplug-partner.log \
+            --fixture-cmd "$PWD/tck-fixture --device Device1" \
+            --fixture-log tck-fixture.log
 
       - if: always() && steps.detect.outputs.present == '1'
         name: Collect logs
@@ -248,5 +258,7 @@ jobs:
           path: |
             tck-host.json
             sparkplug-host.log
+            sparkplug-partner.log
+            tck-fixture.log
             hivemq.log
             nats.log
