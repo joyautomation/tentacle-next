@@ -39,4 +39,11 @@ func main() {
 		slog.Error("module failed", "error", err)
 		os.Exit(1)
 	}
+	// Graceful shutdown — Stop() publishes NDEATH then sends MQTT DISCONNECT.
+	// Without this, an SIGTERM lets the OS close the TCP socket, which makes
+	// the broker fire the LWT but the TCK records no MQTT DISCONNECT packet
+	// (operational-behavior-edge-node-intentional-disconnect-packet FAILs).
+	if err := m.Stop(); err != nil {
+		slog.Error("module stop failed", "error", err)
+	}
 }

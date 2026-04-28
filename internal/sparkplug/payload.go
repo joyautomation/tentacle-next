@@ -245,9 +245,10 @@ func encodeTemplate(t *Template) (*pb.Payload_Template, error) {
 	if t.TemplateRef != "" {
 		pbt.TemplateRef = proto.String(t.TemplateRef)
 	}
-	if t.IsDefinition {
-		pbt.IsDefinition = proto.Bool(true)
-	}
+	// Per Sparkplug B `payloads-template-is-definition`, every Template
+	// (both definitions and instances) MUST include this flag — true for
+	// definitions in NBIRTH, false for instances in DBIRTH/DDATA.
+	pbt.IsDefinition = proto.Bool(t.IsDefinition)
 	for i := range t.Metrics {
 		pbm, err := encodeMetric(&t.Metrics[i])
 		if err != nil {
