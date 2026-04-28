@@ -47,18 +47,24 @@ docker run -d --name hivemq-tck \
   hivemq/hivemq-ce:latest
 docker run -d --name nats -p 4222:4222 nats:2 -js
 
-# 3. Build the impl
+# 3. Build the impl + the data fixture
 go build -tags mqtt -o tentacle-sparkplug ./cmd/tentacle-sparkplug
+go build -o tck-fixture ./cmd/tck-fixture
 # (or: go build -tags sparkplughost -o tentacle-sparkplug-host ./cmd/tentacle-sparkplug-host)
 
-# 4. Drive the TCK — the driver starts the impl itself
+# 4. Drive the TCK — the driver starts the impl + fixture itself
 NATS_URL=nats://localhost:4222 \
 MQTT_BROKER_URL=tcp://localhost:1883 \
 MQTT_PRIMARY_HOST_ID=MantleHost \
 python scripts/tck/run_tck.py \
   --profile edge \
-  --impl-cmd "$PWD/tentacle-sparkplug"
+  --impl-cmd "$PWD/tentacle-sparkplug" \
+  --fixture-cmd "$PWD/tck-fixture --device Device1"
 ```
+
+`cmd/tck-fixture` publishes synthetic gateway data on NATS so the bridge has a
+device + variables to send DBIRTH/DDATA for. Without it, ~20 device-related TCK
+assertions report `NOT EXECUTED` instead of `PASS`.
 
 For richer interactive debugging, point a browser at the TCK web console
 (`yarn start` in the upstream repo's `tck/webconsole`) — same broker, same

@@ -99,6 +99,12 @@ jobs:
       - name: Build sparkplug node
         run: go build -tags mqtt -o ./tentacle-sparkplug ./cmd/tentacle-sparkplug
 
+      - name: Build TCK fixture
+        # Publishes synthetic gateway data on NATS so the bridge has a device +
+        # variables to publish DBIRTH/DDATA for. Without it, the TCK reports
+        # ~20 device-related assertions as NOT EXECUTED.
+        run: go build -o ./tck-fixture ./cmd/tck-fixture
+
       - name: Run TCK (edge profile)
         env:
           # Driver config
@@ -123,7 +129,9 @@ jobs:
             --profile edge \
             --report tck-edge.json \
             --impl-cmd "$PWD/tentacle-sparkplug" \
-            --impl-log sparkplug-node.log
+            --impl-log sparkplug-node.log \
+            --fixture-cmd "$PWD/tck-fixture --device $TCK_DEVICE_ID" \
+            --fixture-log fixture.log
 
       - name: Collect logs
         if: always()
@@ -138,6 +146,7 @@ jobs:
           path: |
             tck-edge.json
             sparkplug-node.log
+            fixture.log
             hivemq.log
             nats.log
 
