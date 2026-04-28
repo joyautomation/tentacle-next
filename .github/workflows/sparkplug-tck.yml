@@ -28,11 +28,14 @@ jobs:
           path: tck-ext
           key: ${{ steps.cachekey.outputs.key }}
 
+      # The TCK pins its java toolchain to 11 (see eclipse-sparkplug/sparkplug
+       # tck/build.gradle.kts), and the spec subproject's asciidoctor 3.3.2
+       # plugin breaks on Gradle 9 — pin both.
       - uses: actions/setup-java@v4
         if: steps.cache.outputs.cache-hit != 'true'
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 11
 
       - uses: gradle/actions/setup-gradle@v3
         if: steps.cache.outputs.cache-hit != 'true'

@@ -31,13 +31,10 @@ cd "$WORK/sparkplug/tck"
 # from a fresh clone. Use system gradle (caller is responsible for installing
 # it — the CI workflow uses gradle/actions/setup-gradle pinned to 8.10).
 
-# tck/settings.gradle.kts does includeBuild("../specification"), which pulls
-# in the spec docs project. That project applies org.asciidoctor.jvm.base
-# 3.3.2, which fails on modern Gradle. We only need the extension binary,
-# so strip the include.
-sed -i '/includeBuild.*specification/d' settings.gradle.kts
-
-gradle --no-daemon build
+# The tck depends on the spec subproject (tckAuditXml configuration pulls
+# org.eclipse.sparkplug:specification). Spec uses asciidoctor 3.3.2 which is
+# fine on Gradle 8.x but breaks on Gradle 9. The CI workflow pins 8.10.
+gradle --no-daemon build -x test
 
 ZIP=$(ls build/hivemq-extension/sparkplug-tck-*.zip 2>/dev/null | head -1)
 if [ -z "$ZIP" ]; then
