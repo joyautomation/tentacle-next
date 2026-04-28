@@ -11,6 +11,7 @@
 package sparkplughost
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -84,11 +85,12 @@ type Module struct {
 	moduleID string
 	log      *slog.Logger
 
-	mu         sync.Mutex
-	client     paho.Client
-	stateTopic string
-	stopHB     func()
-	subs       []bus.Subscription
+	mu               sync.Mutex
+	client           paho.Client
+	stateTopic       string
+	connectTimestamp int64 // timestamp baked into Will/BIRTH/DEATH; reused so they match
+	stopHB           func()
+	subs             []bus.Subscription
 
 	invMu sync.RWMutex
 	nodes map[string]*Node // keyed by "group/node"
@@ -140,7 +142,11 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	// Sparkplug B 3.0 §6.4.2: STATE Will payload timestamp must be a current
 	// UTC millisecond value at CONNECT time. The Sparkplug TCK Monitor parses
 	// the Will payload and rejects anything outside its UTC window (60s).
-	offlinePayload := []byte(fmt.Sprintf(`{"online":false,"timestamp":%d}`, time.Now().UnixMilli()))
+	// The BIRTH timestamp MUST match the Will timestamp (TCK assertions
+	// host-topic-phid-birth-payload-timestamp and
+	// message-flow-phid-sparkplug-state-publish-payload-timestamp).
+	connectTimestamp := time.Now().UnixMilli()
+	offlinePayload := []byte(fmt.Sprintf(`{"online":false,"timestamp":%d}`, connectTimestamp))
 
 	opts := paho.NewClientOptions().
 		AddBroker(cfg.BrokerURL).
@@ -163,21 +169,34 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	opts.OnConnect = func(c paho.Client) {
 		m.log.Info("sparkplug-host: connected to broker", "broker", cfg.BrokerURL, "filter", subTopic, "primaryHostId", cfg.PrimaryHostID)
 
-		// Sparkplug B 3.0 Host Application: publish retained STATE ONLINE on connect.
-		online := []byte(fmt.Sprintf(`{"online":true,"timestamp":%d}`, time.Now().UnixMilli()))
-		if t := c.Publish(stateTopic, 1, true, online); t.Wait() && t.Error() != nil {
-			m.log.Warn("sparkplug-host: STATE publish failed", "topic", stateTopic, "error", t.Error())
-		}
-
+		// Sparkplug B 3.0 §6.4.2 / host-topic-phid-birth-sub-required:
+		// Subscribe to the Sparkplug topic namespace BEFORE publishing the
+		// retained STATE birth. Otherwise the host can race past edge
+		// NBIRTH/DBIRTH messages that arrived between its CONNECT and SUB.
 		filterMap := make(map[string]byte, len(subFilters))
 		for _, f := range subFilters {
 			filterMap[f] = 0
 		}
-		token := c.SubscribeMultiple(filterMap, func(_ paho.Client, msg paho.Message) {
+		online := []byte(fmt.Sprintf(`{"online":true,"timestamp":%d}`, connectTimestamp))
+		if token := c.SubscribeMultiple(filterMap, func(client paho.Client, msg paho.Message) {
+			// Sparkplug B 3.0 §6.4.2 / message-flow-hid-sparkplug-state-message-delivered:
+			// If we receive a STATE message on our own host_id with online:false,
+			// we MUST immediately republish our BIRTH with the SAME timestamp as
+			// the original CONNECT Will payload.
+			if msg.Topic() == stateTopic && bytes.Contains(msg.Payload(), []byte(`"online":false`)) {
+				m.log.Info("sparkplug-host: received STATE offline injection - republishing BIRTH", "topic", stateTopic)
+				if t := client.Publish(stateTopic, 1, true, online); t.Wait() && t.Error() != nil {
+					m.log.Warn("sparkplug-host: STATE resend failed", "error", t.Error())
+				}
+				return
+			}
 			m.handleMessage(b, msg.Topic(), msg.Payload())
-		})
-		if token.Wait() && token.Error() != nil {
+		}); token.Wait() && token.Error() != nil {
 			m.log.Error("sparkplug-host: subscribe failed", "error", token.Error())
+		}
+
+		if t := c.Publish(stateTopic, 1, true, online); t.Wait() && t.Error() != nil {
+			m.log.Warn("sparkplug-host: STATE publish failed", "topic", stateTopic, "error", t.Error())
 		}
 	}
 	opts.OnConnectionLost = func(_ paho.Client, err error) {
@@ -191,6 +210,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	m.mu.Lock()
 	m.client = client
 	m.stateTopic = stateTopic
+	m.connectTimestamp = connectTimestamp
 	m.mu.Unlock()
 
 	m.stopHB = heartbeat.Start(b, m.moduleID, serviceType, func() map[string]interface{} {
@@ -277,6 +297,13 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	case <-ctx.Done():
 	case <-sigChan:
 	}
+	// Sparkplug B 3.0 §6.4.2: an intentionally-disconnecting Host Application
+	// MUST publish a DEATH (online:false) before sending the MQTT DISCONNECT
+	// (TCK SessionTerminationTest assertions
+	// host-topic-phid-death-payload-timestamp-disconnect-clean,
+	// operational-behavior-host-application-disconnect-intentional,
+	// operational-behavior-host-application-termination).
+	_ = m.Stop()
 	return nil
 }
 
@@ -286,6 +313,7 @@ func (m *Module) Stop() error {
 	m.client = nil
 	stateTopic := m.stateTopic
 	m.stateTopic = ""
+	connectTs := m.connectTimestamp
 	subs := m.subs
 	m.subs = nil
 	stopHB := m.stopHB
@@ -300,7 +328,10 @@ func (m *Module) Stop() error {
 	}
 	if client != nil && client.IsConnected() {
 		if stateTopic != "" {
-			offline := []byte(fmt.Sprintf(`{"online":false,"timestamp":%d}`, time.Now().UnixMilli()))
+			// Use the original Will timestamp so the DEATH payload matches
+			// what the TCK Monitor expects (BIRTH and DEATH should share the
+			// same connect-time UTC value during a session).
+			offline := []byte(fmt.Sprintf(`{"online":false,"timestamp":%d}`, connectTs))
 			if t := client.Publish(stateTopic, 1, true, offline); t.WaitTimeout(500*time.Millisecond) && t.Error() != nil {
 				if m.log != nil {
 					m.log.Warn("sparkplug-host: STATE OFFLINE publish failed", "error", t.Error())
@@ -322,21 +353,41 @@ func (m *Module) Stop() error {
 // (including the embedded mqtt-broker) do not match `#` against zero levels,
 // so a single `+/+/+/#` filter misses 4-segment topics.
 //
-// If SharedGroup is set, wraps each filter as $share/<group>/... for MQTT 5
-// shared subscriptions (HA fan-out).
+// Sparkplug B 3.0 §6.4.2 also requires a Host Application to subscribe on
+// its own spBv1.0/STATE/<host_id> topic so it can detect rogue clients
+// publishing on its STATE namespace (host-topic-phid-birth-sub-required,
+// payloads-state-subscribe, message-flow-phid-sparkplug-subscription).
+//
+// If SharedGroup is set, wraps the data filters as $share/<group>/... for
+// MQTT 5 shared subscriptions (HA fan-out). The STATE filter is always
+// non-shared so every host instance observes its own STATE topic.
 func buildSubscriptionFilters(cfg Config) []string {
-	bases := []string{
-		"spBv1.0/" + cfg.GroupFilter + "/+/+",
-		"spBv1.0/" + cfg.GroupFilter + "/+/+/#",
+	// When GroupFilter is the wildcard "+", subscribe to the entire Sparkplug
+	// namespace with `spBv1.0/#`. The Sparkplug TCK SessionEstablishmentTest
+	// checks for this exact literal filter (checkSubscribes in the TCK source)
+	// and FAILs assertions host-topic-phid-birth-sub-required,
+	// message-flow-phid-sparkplug-subscription, payloads-state-subscribe if
+	// the host subscribes only to narrower patterns like spBv1.0/+/+/+.
+	var bases []string
+	if cfg.GroupFilter == "" || cfg.GroupFilter == "+" {
+		bases = []string{"spBv1.0/#"}
+	} else {
+		bases = []string{
+			"spBv1.0/" + cfg.GroupFilter + "/+/+",
+			"spBv1.0/" + cfg.GroupFilter + "/+/+/#",
+		}
 	}
-	if cfg.SharedGroup == "" {
-		return bases
+	if cfg.SharedGroup != "" {
+		shared := make([]string, len(bases))
+		for i, b := range bases {
+			shared[i] = "$share/" + cfg.SharedGroup + "/" + b
+		}
+		bases = shared
 	}
-	out := make([]string, len(bases))
-	for i, b := range bases {
-		out[i] = "$share/" + cfg.SharedGroup + "/" + b
+	if cfg.PrimaryHostID != "" {
+		bases = append(bases, "spBv1.0/STATE/"+cfg.PrimaryHostID)
 	}
-	return out
+	return bases
 }
 
 // handleMessage decodes a single Sparkplug message and republishes its
