@@ -29,7 +29,14 @@ git clone --depth 1 --branch "$TCK_REF" "$TCK_REPO" "$WORK/sparkplug" \
 cd "$WORK/sparkplug/tck"
 # Upstream gitignores gradle/wrapper/gradle-wrapper.jar so ./gradlew won't run
 # from a fresh clone. Use system gradle (caller is responsible for installing
-# it — the CI workflow uses gradle/actions/setup-gradle).
+# it — the CI workflow uses gradle/actions/setup-gradle pinned to 8.10).
+
+# tck/settings.gradle.kts does includeBuild("../specification"), which pulls
+# in the spec docs project. That project applies org.asciidoctor.jvm.base
+# 3.3.2, which fails on modern Gradle. We only need the extension binary,
+# so strip the include.
+sed -i '/includeBuild.*specification/d' settings.gradle.kts
+
 gradle --no-daemon build
 
 ZIP=$(ls build/hivemq-extension/sparkplug-tck-*.zip 2>/dev/null | head -1)
