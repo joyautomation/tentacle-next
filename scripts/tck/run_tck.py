@@ -54,6 +54,7 @@ CONFIG_TOPIC = "SPARKPLUG_TCK/CONFIG"
 RESULT_TOPIC = "SPARKPLUG_TCK/RESULT"
 LOG_TOPIC = "SPARKPLUG_TCK/LOG"
 PROMPT_TOPIC = "SPARKPLUG_TCK/CONSOLE_PROMPT"
+REPLY_TOPIC = "SPARKPLUG_TCK/CONSOLE_REPLY"
 
 PUBLISH_ACK_TIMEOUT = 10.0  # seconds; never block forever on a publish
 
@@ -120,6 +121,10 @@ class TCKDriver:
         self._connected = threading.Event()
         self._results: queue.Queue = queue.Queue()
         self._log_lines: list[str] = []
+        # When set, every CONSOLE_PROMPT received triggers a CONSOLE_REPLY
+        # publish with this payload. Used by tests that gate their state
+        # machine on operator confirmation (e.g. EdgeSessionTerminationTest).
+        self._auto_reply: str | None = None
 
     def _on_connect_v1(self, client, _u, _f, rc):
         if rc == 0:
@@ -144,6 +149,16 @@ class TCKDriver:
             self._log_lines.append(f"[{msg.topic}] {payload}")
             if len(self._log_lines) > 1000:
                 self._log_lines = self._log_lines[-1000:]
+            # Auto-respond to operator prompts when enabled. Tests like
+            # EdgeSessionTerminationTest publish CONSOLE_PROMPT messages
+            # asking a human to confirm host behavior; without a reply
+            # they hang. We simply echo PASS so the per-assertion
+            # setResultIfNotFail call uses the host-observed verdict.
+            if msg.topic == PROMPT_TOPIC and self._auto_reply is not None:
+                try:
+                    self.client.publish(REPLY_TOPIC, self._auto_reply, qos=1)
+                except Exception:
+                    pass
 
     def connect(self):
         host, port = parse_mqtt_url(self.broker_url)
@@ -184,6 +199,9 @@ class TCKDriver:
         partner_log: str = "partner.log",
         fixture_cmd: str | None = None,
         fixture_log: str = "fixture.log",
+        auto_reply: str | None = None,
+        impl_first: bool = False,
+        impl_first_settle: float = 5.0,
     ) -> dict:
         """
         Run one TCK test:
@@ -202,10 +220,7 @@ class TCKDriver:
             try: self._results.get_nowait()
             except queue.Empty: break
 
-        params_str = " ".join(params)
-        new_test = f"NEW_TEST {profile} {test_type} {params_str}".strip()
-        print(f">> {new_test}", flush=True)
-        self._publish(CONTROL_TOPIC, new_test)
+        self._auto_reply = auto_reply
 
         def launch(label: str, cmd: str, log_path: str):
             print(f">> launching {label}: {cmd}", flush=True)
@@ -216,7 +231,24 @@ class TCKDriver:
                 start_new_session=True,
             )
 
-        impl_proc = launch("impl", impl_cmd, impl_log) if impl_cmd else None
+        # Some tests (e.g. EdgeSessionTerminationTest) call
+        # Utils.checkHostApplicationIsOnline at construction and throw
+        # IllegalStateException if the host isn't already STATE-online —
+        # which it can't be if NEW_TEST starts the impl. For those tests
+        # we launch the impl first, give it time to publish BIRTH, and
+        # only then send NEW_TEST.
+        impl_proc = None
+        if impl_first and impl_cmd:
+            impl_proc = launch("impl", impl_cmd, impl_log)
+            time.sleep(impl_first_settle)
+
+        params_str = " ".join(params)
+        new_test = f"NEW_TEST {profile} {test_type} {params_str}".strip()
+        print(f">> {new_test}", flush=True)
+        self._publish(CONTROL_TOPIC, new_test)
+
+        if impl_proc is None and impl_cmd:
+            impl_proc = launch("impl", impl_cmd, impl_log)
 
         partner_proc = None
         if partner_cmd:
@@ -253,6 +285,8 @@ class TCKDriver:
                     os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+
+        self._auto_reply = None
 
         print(">> END_TEST", flush=True)
         self._publish(CONTROL_TOPIC, "END_TEST")
@@ -372,12 +406,26 @@ def main():
         params = render_params(test.get("params", []), ctx)
         observe = float(test.get("observe_seconds", 30))
         result_to = float(test.get("result_timeout", 30))
+        # Per-test overrides:
+        #   no_partner: skip the global --partner-cmd for this test (e.g.
+        #     EdgeSessionTerminationTest must run against the TCK's own
+        #     edge utility — a real partner makes hasDevice() return true
+        #     and disables the test's auto-kill scheduler).
+        #   no_fixture: skip the global --fixture-cmd for this test.
+        #   auto_reply: payload to publish on SPARKPLUG_TCK/CONSOLE_REPLY
+        #     for every CONSOLE_PROMPT received during the test.
+        partner_cmd = None if test.get("no_partner") else args.partner_cmd
+        fixture_cmd = None if test.get("no_fixture") else args.fixture_cmd
+        auto_reply = test.get("auto_reply")
+        impl_first = bool(test.get("impl_first"))
         print(f"\n=== {args.profile}/{name} ===")
         r = driver.run_test(
             args.profile, name, params, observe, result_to,
             impl_cmd=args.impl_cmd, impl_log=args.impl_log,
-            partner_cmd=args.partner_cmd, partner_log=args.partner_log,
-            fixture_cmd=args.fixture_cmd, fixture_log=args.fixture_log,
+            partner_cmd=partner_cmd, partner_log=args.partner_log,
+            fixture_cmd=fixture_cmd, fixture_log=args.fixture_log,
+            auto_reply=auto_reply,
+            impl_first=impl_first,
         )
         v = r["verdict"]
         a = r["assertions"]

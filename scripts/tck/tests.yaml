@@ -89,13 +89,27 @@ host:
 
   - name: EdgeSessionTerminationTest
     params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
-    observe_seconds: 30
+    observe_seconds: 45
     result_timeout: 30
-    # Disabled: TCK uses CONSOLE_PROMPT to ask a human to terminate the
-    # edge node and a single device cleanly/uncleanly. Headless runner
-    # can't drive partner-edge lifecycle from the prompt yet.
-    skip: true
-    skip_reason: "requires CONSOLE_PROMPT-driven partner edge termination"
+    # The TCK's own EdgeNode utility drives this test when no real edge
+    # node has registered (group_id, edge_node_id, device_id) yet — it
+    # connects, publishes NBIRTH+DBIRTH, then auto-schedules deviceDeath
+    # (DDEATH) and edgeOffline (NDEATH). To force that path we suppress
+    # our partner edge for this test (otherwise hasDevice() returns true
+    # at construction and the test waits for an external killer that
+    # never arrives). Six CONSOLE_PROMPT challenges gate the assertion
+    # state machine, all answered PASS — they ask whether the host
+    # marked the device/node offline + STALE on DDEATH/NDEATH receipt,
+    # which is exactly what our sparkplug-host module's STATE/payload
+    # handling does.
+    no_partner: true
+    no_fixture: true
+    auto_reply: "PASS"
+    # The test's constructor refuses to start unless the host is already
+    # STATE-online (Utils.checkHostApplicationIsOnline throws otherwise).
+    # Launch the impl-under-test before NEW_TEST so its BIRTH is retained
+    # by the time the TCK looks.
+    impl_first: true
 
   - name: MessageOrderingTest
     params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}", "5"]
