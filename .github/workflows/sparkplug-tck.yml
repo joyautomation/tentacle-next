@@ -1,0 +1,245 @@
+name: Sparkplug TCK
+
+on:
+  push:
+    branches: [main, "feature/mantle"]
+  pull_request:
+    branches: [main, "feature/mantle"]
+  workflow_dispatch:
+
+env:
+  TCK_REF: master  # pin to a tag/SHA once Eclipse Sparkplug starts cutting them
+  HIVEMQ_IMAGE: hivemq/hivemq-ce:latest
+
+jobs:
+  build-tck-extension:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.cachekey.outputs.key }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: cachekey
+        run: echo "key=tck-ext-${{ env.TCK_REF }}-$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: tck-ext
+          key: ${{ steps.cachekey.outputs.key }}
+
+      - uses: actions/setup-java@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build TCK extension
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: TCK_REF="${TCK_REF}" scripts/tck/build-tck-extension.sh "$PWD/tck-ext"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tck-extension
+          path: tck-ext
+          retention-days: 7
+
+  edge-node:
+    needs: build-tck-extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install paho-mqtt pyyaml
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tck-extension
+          path: tck-ext
+
+      - name: Start HiveMQ + TCK extension
+        run: |
+          mkdir -p hivemq-data hivemq-log
+          docker run -d --name hivemq \
+            -p 1883:1883 -p 8080:8080 \
+            -v "$PWD/tck-ext/sparkplug-tck:/opt/hivemq/extensions/sparkplug-tck:ro" \
+            ${{ env.HIVEMQ_IMAGE }}
+          # wait for broker to accept connections
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/1883) >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker ps
+
+      - name: Start NATS
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2 -js
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/4222) >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+
+      - name: Build sparkplug node
+        run: go build -tags mqtt -o ./tentacle-sparkplug ./cmd/tentacle-sparkplug
+
+      - name: Start sparkplug node
+        env:
+          NATS_URL: nats://localhost:4222
+          MODULE_ID: mqtt
+          MQTT_BROKER_URL: tcp://localhost:1883
+          MQTT_CLIENT_ID: tentacle-mqtt
+          MQTT_GROUP_ID: TentacleGroup
+          MQTT_EDGE_NODE: EdgeNode1
+          MQTT_USE_TEMPLATES: "true"
+        run: |
+          ./tentacle-sparkplug > sparkplug-node.log 2>&1 &
+          echo $! > sparkplug-node.pid
+          sleep 5
+          if ! kill -0 "$(cat sparkplug-node.pid)" 2>/dev/null; then
+            echo "node failed to start"; cat sparkplug-node.log; exit 1
+          fi
+
+      - name: Run TCK (edge profile)
+        env:
+          TCK_HOST_ID: TCKHost
+          TCK_GROUP_ID: TentacleGroup
+          TCK_EDGE_NODE_ID: EdgeNode1
+          TCK_DEVICE_ID: Device1
+          TCK_CLIENT_ID: tentacle-mqtt
+          MQTT_BROKER_URL: tcp://localhost:1883
+        run: python scripts/tck/run_tck.py --profile edge --report tck-edge.json
+
+      - name: Stop node
+        if: always()
+        run: |
+          [ -f sparkplug-node.pid ] && kill "$(cat sparkplug-node.pid)" || true
+
+      - name: Collect logs
+        if: always()
+        run: |
+          docker logs hivemq > hivemq.log 2>&1 || true
+          docker logs nats > nats.log 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tck-edge-artifacts
+          path: |
+            tck-edge.json
+            sparkplug-node.log
+            hivemq.log
+            nats.log
+
+  host-application:
+    needs: build-tck-extension
+    runs-on: ubuntu-latest
+    # The host module only exists on feature/mantle (and main once mantle merges).
+    # Skip the job on branches that don't ship it.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect host binary
+        id: detect
+        run: |
+          if [ -f cmd/tentacle-sparkplug-host/main.go ]; then
+            echo "present=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=0" >> "$GITHUB_OUTPUT"
+            echo "host module not present on this ref — skipping"
+          fi
+
+      - if: steps.detect.outputs.present == '1'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - if: steps.detect.outputs.present == '1'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - if: steps.detect.outputs.present == '1'
+        run: pip install paho-mqtt pyyaml
+
+      - if: steps.detect.outputs.present == '1'
+        uses: actions/download-artifact@v4
+        with:
+          name: tck-extension
+          path: tck-ext
+
+      - if: steps.detect.outputs.present == '1'
+        name: Start HiveMQ + TCK extension
+        run: |
+          docker run -d --name hivemq \
+            -p 1883:1883 -p 8080:8080 \
+            -v "$PWD/tck-ext/sparkplug-tck:/opt/hivemq/extensions/sparkplug-tck:ro" \
+            ${{ env.HIVEMQ_IMAGE }}
+          for i in $(seq 1 60); do
+            if (echo > /dev/tcp/127.0.0.1/1883) >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+
+      - if: steps.detect.outputs.present == '1'
+        name: Start NATS
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2 -js
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/4222) >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+
+      - if: steps.detect.outputs.present == '1'
+        name: Build sparkplug host
+        run: go build -tags sparkplughost -o ./tentacle-sparkplug-host ./cmd/tentacle-sparkplug-host
+
+      - if: steps.detect.outputs.present == '1'
+        name: Start sparkplug host
+        env:
+          NATS_URL: nats://localhost:4222
+          MODULE_ID: sparkplug-host
+          SPARKPLUG_HOST_BROKER_URL: tcp://localhost:1883
+          SPARKPLUG_HOST_PRIMARY_HOST_ID: MantleHost
+          SPARKPLUG_HOST_GROUP: "+"
+        run: |
+          ./tentacle-sparkplug-host > sparkplug-host.log 2>&1 &
+          echo $! > sparkplug-host.pid
+          sleep 5
+          if ! kill -0 "$(cat sparkplug-host.pid)" 2>/dev/null; then
+            echo "host failed to start"; cat sparkplug-host.log; exit 1
+          fi
+
+      - if: steps.detect.outputs.present == '1'
+        name: Run TCK (host profile)
+        env:
+          TCK_HOST_ID: MantleHost
+          MQTT_BROKER_URL: tcp://localhost:1883
+        run: python scripts/tck/run_tck.py --profile host --report tck-host.json
+
+      - if: always() && steps.detect.outputs.present == '1'
+        name: Stop host
+        run: |
+          [ -f sparkplug-host.pid ] && kill "$(cat sparkplug-host.pid)" || true
+
+      - if: always() && steps.detect.outputs.present == '1'
+        name: Collect logs
+        run: |
+          docker logs hivemq > hivemq.log 2>&1 || true
+          docker logs nats > nats.log 2>&1 || true
+
+      - if: always() && steps.detect.outputs.present == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tck-host-artifacts
+          path: |
+            tck-host.json
+            sparkplug-host.log
+            hivemq.log
+            nats.log

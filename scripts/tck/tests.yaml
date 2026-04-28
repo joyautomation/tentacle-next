@@ -1,0 +1,50 @@
+# Sparkplug TCK test plan.
+#
+# Each entry runs:
+#   SPARKPLUG_TCK/TEST_CONTROL  ->  "NEW_TEST <profile> <name> <params...>"
+#
+# Parameter ordering for each test was extracted from the TCK web console
+# (tck/webconsole/components/Tck/* in eclipse-sparkplug/sparkplug). When the
+# TCK changes its expected order, update the `params` list here.
+#
+# Available substitutions (passed via run_tck.py CLI / env):
+#   {host_id} {group_id} {edge_node_id} {device_id} {client_id} {broker_uri}
+
+# ----- Edge Node profile -----
+# Tests our tentacle-sparkplug binary as a Sparkplug B Edge Node.
+edge:
+  - name: SessionEstablishmentTest
+    params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+    timeout: 120
+
+  # Add as the implementation matures and each test becomes green:
+  # - name: SessionTerminationTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  # - name: SendDataTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  # - name: SendComplexDataTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  # - name: ReceiveCommandTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  # - name: PrimaryHostTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+
+# ----- Host Application profile -----
+# Tests the mantle sparkplug-host module as a Sparkplug B Host Application.
+host:
+  - name: SessionEstablishmentTest
+    params: ["{host_id}"]
+    timeout: 120
+
+  # Tests that need a co-operating edge node would also need a publisher running
+  # against the same broker (the TCK ships a 'utilities' fake node that the web
+  # console drives — for CI we use cmd/sparkplug-smoke as the partner). Wire
+  # these up after the basic session test is green.
+  # - name: SendCommandTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  # - name: ReceiveDataTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  # - name: EdgeSessionTerminationTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
+  # - name: MessageOrderingTest
+  #   params: ["{host_id}", "{group_id}", "{edge_node_id}", "{device_id}"]
