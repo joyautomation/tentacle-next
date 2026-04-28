@@ -27,11 +27,17 @@ git clone --depth 1 --branch "$TCK_REF" "$TCK_REPO" "$WORK/sparkplug" \
   || { git clone "$TCK_REPO" "$WORK/sparkplug" && git -C "$WORK/sparkplug" checkout "$TCK_REF"; }
 
 cd "$WORK/sparkplug/tck"
-chmod +x ./gradlew
-./gradlew --no-daemon hivemqExtensionZip
+# Upstream gitignores gradle/wrapper/gradle-wrapper.jar so ./gradlew won't run
+# from a fresh clone. Use system gradle (caller is responsible for installing
+# it — the CI workflow uses gradle/actions/setup-gradle).
+gradle --no-daemon build
 
-ZIP=$(ls build/hivemq-extension/sparkplug-tck-*.zip | head -1)
-[ -z "$ZIP" ] && { echo "no extension zip produced"; exit 1; }
+ZIP=$(ls build/hivemq-extension/sparkplug-tck-*.zip 2>/dev/null | head -1)
+if [ -z "$ZIP" ]; then
+  echo "no extension zip in build/hivemq-extension/ — gradle output:"
+  find build -maxdepth 3 -name '*.zip' 2>/dev/null || true
+  exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 rm -rf "$OUT_DIR/sparkplug-tck"
