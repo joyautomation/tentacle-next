@@ -3,6 +3,7 @@ name: Sparkplug TCK
 on:
   push:
     branches: [main, "feature/mantle"]
+    tags: ["v*"]
   pull_request:
     branches: [main, "feature/mantle"]
   workflow_dispatch:
@@ -12,7 +13,57 @@ env:
   HIVEMQ_IMAGE: hivemq/hivemq-ce:latest
 
 jobs:
+  # Skip the heavy TCK jobs unless something Sparkplug-relevant changed.
+  # Tag pushes (releases) and manual dispatches always run as a CYA. Path
+  # filters at the `on:` level don't interact predictably with tag pushes
+  # (no well-defined diff base), so we gate at the job level instead.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]] || [[ "$REF" == refs/tags/v* ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "tag/dispatch — running TCK"
+            exit 0
+          fi
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE"; head="$PR_HEAD"
+          else
+            base="$PUSH_BEFORE"; head="$PUSH_AFTER"
+          fi
+          # On a brand-new branch the "before" sha is all zeros — bail out
+          # safe and run the TCK.
+          if [[ -z "$base" || "$base" == "0000000000000000000000000000000000000000" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "no diff base — running TCK"
+            exit 0
+          fi
+          patterns='^(internal/mqtt/|internal/sparkplug/|internal/sparkplughost/|cmd/tentacle-sparkplug/|cmd/tentacle-sparkplug-host/|cmd/tck-fixture/|scripts/tck/|\.github/workflows/sparkplug-tck\.yml|go\.mod|go\.sum)'
+          if git diff --name-only "$base" "$head" | grep -qE "$patterns"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Sparkplug-relevant changes detected — running TCK"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "no Sparkplug-relevant changes — skipping TCK"
+          fi
+
   build-tck-extension:
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
     runs-on: ubuntu-latest
     outputs:
       cache-key: ${{ steps.cachekey.outputs.key }}
