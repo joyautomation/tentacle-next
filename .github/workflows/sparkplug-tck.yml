@@ -55,6 +55,7 @@ jobs:
   edge-node:
     needs: build-tck-extension
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -98,37 +99,31 @@ jobs:
       - name: Build sparkplug node
         run: go build -tags mqtt -o ./tentacle-sparkplug ./cmd/tentacle-sparkplug
 
-      - name: Start sparkplug node
-        env:
-          NATS_URL: nats://localhost:4222
-          MODULE_ID: mqtt
-          MQTT_BROKER_URL: tcp://localhost:1883
-          MQTT_CLIENT_ID: tentacle-mqtt
-          MQTT_GROUP_ID: TentacleGroup
-          MQTT_EDGE_NODE: EdgeNode1
-          MQTT_USE_TEMPLATES: "true"
-        run: |
-          ./tentacle-sparkplug > sparkplug-node.log 2>&1 &
-          echo $! > sparkplug-node.pid
-          sleep 5
-          if ! kill -0 "$(cat sparkplug-node.pid)" 2>/dev/null; then
-            echo "node failed to start"; cat sparkplug-node.log; exit 1
-          fi
-
       - name: Run TCK (edge profile)
         env:
-          TCK_HOST_ID: TCKHost
+          # Driver config
+          TCK_HOST_ID: MantleHost
           TCK_GROUP_ID: TentacleGroup
           TCK_EDGE_NODE_ID: EdgeNode1
           TCK_DEVICE_ID: Device1
           TCK_CLIENT_ID: tentacle-mqtt
           MQTT_BROKER_URL: tcp://localhost:1883
-        run: python scripts/tck/run_tck.py --profile edge --report tck-edge.json
-
-      - name: Stop node
-        if: always()
+          # Impl-under-test config (forwarded to the subprocess the driver spawns).
+          # The driver starts the node fresh after NEW_TEST so the TCK observes
+          # its full connect/NBIRTH sequence.
+          NATS_URL: nats://localhost:4222
+          MODULE_ID: mqtt
+          MQTT_CLIENT_ID: tentacle-mqtt
+          MQTT_GROUP_ID: TentacleGroup
+          MQTT_EDGE_NODE: EdgeNode1
+          MQTT_USE_TEMPLATES: "true"
+          MQTT_PRIMARY_HOST_ID: MantleHost
         run: |
-          [ -f sparkplug-node.pid ] && kill "$(cat sparkplug-node.pid)" || true
+          python scripts/tck/run_tck.py \
+            --profile edge \
+            --report tck-edge.json \
+            --impl-cmd "$PWD/tentacle-sparkplug" \
+            --impl-log sparkplug-node.log
 
       - name: Collect logs
         if: always()
@@ -149,6 +144,7 @@ jobs:
   host-application:
     needs: build-tck-extension
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The host module only exists on feature/mantle (and main once mantle merges).
     # Skip the job on branches that don't ship it.
     steps:
@@ -209,32 +205,22 @@ jobs:
         run: go build -tags sparkplughost -o ./tentacle-sparkplug-host ./cmd/tentacle-sparkplug-host
 
       - if: steps.detect.outputs.present == '1'
-        name: Start sparkplug host
+        name: Run TCK (host profile)
         env:
+          TCK_HOST_ID: MantleHost
+          MQTT_BROKER_URL: tcp://localhost:1883
+          # Impl-under-test config
           NATS_URL: nats://localhost:4222
           MODULE_ID: sparkplug-host
           SPARKPLUG_HOST_BROKER_URL: tcp://localhost:1883
           SPARKPLUG_HOST_PRIMARY_HOST_ID: MantleHost
           SPARKPLUG_HOST_GROUP: "+"
         run: |
-          ./tentacle-sparkplug-host > sparkplug-host.log 2>&1 &
-          echo $! > sparkplug-host.pid
-          sleep 5
-          if ! kill -0 "$(cat sparkplug-host.pid)" 2>/dev/null; then
-            echo "host failed to start"; cat sparkplug-host.log; exit 1
-          fi
-
-      - if: steps.detect.outputs.present == '1'
-        name: Run TCK (host profile)
-        env:
-          TCK_HOST_ID: MantleHost
-          MQTT_BROKER_URL: tcp://localhost:1883
-        run: python scripts/tck/run_tck.py --profile host --report tck-host.json
-
-      - if: always() && steps.detect.outputs.present == '1'
-        name: Stop host
-        run: |
-          [ -f sparkplug-host.pid ] && kill "$(cat sparkplug-host.pid)" || true
+          python scripts/tck/run_tck.py \
+            --profile host \
+            --report tck-host.json \
+            --impl-cmd "$PWD/tentacle-sparkplug-host" \
+            --impl-log sparkplug-host.log
 
       - if: always() && steps.detect.outputs.present == '1'
         name: Collect logs

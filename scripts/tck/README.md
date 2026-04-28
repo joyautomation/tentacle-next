@@ -9,10 +9,19 @@ against our Sparkplug B implementations:
 ## How it works
 
 The TCK is a HiveMQ extension. Its web console talks to the extension via
-control topics on the broker — we replace the console with `run_tck.py`, which
-publishes `NEW_TEST` payloads on `SPARKPLUG_TCK/TEST_CONTROL` and watches
-`SPARKPLUG_TCK/RESULT` and `SPARKPLUG_TCK/LOG` for the `OVERALL: PASS`/`FAIL`/
-`NOT EXECUTED` verdict line.
+control topics on the broker — we replace the console with `run_tck.py`,
+which:
+
+1. Connects to the broker and configures result logging
+2. Publishes `NEW_TEST <profile> <name> <params>` on `SPARKPLUG_TCK/TEST_CONTROL`
+3. Spawns the impl-under-test as a subprocess (`--impl-cmd`) so the TCK observes
+   a fresh connect → NBIRTH sequence — running the impl beforehand makes the
+   test report all assertions as `NOT EXECUTED`
+4. After `observe_seconds`, stops the impl (which sends NDEATH via its will)
+5. Publishes `END_TEST`, which causes the TCK to emit a multi-line summary on
+   `SPARKPLUG_TCK/RESULT` listing each assertion as `PASS`/`FAIL`/`NOT EXECUTED`
+6. Derives an overall verdict (any FAIL → FAIL; else any PASS → PASS;
+   else NOT_EXECUTED) and exits non-zero on FAIL/TIMEOUT
 
 CI flow (`.github/workflows/sparkplug-tck.yml`):
 
@@ -28,7 +37,7 @@ CI flow (`.github/workflows/sparkplug-tck.yml`):
 You need Docker, Java 17, Go, and Python 3.11+ with `paho-mqtt` and `pyyaml`.
 
 ```bash
-# 1. Build the TCK extension (cached after first run)
+# 1. Build the TCK extension (cached after first run). Requires JDK 11.
 scripts/tck/build-tck-extension.sh ./tck-ext
 
 # 2. Start broker + NATS
@@ -38,13 +47,17 @@ docker run -d --name hivemq-tck \
   hivemq/hivemq-ce:latest
 docker run -d --name nats -p 4222:4222 nats:2 -js
 
-# 3. Start the impl under test
-MQTT_BROKER_URL=tcp://localhost:1883 \
-NATS_URL=nats://localhost:4222 \
-./tentacle-sparkplug &       # or ./tentacle-sparkplug-host
+# 3. Build the impl
+go build -tags mqtt -o tentacle-sparkplug ./cmd/tentacle-sparkplug
+# (or: go build -tags sparkplughost -o tentacle-sparkplug-host ./cmd/tentacle-sparkplug-host)
 
-# 4. Drive the TCK
-python scripts/tck/run_tck.py --profile edge   # or host
+# 4. Drive the TCK — the driver starts the impl itself
+NATS_URL=nats://localhost:4222 \
+MQTT_BROKER_URL=tcp://localhost:1883 \
+MQTT_PRIMARY_HOST_ID=MantleHost \
+python scripts/tck/run_tck.py \
+  --profile edge \
+  --impl-cmd "$PWD/tentacle-sparkplug"
 ```
 
 For richer interactive debugging, point a browser at the TCK web console
