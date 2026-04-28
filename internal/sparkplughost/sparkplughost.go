@@ -137,7 +137,10 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	}
 
 	stateTopic := "spBv1.0/STATE/" + cfg.PrimaryHostID
-	offlinePayload := []byte(`{"online":false,"timestamp":0}`)
+	// Sparkplug B 3.0 §6.4.2: STATE Will payload timestamp must be a current
+	// UTC millisecond value at CONNECT time. The Sparkplug TCK Monitor parses
+	// the Will payload and rejects anything outside its UTC window (60s).
+	offlinePayload := []byte(fmt.Sprintf(`{"online":false,"timestamp":%d}`, time.Now().UnixMilli()))
 
 	opts := paho.NewClientOptions().
 		AddBroker(cfg.BrokerURL).
