@@ -7,7 +7,11 @@ set -euo pipefail
 # gateway over SSH+SCP.
 #
 # Usage:
-#   scripts/deploy-remote.sh user@host [--no-web] [--no-rebuild-image]
+#   scripts/deploy-remote.sh user@host [--no-web] [--no-rebuild-image] [--mantle]
+#
+# Build role: defaults to a regular edge tentacle even when run from a worktree
+# named *mantle* — the worktree is just a dev convenience, the remote target
+# is what determines role. Pass --mantle to deploy a mantle build instead.
 #
 # Requirements:
 #   - docker available without sudo (rootless or `docker` group membership)
@@ -18,7 +22,7 @@ set -euo pipefail
 #   - /etc/systemd/system/tentacle.service already configured on the remote.
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: $0 user@host [--no-web] [--no-rebuild-image]" >&2
+  echo "usage: $0 user@host [--no-web] [--no-rebuild-image] [--mantle]" >&2
   exit 2
 fi
 
@@ -27,10 +31,12 @@ shift || true
 
 BUILD_WEB=1
 REBUILD_IMAGE_IF_MISSING=1
+MANTLE_ROLE=0
 for arg in "$@"; do
   case "$arg" in
     --no-web) BUILD_WEB=0 ;;
     --no-rebuild-image) REBUILD_IMAGE_IF_MISSING=0 ;;
+    --mantle) MANTLE_ROLE=1 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -66,10 +72,11 @@ fi
 
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-# Same tag policy as deploy-dev.sh: mantle worktrees layer the mantle tag on
-# top of "all" so role_mantle.go fires.
+# Tag policy: remote targets are edge tentacles by default, so don't inherit
+# the mantle build tag from the worktree dir name. Pass --mantle explicitly
+# to deploy a mantle build to a remote.
 BUILD_TAGS="all"
-if [[ "$REPO_DIR" == *mantle* ]]; then
+if [[ "$MANTLE_ROLE" == "1" ]]; then
   BUILD_TAGS="all,mantle"
 fi
 
