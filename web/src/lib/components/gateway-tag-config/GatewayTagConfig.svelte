@@ -39,6 +39,11 @@
   // Guard to prevent re-initialization from invalidateAll() wiping working state
   let needsInit = $state(true);
   let initialized = $state(false);
+  // Snapshot of working state right after initializeState. Used to detect
+  // "user hasn't touched anything" — when an external gitops apply re-runs
+  // load functions and gatewayConfig changes, we can safely reinit if working
+  // state still matches the snapshot, avoiding a phantom dirty banner.
+  let lastInitSnapshot = '';
 
   // Working copies for dirty tracking
   let workingTemplates: Map<string, GatewayUdtTemplate> = $state(new Map());
@@ -233,6 +238,28 @@
     editingCell = null;
   }
 
+  // Capture every dimension that feeds isDirty, so detecting "no user edits"
+  // == "working state still equals snapshot" stays in sync with dirty logic.
+  function snapshotWorkingState(): string {
+    const sortedSet = (s: Set<string>) => [...s].sort();
+    const sortedMap = <V>(m: Map<string, V>) =>
+      [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const sortedExcluded = Object.entries(excludedUdtMembers)
+      .map(([k, v]) => [k, sortedSet(v)])
+      .sort((a, b) => (a[0] as string).localeCompare(b[0] as string));
+    return JSON.stringify({
+      atomic: sortedSet(checkedAtomicTags),
+      udt: sortedSet(checkedUdtInstances),
+      histAtomic: sortedSet(checkedHistoryAtomicTags),
+      histUdt: sortedSet(checkedHistoryUdtInstances),
+      rbe: sortedMap(rbeOverrides),
+      tmpl: sortedMap(workingTemplates),
+      inst: sortedMap(workingInstanceOverrides),
+      tmplOverrides: sortedMap(workingTemplateOverrides),
+      excluded: sortedExcluded,
+    });
+  }
+
   // Only initialize on first mount or when explicitly requested (save/discard).
   // When browse data arrives (invalidateAll from subscription), merge new templates
   // without resetting working state.
@@ -241,10 +268,23 @@
     templates; allConfigInstances; gatewayConfig;
     const caches = browseCaches;
 
+    // External gitops apply path: gatewayConfig changed under us. If working
+    // state hasn't been touched since last init (still matches snapshot),
+    // reinit to the new server state — otherwise we'd flag phantom dirty
+    // edits the operator never made. If the user *was* editing, leave their
+    // draft alone; their save will conflict-resolve.
+    if (initialized && !needsInit) {
+      const current = untrack(() => snapshotWorkingState());
+      if (current === lastInitSnapshot) {
+        needsInit = true;
+      }
+    }
+
     if (needsInit) {
       initializeState();
       needsInit = false;
       initialized = true;
+      lastInitSnapshot = snapshotWorkingState();
       return;
     }
 

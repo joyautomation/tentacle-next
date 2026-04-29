@@ -696,7 +696,11 @@ func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *spar
 			}
 		}
 	}
+	gitopsChanged := false
 	if gitopsSet {
+		if n.GitopsCommitSHA != gitopsSHA {
+			gitopsChanged = true
+		}
 		n.GitopsCommitSHA = gitopsSHA
 	}
 	m.invMu.Unlock()
@@ -711,6 +715,24 @@ func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *spar
 		if data, err := json.Marshal(evt); err == nil {
 			if err := b.Publish(sparkplug.SubjectHostBrowseCacheUpdated, data); err != nil {
 				m.log.Debug("sparkplug-host: browse cache updated publish failed", "error", err)
+			}
+		}
+	}
+
+	// Republish edge convergence on mantle's local bus so the existing
+	// /gitops/applied/stream SSE relays it and the frontend invalidates
+	// without manual refresh. Source carries the edge identity so the
+	// handler doesn't confuse it with a local mantle apply. Skip when the
+	// SHA hasn't changed (NBIRTH/reconnect re-emits the same value).
+	if gitopsChanged && b != nil {
+		evt := topics.GitOpsAppliedEvent{
+			CommitSHA: gitopsSHA,
+			Source:    "edge:" + group + "/" + edgeNode,
+			Timestamp: time.Now().UnixMilli(),
+		}
+		if data, err := json.Marshal(evt); err == nil {
+			if err := b.Publish(topics.GitOpsApplied, data); err != nil {
+				m.log.Debug("sparkplug-host: gitops applied publish failed", "error", err)
 			}
 		}
 	}
