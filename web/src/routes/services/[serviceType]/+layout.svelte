@@ -7,7 +7,23 @@
   } from '$lib/constants/services';
   import { setRemoteTargetContext } from '$lib/contexts/remote-target';
 
-  let { children } = $props();
+  let { children, data } = $props();
+
+  function syncLabel(status?: string): string {
+    switch (status) {
+      case 'synced': return 'Synced';
+      case 'syncing': return 'Syncing';
+      case 'empty': return 'Empty repo';
+      case 'unknown': return 'Awaiting edge';
+      default: return 'Unknown';
+    }
+  }
+
+  function syncTitle(n: { gitopsCommitSHA?: string; repoHead?: string } | null | undefined): string {
+    const edge = n?.gitopsCommitSHA || '(not yet reported)';
+    const head = n?.repoHead || '(no commits)';
+    return `Edge applied: ${edge}\nMantle HEAD: ${head}`;
+  }
 
   const serviceType = $derived($page.params.serviceType ?? '');
   const serviceName = $derived(getServiceName(serviceType));
@@ -86,6 +102,13 @@
       <span class="remote-label">Configuring remote tentacle</span>
       <span class="remote-target mono">{target}</span>
       <span class="remote-hint">Changes are committed to mantle's git repo for this edge node.</span>
+      <span
+        class="sync-badge"
+        class:sync-synced={data?.fleetNode?.syncStatus === 'synced'}
+        class:sync-syncing={data?.fleetNode?.syncStatus === 'syncing'}
+        class:sync-muted={!data?.fleetNode?.syncStatus || data.fleetNode.syncStatus === 'empty' || data.fleetNode.syncStatus === 'unknown'}
+        title={syncTitle(data?.fleetNode)}
+      >{syncLabel(data?.fleetNode?.syncStatus)}</span>
     </div>
   {/if}
   <nav class="service-nav">
@@ -241,6 +264,33 @@
   .remote-hint {
     color: var(--theme-text-muted);
     font-size: 0.75rem;
+  }
+
+  .sync-badge {
+    margin-left: auto;
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.125rem 0.5rem;
+    border-radius: var(--rounded-full, 999px);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: help;
+
+    &.sync-synced {
+      background: var(--badge-green-bg);
+      color: var(--badge-green-text);
+    }
+
+    &.sync-syncing {
+      background: var(--badge-amber-bg, color-mix(in srgb, #f59e0b 18%, transparent));
+      color: var(--badge-amber-text, #b45309);
+    }
+
+    &.sync-muted {
+      background: var(--badge-muted-bg);
+      color: var(--badge-muted-text);
+    }
   }
 
   .service-layout.remote::after {
