@@ -33,6 +33,17 @@ func (r *gitRepo) Init() error {
 		return nil
 	}
 
+	// Dir exists but has no .git — stale leftover from a partial clone or from
+	// syncToGit running before the first successful clone. Wipe it so the
+	// upcoming clone can succeed; whatever is there is, by definition, not the
+	// repo, and mantle's authoritative copy will replace it.
+	if entries, err := os.ReadDir(r.dir); err == nil && len(entries) > 0 {
+		r.log.Warn("gitops: clearing non-git work dir before clone", "dir", r.dir)
+		if err := os.RemoveAll(r.dir); err != nil {
+			return fmt.Errorf("clear stale work dir: %w", err)
+		}
+	}
+
 	// Clone fresh.
 	if err := os.MkdirAll(filepath.Dir(r.dir), 0o755); err != nil {
 		return fmt.Errorf("create parent dir: %w", err)

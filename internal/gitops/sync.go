@@ -93,6 +93,21 @@ func applyFromDisk(b bus.Bus, configPath string, log *slog.Logger) {
 
 // syncFromGit pulls remote changes and applies them to KV.
 func syncFromGit(b bus.Bus, repo *gitRepo, configPath string, log *slog.Logger) {
+	// Recover from a failed initial clone (e.g. mantle was unreachable at
+	// startup, or the bare repo hadn't been seeded yet). Without this retry
+	// the poll loop would fetch in a non-git dir forever and the edge would
+	// never sync.
+	if _, err := os.Stat(filepath.Join(repo.dir, ".git")); os.IsNotExist(err) {
+		if err := repo.Init(); err != nil {
+			log.Warn("gitops: clone retry failed", "error", err)
+			return
+		}
+		repo.EnsureIdentity()
+		log.Info("gitops: cloned remote on retry", "dir", repo.dir, "remote", repo.remote)
+		applyFromDisk(b, configPath, log)
+		return
+	}
+
 	hasNew, err := repo.HasRemoteChanges()
 	if err != nil {
 		log.Warn("gitops: check remote failed", "error", err)
