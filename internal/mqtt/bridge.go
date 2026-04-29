@@ -516,7 +516,107 @@ func (br *Bridge) handleNodeCommand(metrics []sparkplug.Metric) {
 		if m.Name == "Node Control/Rebirth" {
 			continue // Handled by the node itself
 		}
+		if strings.HasPrefix(m.Name, sparkplug.NodeControlPrefix) {
+			go br.dispatchVerb(m)
+			continue
+		}
 		br.log.Info("mqtt: received NCMD", "metric", m.Name)
+	}
+}
+
+// dispatchVerb runs an RPC-style NCMD verb. The metric value carries a JSON
+// sparkplug.RPCRequest envelope; this method runs the verb and publishes a
+// `Node Status/<Verb>` NDATA reply with the matching requestId so mantle's
+// rpcInflight tracker can resolve. Runs on its own goroutine because verbs
+// can take a moment (browse acceptance, etc.).
+func (br *Bridge) dispatchVerb(m sparkplug.Metric) {
+	verb := strings.TrimPrefix(m.Name, sparkplug.NodeControlPrefix)
+	raw, ok := m.Value.(string)
+	if !ok {
+		br.replyVerb(verb, "", "verb payload must be a String metric", nil)
+		return
+	}
+	var req sparkplug.RPCRequest
+	if err := json.Unmarshal([]byte(raw), &req); err != nil {
+		br.replyVerb(verb, "", "decode request: "+err.Error(), nil)
+		return
+	}
+	if req.RequestID == "" {
+		br.replyVerb(verb, "", "missing requestId", nil)
+		return
+	}
+
+	switch verb {
+	case sparkplug.VerbBrowse:
+		br.handleVerbBrowse(req)
+	default:
+		br.replyVerb(verb, req.RequestID, "unknown verb: "+verb, nil)
+	}
+}
+
+// handleVerbBrowse runs a Browse verb by delegating to the api module's
+// bus-registered start path. The reply confirms acceptance (or rejection);
+// the actual cache lands on mantle later via "_meta/browse" DDATA.
+func (br *Bridge) handleVerbBrowse(req sparkplug.RPCRequest) {
+	var params sparkplug.BrowseRequestParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		br.replyVerb(sparkplug.VerbBrowse, req.RequestID, "decode browse params: "+err.Error(), nil)
+		return
+	}
+	if params.GatewayID == "" {
+		params.GatewayID = "gateway"
+	}
+
+	var input map[string]interface{}
+	if len(params.Input) > 0 {
+		if err := json.Unmarshal(params.Input, &input); err != nil {
+			br.replyVerb(sparkplug.VerbBrowse, req.RequestID, "decode browse input: "+err.Error(), nil)
+			return
+		}
+	} else {
+		input = make(map[string]interface{})
+	}
+
+	startReq, _ := json.Marshal(topics.GatewayBrowseStartRequest{
+		GatewayID: params.GatewayID,
+		Input:     input,
+	})
+	respData, err := br.b.Request(topics.GatewayBrowseStart, startReq, 10*time.Second)
+	if err != nil {
+		br.replyVerb(sparkplug.VerbBrowse, req.RequestID, "browse start: "+err.Error(), nil)
+		return
+	}
+	var startResp topics.GatewayBrowseStartReply
+	if err := json.Unmarshal(respData, &startResp); err != nil {
+		br.replyVerb(sparkplug.VerbBrowse, req.RequestID, "decode browse reply: "+err.Error(), nil)
+		return
+	}
+	if startResp.Error != "" {
+		br.replyVerb(sparkplug.VerbBrowse, req.RequestID, startResp.Error, nil)
+		return
+	}
+	result, _ := json.Marshal(sparkplug.BrowseRequestResult{BrowseID: startResp.BrowseID})
+	br.replyVerb(sparkplug.VerbBrowse, req.RequestID, "", result)
+}
+
+// replyVerb publishes a `Node Status/<Verb>` NDATA carrying an RPCResponse.
+// errMsg=="" indicates success and result is the verb-specific payload.
+func (br *Bridge) replyVerb(verb, requestID, errMsg string, result json.RawMessage) {
+	resp := sparkplug.RPCResponse{
+		RequestID: requestID,
+		Verb:      verb,
+		OK:        errMsg == "",
+		Error:     errMsg,
+		Result:    result,
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		br.log.Warn("mqtt: marshal verb reply", "verb", verb, "error", err)
+		return
+	}
+	metric := sparkplug.NewStringMetric(sparkplug.NodeStatusPrefix+verb, string(body))
+	if err := br.node.PublishNodeData([]sparkplug.Metric{metric}); err != nil {
+		br.log.Warn("mqtt: publish verb reply", "verb", verb, "requestId", requestID, "error", err)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/topics"
 	"github.com/joyautomation/tentacle/internal/version"
 	"github.com/joyautomation/tentacle/internal/web"
 	ttypes "github.com/joyautomation/tentacle/types"
@@ -44,6 +45,11 @@ type Module struct {
 	logsMu  sync.RWMutex
 	logBufs map[string][]ttypes.ServiceLogEntry
 	logSub  bus.Subscription
+
+	// browseStartSub subscribes to topics.GatewayBrowseStart so other
+	// modules (the mqtt bridge handling NCMD) can trigger a browse without
+	// going through HTTP.
+	browseStartSub bus.Subscription
 
 	// Browse state tracking (in-memory).
 	browseMu     sync.RWMutex
@@ -133,6 +139,17 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.logSub = sub
 	}
 
+	// Bus-callable browse trigger so the mqtt bridge can dispatch a Sparkplug
+	// NCMD `Node Control/Browse` straight into the same handler the HTTP
+	// path uses. The reply carries browseID/error so the caller can confirm
+	// acceptance synchronously; the actual cache rides out via `_meta/browse`
+	// DDATA once the scanner finishes.
+	if sub, err := b.Subscribe(topics.GatewayBrowseStart, m.handleBrowseStartBus); err == nil {
+		m.browseStartSub = sub
+	} else {
+		m.log.Warn("api: failed to subscribe to gateway browse start", "error", err)
+	}
+
 	m.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", m.port),
 		Handler: m.routes(),
@@ -160,6 +177,9 @@ func (m *Module) Stop() error {
 	m.traffic.stop()
 	if m.logSub != nil {
 		m.logSub.Unsubscribe()
+	}
+	if m.browseStartSub != nil {
+		m.browseStartSub.Unsubscribe()
 	}
 	if m.cancel != nil {
 		m.cancel()

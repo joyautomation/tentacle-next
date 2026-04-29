@@ -29,6 +29,28 @@ func Shutdown(moduleID string) string                   { return moduleID + ".sh
 // Service management.
 func ServiceLogs(serviceType, moduleID string) string { return fmt.Sprintf("service.logs.%s.%s", serviceType, moduleID) }
 
+// GatewayBrowseStart is the bus subject the api module subscribes to for
+// initiating a gateway-scoped browse. Used by remote-controlled browses
+// (the mqtt bridge dispatches Sparkplug NCMD `Node Control/Browse` here)
+// so the same handler that serves POST /api/v1/gateways/{id}/browse runs
+// the request. Request: GatewayBrowseStartRequest. Reply: GatewayBrowseStartReply.
+const GatewayBrowseStart = "gateway.browse.start"
+
+// GatewayBrowseStartRequest is the bus payload for GatewayBrowseStart.
+// Input mirrors the JSON body of POST /api/v1/gateways/{gatewayId}/browse.
+type GatewayBrowseStartRequest struct {
+	GatewayID string                 `json:"gatewayId"`
+	Input     map[string]interface{} `json:"input"`
+}
+
+// GatewayBrowseStartReply is the bus reply for GatewayBrowseStart. On
+// success, BrowseID + DeviceID are filled. On failure, Error is set.
+type GatewayBrowseStartReply struct {
+	BrowseID string `json:"browseId,omitempty"`
+	DeviceID string `json:"deviceId,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 // Orchestrator.
 const OrchestratorCommand = "orchestrator.command"
 

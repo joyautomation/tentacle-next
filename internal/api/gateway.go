@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joyautomation/tentacle/internal/sparkplug"
 	"github.com/joyautomation/tentacle/internal/topics"
 	itypes "github.com/joyautomation/tentacle/internal/types"
 	ttypes "github.com/joyautomation/tentacle/types"
@@ -708,6 +709,38 @@ func (m *Module) handleUpdateGatewayUdtConfig(w http.ResponseWriter, r *http.Req
 func (m *Module) handleGetGatewayBrowseCache(w http.ResponseWriter, r *http.Request) {
 	gatewayID := chi.URLParam(r, "gatewayId")
 	deviceID := chi.URLParam(r, "deviceId")
+
+	// Remote/target mode: serve the cache mantle captured from the edge's
+	// `_meta/browse` Sparkplug metric, not the local scanner cache. The
+	// shape is identical (the edge emits it via the same transform path),
+	// so the frontend doesn't need a different code path.
+	if t := parseTarget(r); t.IsRemote() {
+		req, _ := json.Marshal(sparkplug.HostBrowseCacheRequest{
+			GroupID: t.Group, NodeID: t.Node, DeviceID: deviceID,
+		})
+		respData, err := m.bus.Request(sparkplug.SubjectHostBrowseCache, req, busTimeout)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "sparkplug-host unavailable: "+err.Error())
+			return
+		}
+		var resp sparkplug.HostBrowseCacheReply
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			writeError(w, http.StatusBadGateway, "decode reply: "+err.Error())
+			return
+		}
+		if resp.Error != "" {
+			writeError(w, http.StatusBadGateway, resp.Error)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if len(resp.Cache) == 0 {
+			w.Write([]byte("null"))
+			return
+		}
+		w.Write(resp.Cache)
+		return
+	}
 
 	cacheKey := gatewayID + ":" + deviceID
 

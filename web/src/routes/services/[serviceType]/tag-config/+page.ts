@@ -42,29 +42,19 @@ export const load: PageLoad = async ({ params, url }) => {
 
     const config = result.data ?? null;
 
-    // Browse cache + states are live runtime data on the local module.
-    // In remote mode there's no per-target browse engine — skip the fetch
-    // so the page still loads and the operator can see the gitops-managed
-    // device list / variable selections without a stream of 404s.
-    if (target) {
-      return {
-        serviceType,
-        target,
-        gatewayConfig: config,
-        browseCaches: [] as BrowseCache[],
-        browseStates: [] as GatewayBrowseState[],
-        error: null,
-      };
-    }
-
-    // Fetch browse caches and browse states in parallel
+    // In remote mode the cache is sourced from mantle's per-node Sparkplug
+    // observed-state (captured from the edge's `_meta/browse` metric), and
+    // browse-states aren't tracked per target — skip the states fetch but
+    // still pull caches so the operator sees what the edge has scanned.
     const [browseCaches, browseStates] = await Promise.all([
       (async () => {
         const caches: BrowseCache[] = [];
         if (config?.devices) {
           const cacheResults = await Promise.allSettled(
             config.devices.map(async (device) => {
-              const cacheResult = await api<BrowseCache>(`/gateways/gateway/browse-cache/${device.deviceId}`);
+              const cacheResult = await api<BrowseCache>(
+                withTarget(`/gateways/gateway/browse-cache/${device.deviceId}`, target),
+              );
               return cacheResult.data ?? null;
             })
           );
@@ -77,6 +67,7 @@ export const load: PageLoad = async ({ params, url }) => {
         return caches;
       })(),
       (async () => {
+        if (target) return [] as GatewayBrowseState[];
         try {
           const statesResult = await api<GatewayBrowseState[]>('/gateways/browse-states');
           return statesResult.data ?? [];

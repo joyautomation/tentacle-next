@@ -13,6 +13,7 @@ package sparkplughost
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -62,16 +63,7 @@ type Node struct {
 	// rpcInflight maps requestId → reply channel for outstanding RPC calls
 	// targeting this node. Populated when mantle issues NCMD; drained by
 	// the Node Status/<Verb> NDATA handler. Not serialized.
-	rpcInflight map[string]chan rpcResponse `json:"-"`
-}
-
-// rpcResponse carries the decoded JSON envelope of an NDATA Node Status reply.
-// Phase 3 will move this into internal/sparkplug alongside the request shape.
-type rpcResponse struct {
-	RequestID string          `json:"requestId"`
-	OK        bool            `json:"ok"`
-	Result    json.RawMessage `json:"result,omitempty"`
-	Error     string          `json:"error,omitempty"`
+	rpcInflight map[string]chan sparkplug.RPCResponse `json:"-"`
 }
 
 // Device is a single device under an edge node.
@@ -277,6 +269,50 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		}
 	})
 
+	verbSub, _ := b.Subscribe(sparkplug.SubjectHostVerb, func(_ string, data []byte, reply bus.ReplyFunc) {
+		if reply == nil {
+			return
+		}
+		var req sparkplug.HostVerbRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			out, _ := json.Marshal(sparkplug.RPCResponse{Verb: req.Verb, OK: false, Error: "invalid request: " + err.Error()})
+			_ = reply(out)
+			return
+		}
+		timeout := time.Duration(req.TimeoutMs) * time.Millisecond
+		resp, err := m.sendVerb(req.GroupID, req.NodeID, req.Verb, req.Params, timeout)
+		if err != nil {
+			out, _ := json.Marshal(sparkplug.RPCResponse{Verb: req.Verb, OK: false, Error: err.Error()})
+			_ = reply(out)
+			return
+		}
+		out, _ := json.Marshal(resp)
+		_ = reply(out)
+	})
+
+	browseCacheSub, _ := b.Subscribe(sparkplug.SubjectHostBrowseCache, func(_ string, data []byte, reply bus.ReplyFunc) {
+		if reply == nil {
+			return
+		}
+		var req sparkplug.HostBrowseCacheRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			out, _ := json.Marshal(sparkplug.HostBrowseCacheReply{Error: "invalid request: " + err.Error()})
+			_ = reply(out)
+			return
+		}
+		key := req.GroupID + "/" + req.NodeID
+		m.invMu.RLock()
+		var cache json.RawMessage
+		if n, ok := m.nodes[key]; ok {
+			if c, ok := n.BrowseCaches[req.DeviceID]; ok {
+				cache = append(json.RawMessage(nil), c...)
+			}
+		}
+		m.invMu.RUnlock()
+		out, _ := json.Marshal(sparkplug.HostBrowseCacheReply{Cache: cache})
+		_ = reply(out)
+	})
+
 	shutdownSub, _ := b.Subscribe(topics.Shutdown(m.moduleID), func(subject string, data []byte, reply bus.ReplyFunc) {
 		m.log.Info("sparkplug-host: received shutdown command via Bus")
 		m.Stop()
@@ -288,6 +324,12 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 	}
 	if nodesDeleteSub != nil {
 		m.subs = append(m.subs, nodesDeleteSub)
+	}
+	if verbSub != nil {
+		m.subs = append(m.subs, verbSub)
+	}
+	if browseCacheSub != nil {
+		m.subs = append(m.subs, browseCacheSub)
 	}
 	m.subs = append(m.subs, shutdownSub)
 	m.mu.Unlock()
@@ -433,6 +475,134 @@ func (m *Module) handleMessage(b bus.Bus, topic string, payload []byte) {
 	}
 
 	m.captureMeta(group, edgeNode, device, pl)
+	if msgType == "NDATA" && device == "" {
+		m.captureRPCReplies(group, edgeNode, pl)
+	}
+}
+
+// captureRPCReplies scans a node-level NDATA for `Node Status/<Verb>` String
+// metrics. Each one carries an RPCResponse JSON envelope referencing the
+// requestId that mantle issued via NCMD; we drain rpcInflight[requestId] so
+// the originating caller (API handler awaiting verb completion) wakes up.
+func (m *Module) captureRPCReplies(group, edgeNode string, pl *sparkplug.Payload) {
+	key := group + "/" + edgeNode
+	for i := range pl.Metrics {
+		metric := &pl.Metrics[i]
+		if metric.IsNull || !strings.HasPrefix(metric.Name, sparkplug.NodeStatusPrefix) {
+			continue
+		}
+		raw, ok := metric.Value.(string)
+		if !ok {
+			continue
+		}
+		var resp sparkplug.RPCResponse
+		if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+			m.log.Debug("sparkplug-host: bad RPC reply", "metric", metric.Name, "error", err)
+			continue
+		}
+		if resp.RequestID == "" {
+			continue
+		}
+		m.invMu.Lock()
+		n := m.nodes[key]
+		var ch chan sparkplug.RPCResponse
+		if n != nil {
+			ch = n.rpcInflight[resp.RequestID]
+			delete(n.rpcInflight, resp.RequestID)
+		}
+		m.invMu.Unlock()
+		if ch != nil {
+			select {
+			case ch <- resp:
+			default:
+			}
+		}
+	}
+}
+
+// sendVerb publishes a `Node Control/<Verb>` NCMD targeting the named node
+// and waits for the matching `Node Status/<Verb>` NDATA reply. Returns the
+// decoded RPCResponse, or an error if publish or wait fails. timeout=0 uses
+// a 15s default; the in-flight registration is cleaned up on every exit path.
+func (m *Module) sendVerb(group, nodeID, verb string, params json.RawMessage, timeout time.Duration) (sparkplug.RPCResponse, error) {
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+
+	m.mu.Lock()
+	client := m.client
+	m.mu.Unlock()
+	if client == nil || !client.IsConnected() {
+		return sparkplug.RPCResponse{}, fmt.Errorf("sparkplug-host not connected to broker")
+	}
+
+	requestID := newRequestID()
+	req := sparkplug.RPCRequest{RequestID: requestID, Verb: verb, Params: params}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return sparkplug.RPCResponse{}, fmt.Errorf("marshal request: %w", err)
+	}
+
+	metric := sparkplug.NewStringMetric(sparkplug.NodeControlPrefix+verb, string(body))
+	payload := &sparkplug.Payload{
+		Timestamp: uint64(time.Now().UnixMilli()),
+		OmitSeq:   true, // Sparkplug B: NCMD has no seq
+		Metrics:   []sparkplug.Metric{metric},
+	}
+	encoded, err := sparkplug.EncodePayload(payload)
+	if err != nil {
+		return sparkplug.RPCResponse{}, fmt.Errorf("encode NCMD: %w", err)
+	}
+
+	key := group + "/" + nodeID
+	ch := make(chan sparkplug.RPCResponse, 1)
+
+	m.invMu.Lock()
+	n, ok := m.nodes[key]
+	if !ok {
+		m.invMu.Unlock()
+		return sparkplug.RPCResponse{}, fmt.Errorf("unknown node %s", key)
+	}
+	if n.rpcInflight == nil {
+		n.rpcInflight = make(map[string]chan sparkplug.RPCResponse)
+	}
+	n.rpcInflight[requestID] = ch
+	m.invMu.Unlock()
+
+	cleanup := func() {
+		m.invMu.Lock()
+		if n2 := m.nodes[key]; n2 != nil {
+			delete(n2.rpcInflight, requestID)
+		}
+		m.invMu.Unlock()
+	}
+
+	topic := fmt.Sprintf("spBv1.0/%s/NCMD/%s", group, nodeID)
+	if t := client.Publish(topic, 0, false, encoded); t.WaitTimeout(5*time.Second) && t.Error() != nil {
+		cleanup()
+		return sparkplug.RPCResponse{}, fmt.Errorf("publish NCMD: %w", t.Error())
+	}
+
+	select {
+	case resp := <-ch:
+		return resp, nil
+	case <-time.After(timeout):
+		cleanup()
+		return sparkplug.RPCResponse{}, fmt.Errorf("verb %s timed out after %s", verb, timeout)
+	}
+}
+
+// newRequestID returns a short hex string suitable for an RPC requestId.
+// Deliberately not relying on uuid to keep this package's dep surface minimal.
+func newRequestID() string {
+	b := make([]byte, 8)
+	if _, err := cryptorand.Read(b); err != nil {
+		// Fall back to a timestamp + counter; collision risk is minimal at
+		// our request rate and the consequence is just a stale rpcInflight
+		// slot eventually GC'd by the next cleanup.
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%x", b)
 }
 
 // captureMeta scans a payload for "_meta/*" metrics and routes their values
@@ -533,13 +703,7 @@ func sanitizeMetricID(name string) string {
 	return r.Replace(name)
 }
 
-// metaPrefix names the reserved Sparkplug metric namespace for edge↔mantle
-// interop signals — browse caches, driver health, topology, gitops state.
-// Anything in this namespace bypasses the historian and gets routed into
-// per-node observed-state on the host (Node.BrowseCaches and friends).
-const metaPrefix = "_meta/"
-
-func isMetaMetric(name string) bool { return strings.HasPrefix(name, metaPrefix) }
+func isMetaMetric(name string) bool { return strings.HasPrefix(name, sparkplug.MetaPrefix) }
 
 func (m *Module) publishMetric(b bus.Bus, deviceKey string, metric *sparkplug.Metric, msgType string) {
 	datatype := datatypeName(metric.Datatype)
@@ -594,7 +758,7 @@ func (m *Module) updateInventory(msgType, group, edgeNode, device string, metric
 			FirstSeen:    now,
 			Devices:      make(map[string]*Device),
 			BrowseCaches: make(map[string]json.RawMessage),
-			rpcInflight:  make(map[string]chan rpcResponse),
+			rpcInflight:  make(map[string]chan sparkplug.RPCResponse),
 		}
 		m.nodes[key] = n
 	}

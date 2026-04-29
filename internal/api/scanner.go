@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/joyautomation/tentacle/internal/bus"
+	"github.com/joyautomation/tentacle/internal/sparkplug"
 	"github.com/joyautomation/tentacle/internal/topics"
 )
 
@@ -64,6 +65,35 @@ func (m *Module) handleStreamBrowseProgress(w http.ResponseWriter, r *http.Reque
 	<-r.Context().Done()
 }
 
+// handleBrowseStartBus is the bus-side of startGatewayBrowse — wired by the
+// api module's Start() to topics.GatewayBrowseStart. Decodes the request,
+// runs the same start path the HTTP handler uses, and replies with a
+// GatewayBrowseStartReply envelope.
+func (m *Module) handleBrowseStartBus(_ string, data []byte, reply bus.ReplyFunc) {
+	if reply == nil {
+		return
+	}
+	var req topics.GatewayBrowseStartRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		respondReply(reply, topics.GatewayBrowseStartReply{Error: "invalid request: " + err.Error()})
+		return
+	}
+	if req.Input == nil {
+		req.Input = make(map[string]interface{})
+	}
+	browseID, deviceID, err := m.startGatewayBrowse(req.GatewayID, req.Input)
+	if err != nil {
+		respondReply(reply, topics.GatewayBrowseStartReply{DeviceID: deviceID, Error: err.Error()})
+		return
+	}
+	respondReply(reply, topics.GatewayBrowseStartReply{BrowseID: browseID, DeviceID: deviceID})
+}
+
+func respondReply(reply bus.ReplyFunc, v interface{}) {
+	data, _ := json.Marshal(v)
+	_ = reply(data)
+}
+
 // handleStartGatewayBrowse initiates an async browse for a specific gateway device.
 // POST /api/v1/gateways/{gatewayId}/browse
 func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request) {
@@ -76,17 +106,89 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 	}
 	defer r.Body.Close()
 
-	// Extract protocol from the request body.
 	var params map[string]interface{}
 	if err := json.Unmarshal(body, &params); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
 
+	// Remote/target mode: forward to mantle's sparkplug-host, which publishes
+	// a Node Control/Browse NCMD and waits (synchronously) for the edge's
+	// Node Status/Browse NDATA reply. Result/cache lands later as a
+	// `_meta/browse` DDATA — same async browse pipeline as local, just on
+	// the other side of the broker.
+	if t := parseTarget(r); t.IsRemote() {
+		deviceID, _ := params["deviceId"].(string)
+		protocol, _ := params["protocol"].(string)
+		if protocol == "" {
+			writeError(w, http.StatusBadRequest, "missing required field: protocol")
+			return
+		}
+		input, _ := json.Marshal(params)
+		brParams, _ := json.Marshal(sparkplug.BrowseRequestParams{
+			GatewayID: gatewayID,
+			DeviceID:  deviceID,
+			Protocol:  protocol,
+			Input:     input,
+		})
+		req, _ := json.Marshal(sparkplug.HostVerbRequest{
+			GroupID:   t.Group,
+			NodeID:    t.Node,
+			Verb:      sparkplug.VerbBrowse,
+			Params:    brParams,
+			TimeoutMs: 15000,
+		})
+		respData, err := m.bus.Request(sparkplug.SubjectHostVerb, req, 20*time.Second)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "sparkplug-host unavailable: "+err.Error())
+			return
+		}
+		// Reply may be either an RPCResponse or {"error":"..."} envelope from
+		// the host when it failed before publishing NCMD.
+		var envelope struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(respData, &envelope)
+		if envelope.Error != "" {
+			writeError(w, http.StatusBadGateway, envelope.Error)
+			return
+		}
+		var resp sparkplug.RPCResponse
+		if err := json.Unmarshal(respData, &resp); err != nil {
+			writeError(w, http.StatusBadGateway, "decode reply: "+err.Error())
+			return
+		}
+		if !resp.OK {
+			writeError(w, http.StatusBadGateway, resp.Error)
+			return
+		}
+		var result sparkplug.BrowseRequestResult
+		_ = json.Unmarshal(resp.Result, &result)
+		writeJSON(w, http.StatusOK, map[string]string{
+			"browseId": result.BrowseID,
+			"deviceId": deviceID,
+		})
+		return
+	}
+
+	browseID, deviceID, err := m.startGatewayBrowse(gatewayID, params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"browseId": browseID, "deviceId": deviceID})
+}
+
+// startGatewayBrowse is the bus-callable core of the gateway browse handler.
+// Both the HTTP path and the mqtt bridge's NCMD dispatcher invoke this so
+// the result subscription, KV persistence, and "_meta/browse" emission run
+// the same way regardless of trigger source. Returns (browseID, deviceID, err).
+// Implementation note: subscriptions are owned by this method's closure and
+// torn down when the browse reaches a terminal state (completed/failed/cancelled).
+func (m *Module) startGatewayBrowse(gatewayID string, params map[string]interface{}) (string, string, error) {
 	protocol, _ := params["protocol"].(string)
 	if protocol == "" {
-		writeError(w, http.StatusBadRequest, "missing required field: protocol")
-		return
+		return "", "", fmt.Errorf("missing required field: protocol")
 	}
 
 	deviceID, _ := params["deviceId"].(string)
@@ -186,8 +288,7 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 		go cleanupBrowse()
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to subscribe to browse result: "+err.Error())
-		return
+		return "", deviceID, fmt.Errorf("failed to subscribe to browse result: %w", err)
 	}
 	subs = append(subs, resultSub)
 
@@ -211,13 +312,11 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 	// Send the browse request to the scanner (scanner replies immediately with browseId).
 	_, err = m.bus.Request(topics.Browse(protocol), enrichedBody, 10*time.Second)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "browse request failed: "+err.Error())
 		cleanupBrowse()
-		return
+		return "", deviceID, fmt.Errorf("browse request failed: %w", err)
 	}
 
-	// Return immediately with the browseId.
-	writeJSON(w, http.StatusOK, map[string]string{"browseId": browseID, "deviceId": deviceID})
+	return browseID, deviceID, nil
 }
 
 // transformBrowseResult converts a scanner BrowseResult into the frontend BrowseCache shape.

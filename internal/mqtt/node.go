@@ -432,6 +432,34 @@ func (n *SparkplugNode) PublishDeviceData(deviceID string, metrics []sparkplug.M
 	return token.Error()
 }
 
+// PublishNodeData publishes an NDATA frame at the node level. Used to ship
+// RPC replies (Node Status/<Verb>) and other node-scoped observed-state.
+func (n *SparkplugNode) PublishNodeData(metrics []sparkplug.Metric) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.state != StateBorn || n.client == nil {
+		return fmt.Errorf("node not born (state=%d)", n.state)
+	}
+
+	n.seq = (n.seq + 1) % 256
+
+	payload := &sparkplug.Payload{
+		Timestamp: uint64(time.Now().UnixMilli()),
+		Seq:       n.seq,
+		Metrics:   metrics,
+	}
+
+	data, err := sparkplug.EncodePayload(payload)
+	if err != nil {
+		return fmt.Errorf("encode NDATA: %w", err)
+	}
+
+	token := n.client.Publish(n.topic("NDATA"), 0, false, data)
+	token.Wait()
+	return token.Error()
+}
+
 // PublishDeviceDataPayload publishes a pre-built payload as DDATA.
 // Used by the store-forward drain to replay historical data.
 func (n *SparkplugNode) PublishDeviceDataPayload(deviceID string, payload *sparkplug.Payload) error {
