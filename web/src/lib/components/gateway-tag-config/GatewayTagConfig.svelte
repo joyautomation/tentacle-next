@@ -304,61 +304,12 @@
     });
 
     for (const [deviceId, info] of toSubscribe) {
-      // Remote target: there's no SSE progress endpoint (the local one watches
-      // the local NATS scanner, not a remote edge). Poll the browse-states
-      // endpoint, which mantle's api flips to "completed" when sparkplug-host
-      // bus-publishes SubjectHostBrowseCacheUpdated for a fresh _meta/browse.
+      // Remote target: edge tees its scanner's per-event progress as
+      // `_meta/browse/progress` DDATA, mantle's sparkplug-host re-publishes
+      // them on `host.browse.progress.<browseID>`, and the existing SSE
+      // endpoint forwards them to us — same shape as the local case.
       if (remote().target) {
         const startedAtMs = info.startedAtMs ?? Date.now();
-        const maxWaitMs = 5 * 60 * 1000;
-        let stopped = false;
-        const poll = async () => {
-          if (stopped) return;
-          try {
-            const r = await api<GatewayBrowseState[]>(
-              withTarget('/gateways/browse-states', remote().target),
-            );
-            const list = r.data ?? [];
-            const match = list.find((s) => s.browseId === info.browseId);
-            if (match && match.status !== 'browsing') {
-              const updated = new Map(liveProgress);
-              updated.set(deviceId, {
-                deviceId, browseId: info.browseId, protocol: info.protocol,
-                status: match.status, phase: match.status,
-                discoveredCount: 0, totalCount: 0,
-                message: match.status === 'completed' ? 'done' : match.status,
-                startedAt: new Date(startedAtMs).toISOString(),
-                updatedAt: new Date().toISOString(),
-              });
-              liveProgress = updated;
-              const next = new Map(localBrowseSubs);
-              next.delete(deviceId);
-              localBrowseSubs = next;
-              setTimeout(() => invalidateAll(), 500);
-              const capturedDeviceId = deviceId;
-              setTimeout(() => {
-                const cleared = new Map(liveProgress);
-                cleared.delete(capturedDeviceId);
-                liveProgress = cleared;
-              }, 2000);
-              return;
-            }
-          } catch { /* keep polling */ }
-          if (Date.now() - startedAtMs > maxWaitMs) {
-            saltState.addNotification({ message: `Browse for ${deviceId} timed out`, type: 'error' });
-            const next = new Map(localBrowseSubs);
-            next.delete(deviceId);
-            localBrowseSubs = next;
-            const cleared = new Map(liveProgress);
-            cleared.delete(deviceId);
-            liveProgress = cleared;
-            return;
-          }
-          setTimeout(poll, 2000);
-        };
-        // Kick off polling; show indeterminate progress until status flips.
-        // untrack so this write doesn't retrigger the effect (the effect reads
-        // liveProgress for the cancelled filter).
         untrack(() => {
           const updated = new Map(liveProgress);
           updated.set(deviceId, {
@@ -371,9 +322,6 @@
           });
           liveProgress = updated;
         });
-        poll();
-        cleanups.push(() => { stopped = true; });
-        continue;
       }
 
       const cleanup = subscribe<{

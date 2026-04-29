@@ -608,8 +608,77 @@ func (br *Bridge) handleVerbBrowse(req sparkplug.RPCRequest) {
 		br.replyVerb(sparkplug.VerbBrowse, req.RequestID, startResp.Error, nil)
 		return
 	}
+	// Tee per-event browse progress to mantle as `_meta/browse/progress` DDATA
+	// so the remote operator sees the same indeterminate→discovering→reading→
+	// completed phases the local edge UI does, instead of waiting for the
+	// final cache to materialize.
+	if params.Protocol != "" && startResp.BrowseID != "" && params.DeviceID != "" {
+		br.forwardBrowseProgress(params.Protocol, startResp.BrowseID, params.DeviceID)
+	}
 	result, _ := json.Marshal(sparkplug.BrowseRequestResult{BrowseID: startResp.BrowseID})
 	br.replyVerb(sparkplug.VerbBrowse, req.RequestID, "", result)
+}
+
+// browseProgressMetricName carries one BrowseProgressMessage per event for an
+// in-flight remote browse. Mantle's sparkplug-host re-publishes the payload
+// onto its local bus so the existing browse-progress SSE endpoint serves it
+// to the frontend without needing a remote-aware codepath.
+const browseProgressMetricName = "_meta/browse/progress"
+
+// forwardBrowseProgress subscribes to the scanner's per-event progress topic
+// and emits each message as a device-level DDATA. The subscription unwinds
+// on a terminal phase ("completed"/"failed"/"cancelled") or, as a safeguard,
+// after a hard timeout so an abandoned browse can't leak.
+func (br *Bridge) forwardBrowseProgress(protocol, browseID, deviceID string) {
+	progressSubject := topics.BrowseProgress(protocol, browseID)
+
+	var (
+		subMu sync.Mutex
+		sub   bus.Subscription
+		done  bool
+	)
+	cleanup := func() {
+		subMu.Lock()
+		defer subMu.Unlock()
+		if done {
+			return
+		}
+		done = true
+		if sub != nil {
+			_ = sub.Unsubscribe()
+		}
+	}
+
+	created, err := br.b.Subscribe(progressSubject, func(_ string, data []byte, _ bus.ReplyFunc) {
+		if br.node != nil && br.node.State() == StateBorn {
+			metric := sparkplug.NewStringMetric(browseProgressMetricName, string(data))
+			if pubErr := br.node.PublishDeviceData(deviceID, []sparkplug.Metric{metric}); pubErr != nil {
+				br.log.Warn("mqtt: failed to publish browse progress DDATA", "device", deviceID, "browseId", browseID, "error", pubErr)
+			}
+		}
+		var p struct {
+			Phase string `json:"phase"`
+		}
+		if err := json.Unmarshal(data, &p); err == nil {
+			switch p.Phase {
+			case "completed", "failed", "cancelled":
+				go cleanup()
+			}
+		}
+	})
+	if err != nil {
+		br.log.Warn("mqtt: failed to subscribe to browse progress", "browseId", browseID, "error", err)
+		return
+	}
+	subMu.Lock()
+	sub = created
+	subMu.Unlock()
+
+	br.mu.Lock()
+	br.dataSubs = append(br.dataSubs, created)
+	br.mu.Unlock()
+
+	time.AfterFunc(10*time.Minute, cleanup)
 }
 
 // replyVerb publishes a `Node Status/<Verb>` NDATA carrying an RPCResponse.

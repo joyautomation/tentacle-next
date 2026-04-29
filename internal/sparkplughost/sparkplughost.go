@@ -620,6 +620,7 @@ func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *spar
 	var browseTs int64
 	var gitopsSHA string
 	var gitopsSet bool
+	var progressEvents []string
 	for i := range pl.Metrics {
 		metric := &pl.Metrics[i]
 		if metric.IsNull || !isMetaMetric(metric.Name) {
@@ -635,6 +636,13 @@ func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *spar
 				browseSet = true
 				browseTs = int64(metric.Timestamp)
 			}
+		case "_meta/browse/progress":
+			if device == "" {
+				continue
+			}
+			if s, ok := metric.Value.(string); ok && s != "" {
+				progressEvents = append(progressEvents, s)
+			}
 		case "_meta/gitops/commitSHA":
 			if device != "" {
 				continue
@@ -642,6 +650,24 @@ func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *spar
 			if s, ok := metric.Value.(string); ok {
 				gitopsSHA = s
 				gitopsSet = true
+			}
+		}
+	}
+	// Forward each progress event onto a subject matching the same
+	// `*.browse.progress.<browseID>` shape the local scanner uses, so the
+	// existing browse-progress SSE endpoint serves remote browses with no
+	// remote-aware codepath.
+	if b != nil {
+		for _, ev := range progressEvents {
+			var p struct {
+				BrowseID string `json:"browseId"`
+			}
+			if err := json.Unmarshal([]byte(ev), &p); err != nil || p.BrowseID == "" {
+				continue
+			}
+			subject := fmt.Sprintf("host.browse.progress.%s", p.BrowseID)
+			if err := b.Publish(subject, []byte(ev)); err != nil {
+				m.log.Debug("sparkplug-host: browse progress publish failed", "error", err)
 			}
 		}
 	}
