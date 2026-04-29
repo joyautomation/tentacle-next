@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { GatewayConfig, GatewayUdtTemplate, GatewayUdtVariable, BrowseCache, GatewayBrowseState, DeadBandConfig } from '$lib/types/gateway';
-  import { apiPut, apiPost, withTarget } from '$lib/api/client';
+  import { api, apiPut, apiPost, withTarget } from '$lib/api/client';
   import { subscribe } from '$lib/api/subscribe';
   import { getRemoteTarget } from '$lib/contexts/remote-target';
   import { invalidateAll } from '$app/navigation';
@@ -297,6 +297,72 @@
     }
 
     for (const [deviceId, info] of toSubscribe) {
+      // Remote target: no SSE progress endpoint exists per-target. Poll the
+      // browse-cache (which mantle captures from the edge's _meta/browse
+      // metric) and mark complete when its cachedAt advances past now.
+      if (remote().target) {
+        const startedAtMs = Date.now();
+        const maxWaitMs = 5 * 60 * 1000;
+        let stopped = false;
+        const poll = async () => {
+          if (stopped) return;
+          try {
+            const r = await api<BrowseCache>(
+              withTarget(`/gateways/gateway/browse-cache/${deviceId}`, remote().target),
+            );
+            const cache = r.data;
+            const cachedAtMs = cache?.cachedAt ? Date.parse(cache.cachedAt) : 0;
+            if (cachedAtMs && cachedAtMs >= startedAtMs) {
+              const updated = new Map(liveProgress);
+              updated.set(deviceId, {
+                deviceId, browseId: info.browseId, protocol: info.protocol,
+                status: 'completed', phase: 'completed',
+                discoveredCount: cache?.items?.length ?? 0, totalCount: 0,
+                message: 'done', startedAt: new Date(startedAtMs).toISOString(),
+                updatedAt: cache?.cachedAt ?? '',
+              });
+              liveProgress = updated;
+              const next = new Map(localBrowseSubs);
+              next.delete(deviceId);
+              localBrowseSubs = next;
+              setTimeout(() => invalidateAll(), 500);
+              const capturedDeviceId = deviceId;
+              setTimeout(() => {
+                const cleared = new Map(liveProgress);
+                cleared.delete(capturedDeviceId);
+                liveProgress = cleared;
+              }, 2000);
+              return;
+            }
+          } catch { /* keep polling */ }
+          if (Date.now() - startedAtMs > maxWaitMs) {
+            saltState.addNotification({ message: `Browse for ${deviceId} timed out`, type: 'error' });
+            const next = new Map(localBrowseSubs);
+            next.delete(deviceId);
+            localBrowseSubs = next;
+            const cleared = new Map(liveProgress);
+            cleared.delete(deviceId);
+            liveProgress = cleared;
+            return;
+          }
+          setTimeout(poll, 2000);
+        };
+        // Kick off polling; show indeterminate progress until cache lands.
+        const updated = new Map(liveProgress);
+        updated.set(deviceId, {
+          deviceId, browseId: info.browseId, protocol: info.protocol,
+          status: 'browsing', phase: 'browsing',
+          discoveredCount: 0, totalCount: 0,
+          message: 'Browsing on edge…',
+          startedAt: new Date(startedAtMs).toISOString(),
+          updatedAt: new Date(startedAtMs).toISOString(),
+        });
+        liveProgress = updated;
+        poll();
+        cleanups.push(() => { stopped = true; });
+        continue;
+      }
+
       const cleanup = subscribe<{
         browseId: string; deviceId: string; phase: string;
         discoveredCount: number; totalCount: number; message: string; timestamp: string;
