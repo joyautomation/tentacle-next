@@ -53,10 +53,11 @@ type Node struct {
 	// advertised in its NBIRTH. Mantle UI uses this for capability discovery.
 	Verbs []string `json:"verbs,omitempty"`
 
-	// BrowseCaches holds the most-recent browse result per device, populated
-	// by responses to Node Control/Browse RPC commands. Keyed by deviceId.
-	// Stored as raw JSON so the wire shape matches the local browse-cache API.
-	BrowseCaches map[string]json.RawMessage `json:"-"`
+	// BrowseCaches holds the most-recent browse result per device, captured
+	// from Sparkplug "_meta/browse" String metrics emitted by edge tentacles
+	// after a successful protocol browse. Keyed by deviceId. Stored as raw
+	// JSON so the wire shape matches the local browse-cache API.
+	BrowseCaches map[string]json.RawMessage `json:"browseCaches,omitempty"`
 
 	// rpcInflight maps requestId → reply channel for outstanding RPC calls
 	// targeting this node. Populated when mantle issues NCMD; drained by
@@ -430,6 +431,56 @@ func (m *Module) handleMessage(b bus.Bus, topic string, payload []byte) {
 		}
 		m.publishMetric(b, deviceKey, metric, msgType)
 	}
+
+	m.captureMeta(group, edgeNode, device, pl)
+}
+
+// captureMeta scans a payload for "_meta/*" metrics and routes their values
+// into per-node observed-state on the host. Today only "_meta/browse" is
+// recognized — it carries the JSON browse cache published by the edge after
+// a successful protocol scan and lands in Node.BrowseCaches[device].
+func (m *Module) captureMeta(group, edgeNode, device string, pl *sparkplug.Payload) {
+	if device == "" {
+		return
+	}
+	var browse string
+	var browseSet bool
+	for i := range pl.Metrics {
+		metric := &pl.Metrics[i]
+		if metric.IsNull || !isMetaMetric(metric.Name) {
+			continue
+		}
+		switch metric.Name {
+		case "_meta/browse":
+			if s, ok := metric.Value.(string); ok {
+				browse = s
+				browseSet = true
+			}
+		}
+	}
+	if !browseSet {
+		return
+	}
+
+	key := group + "/" + edgeNode
+	m.invMu.Lock()
+	defer m.invMu.Unlock()
+	n, ok := m.nodes[key]
+	if !ok {
+		return
+	}
+	if n.BrowseCaches == nil {
+		n.BrowseCaches = make(map[string]json.RawMessage)
+	}
+	if json.Valid([]byte(browse)) {
+		n.BrowseCaches[device] = json.RawMessage(browse)
+	} else {
+		// Cache is opaque to the host but downstream consumers expect JSON.
+		// Wrap as a JSON string so the API response stays well-formed.
+		if b, err := json.Marshal(browse); err == nil {
+			n.BrowseCaches[device] = b
+		}
+	}
 }
 
 // publishFrameEvent emits a sparkplug.FrameEvent on the bus so downstream
@@ -482,8 +533,21 @@ func sanitizeMetricID(name string) string {
 	return r.Replace(name)
 }
 
+// metaPrefix names the reserved Sparkplug metric namespace for edge↔mantle
+// interop signals — browse caches, driver health, topology, gitops state.
+// Anything in this namespace bypasses the historian and gets routed into
+// per-node observed-state on the host (Node.BrowseCaches and friends).
+const metaPrefix = "_meta/"
+
+func isMetaMetric(name string) bool { return strings.HasPrefix(name, metaPrefix) }
+
 func (m *Module) publishMetric(b bus.Bus, deviceKey string, metric *sparkplug.Metric, msgType string) {
 	datatype := datatypeName(metric.Datatype)
+	// _meta/* metrics are interop signals (browse cache, driver health,
+	// topology, …), not telemetry. Skip the historian — keeping snapshots
+	// of these would balloon storage and isn't useful (the latest one is
+	// always the answer).
+	historyEnabled := !isMetaMetric(metric.Name)
 	msg := types.PlcDataMessage{
 		ModuleID:       m.moduleID,
 		DeviceID:       deviceKey,
@@ -491,7 +555,7 @@ func (m *Module) publishMetric(b bus.Bus, deviceKey string, metric *sparkplug.Me
 		Value:          metric.Value,
 		Timestamp:      int64(metric.Timestamp),
 		Datatype:       datatype,
-		HistoryEnabled: true,
+		HistoryEnabled: historyEnabled,
 	}
 	if msg.Timestamp == 0 {
 		msg.Timestamp = time.Now().UnixMilli()
@@ -609,7 +673,14 @@ func (m *Module) snapshot() []*Node {
 		if len(n.Verbs) > 0 {
 			cp.Verbs = append([]string(nil), n.Verbs...)
 		}
-		cp.BrowseCaches = nil
+		if len(n.BrowseCaches) > 0 {
+			cp.BrowseCaches = make(map[string]json.RawMessage, len(n.BrowseCaches))
+			for k, v := range n.BrowseCaches {
+				cp.BrowseCaches[k] = v
+			}
+		} else {
+			cp.BrowseCaches = nil
+		}
 		cp.rpcInflight = nil
 		out = append(out, &cp)
 	}
