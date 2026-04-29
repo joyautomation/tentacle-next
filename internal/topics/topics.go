@@ -1,7 +1,10 @@
 // Package topics defines NATS subject patterns and helpers used across all modules.
 package topics
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Scanner subjects (per protocol: ethernetip, opcua, snmp, modbus).
 func Browse(protocol string) string                    { return protocol + ".browse" }
@@ -36,7 +39,22 @@ func ConfigSchema(serviceType string) string { return serviceType + ".config.sch
 const (
 	MqttMetrics      = "mqtt.metrics"
 	MqttStoreForward = "mqtt.store-forward"
+	// MqttBrowseCache is published by the api layer after a browse completes
+	// (and its result has been persisted to NATS KV). The mqtt bridge
+	// subscribes, stores the cache per-device for inclusion in DBIRTH on
+	// next rebirth, and publishes it as DDATA so connected hosts see the
+	// update immediately. Payload: BrowseCacheUpdate JSON.
+	MqttBrowseCache = "mqtt.browse_cache"
 )
+
+// BrowseCacheUpdate is the bus payload for MqttBrowseCache events. The bridge
+// turns this into a Sparkplug "_cache/browse" String metric on the named
+// device.
+type BrowseCacheUpdate struct {
+	DeviceID  string          `json:"deviceId"`
+	Cache     json.RawMessage `json:"cache"`
+	Timestamp int64           `json:"timestamp"` // ms epoch
+}
 
 // SNMP specific.
 const SnmpSet = "snmp.set"

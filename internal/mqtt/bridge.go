@@ -32,6 +32,13 @@ type Bridge struct {
 	// Variable tracking
 	variables map[string]*PlcVariable // variableID → tracked var
 
+	// Browse cache per device. Stored as the latest JSON blob keyed by
+	// deviceID; included in DBIRTH (so a re-birthing host sees it without
+	// needing to retrigger a browse) and re-published as DDATA on every
+	// update. Lives outside the `variables` RBE machinery — it's observed
+	// state, not a tag value.
+	browseCaches map[string][]byte
+
 	// Template registry
 	templates *TemplateRegistry
 
@@ -61,13 +68,14 @@ type Bridge struct {
 // NewBridge creates a new NATS-to-MQTT bridge.
 func NewBridge(b bus.Bus, moduleID string, config itypes.MqttBridgeConfig, log *slog.Logger) *Bridge {
 	return &Bridge{
-		b:         b,
-		log:       log,
-		moduleID:  moduleID,
-		config:    config,
-		variables: make(map[string]*PlcVariable),
-		templates: NewTemplateRegistry(),
-		enabled:   true,
+		b:            b,
+		log:          log,
+		moduleID:     moduleID,
+		config:       config,
+		variables:    make(map[string]*PlcVariable),
+		browseCaches: make(map[string][]byte),
+		templates:    NewTemplateRegistry(),
+		enabled:      true,
 	}
 }
 
@@ -107,6 +115,7 @@ func (br *Bridge) Start() error {
 	br.subscribeToMetricsRequest()
 	br.subscribeToSFStatus()
 	br.subscribeToData()
+	br.subscribeToBrowseCache()
 
 	// Start drain goroutine
 	br.drainStop = make(chan struct{})
@@ -707,11 +716,75 @@ func (br *Bridge) buildDeviceMetrics() {
 		m := br.valueToMetric(pv, pv.Value, nowMs)
 		byDevice[devID] = append(byDevice[devID], m)
 	}
+	// Append browse-cache metric for each device that has one. This is what
+	// gives a re-birthing host the cache without a fresh browse — the metric
+	// rides along in DBIRTH.
+	for devID, cache := range br.browseCaches {
+		byDevice[devID] = append(byDevice[devID], sparkplug.NewStringMetric(browseCacheMetricName, string(cache)))
+	}
 	for devID, metrics := range byDevice {
 		isNew := br.node.SetDeviceMetrics(devID, metrics)
 		if isNew && br.node.State() == StateBorn {
 			br.node.PublishDeviceBirth(devID)
 		}
+	}
+}
+
+// browseCacheMetricName is the Sparkplug metric name used to carry the
+// JSON-encoded browse cache for a device. The "_cache/" prefix marks it as
+// observed state so consumers can route it differently from real tag values
+// (e.g. mantle persists it to its own KV instead of treating it as telemetry).
+const browseCacheMetricName = "_cache/browse"
+
+// subscribeToBrowseCache listens for browse-cache update events from the api
+// layer. Each event carries the latest cache JSON for one device; the bridge
+// stores it for inclusion in DBIRTH and immediately publishes a DDATA so
+// connected hosts see the update without waiting for the next rebirth.
+func (br *Bridge) subscribeToBrowseCache() {
+	sub, err := br.b.Subscribe(topics.MqttBrowseCache, func(_ string, data []byte, _ bus.ReplyFunc) {
+		var upd topics.BrowseCacheUpdate
+		if err := json.Unmarshal(data, &upd); err != nil {
+			br.log.Warn("mqtt: bad browse cache payload", "error", err)
+			return
+		}
+		if upd.DeviceID == "" || len(upd.Cache) == 0 {
+			return
+		}
+		br.handleBrowseCacheUpdate(upd.DeviceID, upd.Cache)
+	})
+	if err != nil {
+		br.log.Error("mqtt: failed to subscribe to browse cache", "error", err)
+		return
+	}
+	br.mu.Lock()
+	br.dataSubs = append(br.dataSubs, sub)
+	br.mu.Unlock()
+}
+
+// handleBrowseCacheUpdate stores the latest cache JSON for a device and emits
+// a DDATA carrying the _cache/browse metric. The cache is also added to the
+// device's metric set so the next DBIRTH (after a rebirth or reconnect)
+// carries it automatically.
+func (br *Bridge) handleBrowseCacheUpdate(deviceID string, cache []byte) {
+	cacheCopy := make([]byte, len(cache))
+	copy(cacheCopy, cache)
+
+	br.mu.Lock()
+	br.browseCaches[deviceID] = cacheCopy
+	br.mu.Unlock()
+
+	// Refresh DBIRTH metric set so any future rebirth includes the new cache.
+	br.buildDeviceMetrics()
+
+	// Publish DDATA immediately if we're online; otherwise the next DBIRTH
+	// will carry it. We skip the store-forward buffer for cache updates —
+	// they're idempotent and the freshest one wins.
+	if br.node == nil || br.node.State() != StateBorn {
+		return
+	}
+	metric := sparkplug.NewStringMetric(browseCacheMetricName, string(cacheCopy))
+	if err := br.node.PublishDeviceData(deviceID, []sparkplug.Metric{metric}); err != nil {
+		br.log.Warn("mqtt: failed to publish browse cache DDATA", "device", deviceID, "error", err)
 	}
 }
 

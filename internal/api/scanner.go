@@ -166,6 +166,23 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 			m.log.Warn("failed to persist browse cache to KV", "key", cacheKey, "error", err)
 		}
 
+		// Notify the mqtt bridge so the cache rides out as a Sparkplug
+		// _cache/browse metric (DDATA now, included in next DBIRTH). Mantle's
+		// sparkplug-host picks it up like any other metric and routes it to
+		// its own KV — that's the cross-network half of the cache pipeline.
+		// Cache lives at api layer regardless of whether mqtt is loaded;
+		// publish is fire-and-forget so missing subscribers cost nothing.
+		updatePayload, mErr := json.Marshal(topics.BrowseCacheUpdate{
+			DeviceID:  deviceID,
+			Cache:     json.RawMessage(cacheJSON),
+			Timestamp: time.Now().UnixMilli(),
+		})
+		if mErr == nil {
+			if err := m.bus.Publish(topics.MqttBrowseCache, updatePayload); err != nil {
+				m.log.Warn("failed to publish browse cache update", "device", deviceID, "error", err)
+			}
+		}
+
 		go cleanupBrowse()
 	})
 	if err != nil {
