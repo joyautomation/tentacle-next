@@ -87,6 +87,9 @@ jobs:
           CGO_LDFLAGS_ALLOW: ".*"
           C_INCLUDE_PATH: /usr/local/include
           LIBRARY_PATH: /usr/local/lib
+          # Pin goreleaser to the pushed tag so it never picks up another tag
+          # that happens to point at the same commit (e.g., an earlier rc).
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
       - name: Publish to DigitalOcean Spaces + Directus
         # Non-fatal: GitHub Releases is still authoritative if this step fails
