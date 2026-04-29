@@ -10,7 +10,7 @@ writing — see scripts/tck/README.md):
 
   Control (publish):
     SPARKPLUG_TCK/RESULT_CONFIG  ->  "NEW_RESULT-LOG <filename>"
-    SPARKPLUG_TCK/CONFIG         ->  "UTCwindow <seconds>"
+    SPARKPLUG_TCK/CONFIG         ->  "UTCwindow <ms>"
     SPARKPLUG_TCK/TEST_CONTROL   ->  "NEW_TEST <profile> <name> <space-joined params>"
     SPARKPLUG_TCK/TEST_CONTROL   ->  "END_TEST"
   Telemetry (subscribe):
@@ -182,9 +182,15 @@ class TCKDriver:
         if not info.is_published():
             raise RuntimeError(f"publish to {topic} not acknowledged within {PUBLISH_ACK_TIMEOUT}s")
 
-    def configure_results(self, log_filename: str, utc_window: int = 60):
+    def configure_results(self, log_filename: str, utc_window_ms: int = 60_000):
+        # The TCK's Utils.checkUTC compares now-vs-timestamp in MILLISECONDS
+        # against this value (Date.getTime() - timestamp in ms <= UTCwindow).
+        # Sending "60" gave a 60ms tolerance and failed every STATE BIRTH/WILL
+        # parse on a busy CI runner. Default 60000ms matches the spec's
+        # informal "fresh timestamp" expectation and Results.java's hardcoded
+        # default (Results.Config.UTCwindow = 60000L).
         self._publish(RESULT_CFG_TOPIC, f"NEW_RESULT-LOG {log_filename}")
-        self._publish(CONFIG_TOPIC, f"UTCwindow {utc_window}")
+        self._publish(CONFIG_TOPIC, f"UTCwindow {utc_window_ms}")
 
     def run_test(
         self,
