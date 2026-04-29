@@ -451,6 +451,18 @@ func transformBrowseResult(raw []byte, deviceID, protocol string) json.RawMessag
 
 // handleStreamGatewayBrowseProgress streams gateway browse progress events via SSE.
 // GET /api/v1/gateways/{gatewayId}/browse/{browseId}/progress
+//
+// Resilience: NATS pub/sub doesn't replay, so if the SSE was being torn down /
+// re-opened during the brief window when the scanner emits its terminal
+// "completed" progress event, the client could hang forever waiting for a
+// terminal phase. We harden two ways:
+//  1. On connect, if BrowseState is already terminal (the result subject
+//     already fired and api marked it completed/failed/cancelled), emit a
+//     synthetic terminal event immediately so a late-connecting client
+//     transitions instead of staring at the last "browsing" tick.
+//  2. Also subscribe to the result subject during the SSE: when the scanner
+//     publishes its result, synthesize a terminal so the client doesn't depend
+//     on having received the scanner's progress-channel terminal.
 func (m *Module) handleStreamGatewayBrowseProgress(w http.ResponseWriter, r *http.Request) {
 	browseID := chi.URLParam(r, "browseId")
 
@@ -462,7 +474,6 @@ func (m *Module) handleStreamGatewayBrowseProgress(w http.ResponseWriter, r *htt
 
 	// Subscribe with wildcard to catch any protocol's browse progress.
 	subject := fmt.Sprintf("*.browse.progress.%s", browseID)
-
 	sub, err := m.bus.Subscribe(subject, func(_ string, data []byte, _ bus.ReplyFunc) {
 		sse.WriteEvent("progress", json.RawMessage(data))
 	})
@@ -471,6 +482,49 @@ func (m *Module) handleStreamGatewayBrowseProgress(w http.ResponseWriter, r *htt
 		return
 	}
 	defer sub.Unsubscribe()
+
+	emitSynthetic := func(phase, deviceID, message string) {
+		msg, _ := json.Marshal(map[string]interface{}{
+			"browseId":  browseID,
+			"deviceId":  deviceID,
+			"phase":     phase,
+			"message":   message,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+		sse.WriteEvent("progress", json.RawMessage(msg))
+	}
+
+	// (1) If the browse already terminated, synthesize a terminal event right
+	// away so the client doesn't sit on a stale "browsing" message.
+	m.browseMu.RLock()
+	state := m.browseStates[browseID]
+	var alreadyTerminal, terminalDevice string
+	if state != nil && state.Status != "browsing" {
+		alreadyTerminal = state.Status
+		terminalDevice = state.DeviceID
+	}
+	m.browseMu.RUnlock()
+	if alreadyTerminal != "" {
+		emitSynthetic(alreadyTerminal, terminalDevice, "Browse "+alreadyTerminal)
+		return
+	}
+
+	// (2) If the scanner publishes the result while we're connected, that's
+	// terminal regardless of whether the progress-channel terminal made it.
+	resultSubject := fmt.Sprintf("*.browse.result.%s", browseID)
+	resSub, err := m.bus.Subscribe(resultSubject, func(_ string, _ []byte, _ bus.ReplyFunc) {
+		m.browseMu.RLock()
+		s := m.browseStates[browseID]
+		var dev string
+		if s != nil {
+			dev = s.DeviceID
+		}
+		m.browseMu.RUnlock()
+		emitSynthetic("completed", dev, "Browse complete")
+	})
+	if err == nil {
+		defer resSub.Unsubscribe()
+	}
 
 	<-r.Context().Done()
 }
