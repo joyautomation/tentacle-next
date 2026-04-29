@@ -107,7 +107,36 @@
 
   // Tracks locally-started browses for subscription management (set in refreshDevice, cleared on terminal)
   // This is separate from liveProgress so that progress updates don't trigger subscription re-creation
-  let localBrowseSubs: Map<string, { browseId: string; protocol: string }> = $state(new Map());
+  let localBrowseSubs: Map<string, { browseId: string; protocol: string; startedAtMs?: number }> = $state(new Map());
+
+  // Persisted in-flight remote browses so a reload during a slow edge browse
+  // doesn't strand the spinner / lose the polling loop. Keyed by target so
+  // multiple targets in different tabs don't collide.
+  const INFLIGHT_LS_PREFIX = 'tag-config:inflight-browse:';
+  function inflightLsKey(target: string, deviceId: string): string {
+    return `${INFLIGHT_LS_PREFIX}${target}:${deviceId}`;
+  }
+  function inflightStore(target: string, deviceId: string, info: { browseId: string; protocol: string; startedAtMs: number }) {
+    try { localStorage.setItem(inflightLsKey(target, deviceId), JSON.stringify(info)); } catch { /* ignore quota/private */ }
+  }
+  function inflightClear(target: string, deviceId: string) {
+    try { localStorage.removeItem(inflightLsKey(target, deviceId)); } catch { /* ignore */ }
+  }
+  function inflightRestore(target: string): Array<[string, { browseId: string; protocol: string; startedAtMs: number }]> {
+    const out: Array<[string, { browseId: string; protocol: string; startedAtMs: number }]> = [];
+    try {
+      const prefix = `${INFLIGHT_LS_PREFIX}${target}:`;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith(prefix)) continue;
+        const deviceId = k.slice(prefix.length);
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        try { out.push([deviceId, JSON.parse(raw)]); } catch { /* skip malformed */ }
+      }
+    } catch { /* ignore */ }
+    return out;
+  }
 
   const activeBrowseStates = $derived.by((): Map<string, GatewayBrowseState> => {
     const merged = new Map<string, GatewayBrowseState>();
@@ -243,6 +272,15 @@
 
     if (needsInit) {
       initializeState();
+      // Restore any persisted in-flight remote browses so the polling loop
+      // continues across page reloads.
+      const t = remote().target;
+      if (t) {
+        const restored = inflightRestore(t);
+        if (restored.length > 0) {
+          localBrowseSubs = new Map([...localBrowseSubs, ...restored]);
+        }
+      }
       needsInit = false;
       initialized = true;
       return;
@@ -280,7 +318,7 @@
     const cleanups: (() => void)[] = [];
 
     // Collect devices that need subscriptions
-    const toSubscribe = new Map<string, { browseId: string; protocol: string }>();
+    const toSubscribe = new Map<string, { browseId: string; protocol: string; startedAtMs?: number }>();
     for (const s of browseStates ?? []) {
       if (s.status === 'browsing') {
         toSubscribe.set(s.deviceId, { browseId: s.browseId, protocol: s.protocol });
@@ -301,7 +339,8 @@
       // browse-cache (which mantle captures from the edge's _meta/browse
       // metric) and mark complete when its cachedAt advances past now.
       if (remote().target) {
-        const startedAtMs = Date.now();
+        const target = remote().target!;
+        const startedAtMs = info.startedAtMs ?? Date.now();
         const maxWaitMs = 5 * 60 * 1000;
         let stopped = false;
         const poll = async () => {
@@ -325,6 +364,7 @@
               const next = new Map(localBrowseSubs);
               next.delete(deviceId);
               localBrowseSubs = next;
+              inflightClear(target, deviceId);
               setTimeout(() => invalidateAll(), 500);
               const capturedDeviceId = deviceId;
               setTimeout(() => {
@@ -340,6 +380,7 @@
             const next = new Map(localBrowseSubs);
             next.delete(deviceId);
             localBrowseSubs = next;
+            inflightClear(target, deviceId);
             const cleared = new Map(liveProgress);
             cleared.delete(deviceId);
             liveProgress = cleared;
@@ -1296,8 +1337,12 @@
       } else if (result.data) {
         const b = result.data;
         const now = new Date().toISOString();
+        const startedAtMs = Date.now();
         // Add to localBrowseSubs to trigger subscription (this triggers the subscription effect)
-        localBrowseSubs = new Map([...localBrowseSubs, [deviceId, { browseId: b.browseId, protocol: device.protocol }]]);
+        localBrowseSubs = new Map([...localBrowseSubs, [deviceId, { browseId: b.browseId, protocol: device.protocol, startedAtMs }]]);
+        // Persist in-flight remote browse so a reload doesn't drop the spinner.
+        const t = remote().target;
+        if (t) inflightStore(t, deviceId, { browseId: b.browseId, protocol: device.protocol, startedAtMs });
         // Update liveProgress for display (this does NOT trigger the subscription effect)
         const updated = new Map(liveProgress);
         updated.set(deviceId, {
@@ -1324,6 +1369,8 @@
     const next = new Map(localBrowseSubs);
     next.delete(deviceId);
     localBrowseSubs = next;
+    const t = remote().target;
+    if (t) inflightClear(t, deviceId);
     // Set cancelled status in liveProgress (overrides stale browseStates server prop)
     const updated = new Map(liveProgress);
     updated.set(deviceId, {
