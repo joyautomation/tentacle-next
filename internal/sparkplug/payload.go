@@ -37,9 +37,15 @@ type Parameter struct {
 }
 
 // Payload is a user-friendly Sparkplug B payload.
+//
+// OmitSeq controls whether the seq field is set in the protobuf output. Per
+// the Sparkplug B spec, NDEATH MUST NOT include a sequence number — set
+// OmitSeq=true on NDEATH payloads. All other Sparkplug message types
+// (NBIRTH, NDATA, DBIRTH, DDATA, DDEATH) include seq.
 type Payload struct {
 	Timestamp uint64
 	Seq       uint64
+	OmitSeq   bool
 	Metrics   []Metric
 }
 
@@ -47,7 +53,9 @@ type Payload struct {
 func EncodePayload(p *Payload) ([]byte, error) {
 	pbPayload := &pb.Payload{
 		Timestamp: proto.Uint64(p.Timestamp),
-		Seq:       proto.Uint64(p.Seq),
+	}
+	if !p.OmitSeq {
+		pbPayload.Seq = proto.Uint64(p.Seq)
 	}
 	for i := range p.Metrics {
 		pbMetric, err := encodeMetric(&p.Metrics[i])
@@ -237,9 +245,10 @@ func encodeTemplate(t *Template) (*pb.Payload_Template, error) {
 	if t.TemplateRef != "" {
 		pbt.TemplateRef = proto.String(t.TemplateRef)
 	}
-	if t.IsDefinition {
-		pbt.IsDefinition = proto.Bool(true)
-	}
+	// Per Sparkplug B `payloads-template-is-definition`, every Template
+	// (both definitions and instances) MUST include this flag — true for
+	// definitions in NBIRTH, false for instances in DBIRTH/DDATA.
+	pbt.IsDefinition = proto.Bool(t.IsDefinition)
 	for i := range t.Metrics {
 		pbm, err := encodeMetric(&t.Metrics[i])
 		if err != nil {

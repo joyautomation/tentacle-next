@@ -38,9 +38,19 @@ var configSchema = []config.FieldDef{
 
 // saveConfig persists the current config as individual KV keys (mqtt.MQTT_BROKER_URL etc.)
 // so the web UI settings page can read and display them.
+//
+// Skips writes whose value equals what's already stored. NATS KV emits a watch
+// event on every Put (even when the value is unchanged), and the module's
+// KVWatchAll handler debounces those into a bridge restart — leaving each
+// startup to publish NDEATH/NBIRTH twice and bumping bdSeq mid-test, which
+// breaks several Sparkplug TCK Monitor assertions.
 func saveConfig(b bus.Bus, cfg *itypes.MqttBridgeConfig) {
 	put := func(envVar, value string) {
-		if _, err := b.KVPut(topics.BucketTentacleConfig, "mqtt."+envVar, []byte(value)); err != nil {
+		key := "mqtt." + envVar
+		if existing, _, err := b.KVGet(topics.BucketTentacleConfig, key); err == nil && string(existing) == value {
+			return
+		}
+		if _, err := b.KVPut(topics.BucketTentacleConfig, key, []byte(value)); err != nil {
 			// Ignore errors — best effort
 		}
 	}
@@ -121,5 +131,6 @@ func loadConfig(b bus.Bus) itypes.MqttBridgeConfig {
 		TLSCertPath:     get("MQTT_TLS_CERT_PATH", ""),
 		TLSKeyPath:      get("MQTT_TLS_KEY_PATH", ""),
 		TLSCaPath:       get("MQTT_TLS_CA_PATH", ""),
+		BdSeqFile:       get("MQTT_BDSEQ_FILE", ""),
 	}
 }

@@ -20,6 +20,12 @@ type MqttBridgeConfig struct {
 	TLSCertPath      string `json:"tlsCertPath,omitempty"`
 	TLSKeyPath       string `json:"tlsKeyPath,omitempty"`
 	TLSCaPath        string `json:"tlsCaPath,omitempty"`
+
+	// BdSeqFile is a path where the node persists its Sparkplug bdSeq counter
+	// across process restarts. Required for TCK compliance: bdSeq must start
+	// at zero and increment by one on every new MQTT CONNECT packet, even if
+	// the edge node process is restarted between connects.
+	BdSeqFile string `json:"bdSeqFile,omitempty"`
 }
 
 // MqttMetricInfo describes a single metric published by the Sparkplug bridge.
