@@ -292,12 +292,16 @@
     for (const [did, info] of localBrowseSubs) {
       toSubscribe.set(did, info);
     }
-    // Don't re-subscribe for devices that were locally cancelled
-    for (const [did, progress] of liveProgress) {
-      if (progress.status === 'cancelled') {
-        toSubscribe.delete(did);
+    // Don't re-subscribe for devices that were locally cancelled. Read via
+    // untrack so progress updates don't re-trigger this effect (which would
+    // tear down/re-create subscriptions on every progress tick).
+    untrack(() => {
+      for (const [did, progress] of liveProgress) {
+        if (progress.status === 'cancelled') {
+          toSubscribe.delete(did);
+        }
       }
-    }
+    });
 
     for (const [deviceId, info] of toSubscribe) {
       // Remote target: there's no SSE progress endpoint (the local one watches
@@ -353,16 +357,20 @@
           setTimeout(poll, 2000);
         };
         // Kick off polling; show indeterminate progress until status flips.
-        const updated = new Map(liveProgress);
-        updated.set(deviceId, {
-          deviceId, browseId: info.browseId, protocol: info.protocol,
-          status: 'browsing', phase: 'browsing',
-          discoveredCount: 0, totalCount: 0,
-          message: 'Browsing on edge…',
-          startedAt: new Date(startedAtMs).toISOString(),
-          updatedAt: new Date(startedAtMs).toISOString(),
+        // untrack so this write doesn't retrigger the effect (the effect reads
+        // liveProgress for the cancelled filter).
+        untrack(() => {
+          const updated = new Map(liveProgress);
+          updated.set(deviceId, {
+            deviceId, browseId: info.browseId, protocol: info.protocol,
+            status: 'browsing', phase: 'browsing',
+            discoveredCount: 0, totalCount: 0,
+            message: 'Browsing on edge…',
+            startedAt: new Date(startedAtMs).toISOString(),
+            updatedAt: new Date(startedAtMs).toISOString(),
+          });
+          liveProgress = updated;
         });
-        liveProgress = updated;
         poll();
         cleanups.push(() => { stopped = true; });
         continue;
