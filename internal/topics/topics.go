@@ -48,7 +48,7 @@ const (
 )
 
 // BrowseCacheUpdate is the bus payload for MqttBrowseCache events. The bridge
-// turns this into a Sparkplug "_cache/browse" String metric on the named
+// turns this into a Sparkplug "_meta/browse" String metric on the named
 // device.
 type BrowseCacheUpdate struct {
 	DeviceID  string          `json:"deviceId"`

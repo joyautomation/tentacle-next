@@ -167,7 +167,7 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 		}
 
 		// Notify the mqtt bridge so the cache rides out as a Sparkplug
-		// _cache/browse metric (DDATA now, included in next DBIRTH). Mantle's
+		// _meta/browse metric (DDATA now, included in next DBIRTH). Mantle's
 		// sparkplug-host picks it up like any other metric and routes it to
 		// its own KV — that's the cross-network half of the cache pipeline.
 		// Cache lives at api layer regardless of whether mqtt is loaded;

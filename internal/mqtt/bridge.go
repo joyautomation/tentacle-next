@@ -731,10 +731,13 @@ func (br *Bridge) buildDeviceMetrics() {
 }
 
 // browseCacheMetricName is the Sparkplug metric name used to carry the
-// JSON-encoded browse cache for a device. The "_cache/" prefix marks it as
-// observed state so consumers can route it differently from real tag values
-// (e.g. mantle persists it to its own KV instead of treating it as telemetry).
-const browseCacheMetricName = "_cache/browse"
+// JSON-encoded browse cache for a device. It lives under the "_meta/"
+// namespace, which is reserved for edge↔mantle interop signals that aren't
+// telemetry (driver health, topology, gitops state, capabilities, …).
+// Mantle's sparkplug-host treats anything matching "_meta/*" as observed
+// state: HistoryEnabled=false, routed to the metadata KV bucket instead of
+// the telemetry stream.
+const browseCacheMetricName = "_meta/browse"
 
 // subscribeToBrowseCache listens for browse-cache update events from the api
 // layer. Each event carries the latest cache JSON for one device; the bridge
@@ -762,7 +765,7 @@ func (br *Bridge) subscribeToBrowseCache() {
 }
 
 // handleBrowseCacheUpdate stores the latest cache JSON for a device and emits
-// a DDATA carrying the _cache/browse metric. The cache is also added to the
+// a DDATA carrying the _meta/browse metric. The cache is also added to the
 // device's metric set so the next DBIRTH (after a rebirth or reconnect)
 // carries it automatically.
 func (br *Bridge) handleBrowseCacheUpdate(deviceID string, cache []byte) {
