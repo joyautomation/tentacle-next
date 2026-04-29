@@ -772,9 +772,21 @@ func (m *Module) handleGetGatewayBrowseCache(w http.ResponseWriter, r *http.Requ
 // ─── 16. Get Gateway Browse States ────────────────────────────────────────
 
 func (m *Module) handleGetGatewayBrowseStates(w http.ResponseWriter, r *http.Request) {
+	t := parseTarget(r)
 	m.browseMu.RLock()
 	states := make([]*BrowseState, 0, len(m.browseStates))
 	for _, s := range m.browseStates {
+		if t.IsRemote() {
+			if s.GroupID != t.Group || s.NodeID != t.Node {
+				continue
+			}
+		} else {
+			// Local mode: hide remote-mode entries (they'd never complete via
+			// the local SSE path and would confuse the operator).
+			if s.GroupID != "" || s.NodeID != "" {
+				continue
+			}
+		}
 		states = append(states, s)
 	}
 	m.browseMu.RUnlock()

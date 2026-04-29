@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/heartbeat"
+	"github.com/joyautomation/tentacle/internal/sparkplug"
 	"github.com/joyautomation/tentacle/internal/topics"
 	"github.com/joyautomation/tentacle/internal/version"
 	"github.com/joyautomation/tentacle/internal/web"
@@ -51,6 +52,11 @@ type Module struct {
 	// going through HTTP.
 	browseStartSub bus.Subscription
 
+	// browseCacheUpdatedSub (mantle): listens for sparkplug-host bus events
+	// announcing a fresh `_meta/browse` cache from a remote edge so we can
+	// mark in-flight remote BrowseStates as completed.
+	browseCacheUpdatedSub bus.Subscription
+
 	// Browse state tracking (in-memory).
 	browseMu     sync.RWMutex
 	browseCache  map[string]json.RawMessage // "gatewayId:deviceId" → result
@@ -61,11 +67,15 @@ type Module struct {
 }
 
 // BrowseState tracks an in-progress or completed browse operation.
+// GroupID/NodeID are populated only for remote (target-mode) browses dispatched
+// to an edge tentacle via Sparkplug NCMD; for local browses they're empty.
 type BrowseState struct {
 	BrowseID  string          `json:"browseId"`
 	GatewayID string          `json:"gatewayId,omitempty"`
 	DeviceID  string          `json:"deviceId"`
 	Protocol  string          `json:"protocol"`
+	GroupID   string          `json:"groupId,omitempty"`
+	NodeID    string          `json:"nodeId,omitempty"`
 	Status    string          `json:"status"` // "browsing", "completed", "failed", "cancelled"
 	StartedAt int64           `json:"startedAt"`
 	Result    json.RawMessage `json:"result,omitempty"`
@@ -150,6 +160,36 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		m.log.Warn("api: failed to subscribe to gateway browse start", "error", err)
 	}
 
+	// Mark in-flight remote BrowseStates complete once mantle's sparkplug-host
+	// captures a fresh `_meta/browse` cache from the edge. The bus event is the
+	// terminal signal — without it the spinner would hang until manual refresh.
+	if sub, err := b.Subscribe(sparkplug.SubjectHostBrowseCacheUpdated, func(_ string, data []byte, _ bus.ReplyFunc) {
+		var evt sparkplug.HostBrowseCacheUpdated
+		if json.Unmarshal(data, &evt) != nil {
+			return
+		}
+		m.browseMu.Lock()
+		defer m.browseMu.Unlock()
+		for _, s := range m.browseStates {
+			if s.Status != "browsing" {
+				continue
+			}
+			if s.GroupID != evt.GroupID || s.NodeID != evt.NodeID || s.DeviceID != evt.DeviceID {
+				continue
+			}
+			// Ignore caches older than this browse — they were already in
+			// place when the operator hit Browse and aren't proof of completion.
+			if evt.CachedAtMs > 0 && evt.CachedAtMs < s.StartedAt {
+				continue
+			}
+			s.Status = "completed"
+		}
+	}); err == nil {
+		m.browseCacheUpdatedSub = sub
+	} else {
+		m.log.Debug("api: subscribe browse cache updated", "error", err)
+	}
+
 	m.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", m.port),
 		Handler: m.routes(),
@@ -180,6 +220,9 @@ func (m *Module) Stop() error {
 	}
 	if m.browseStartSub != nil {
 		m.browseStartSub.Unsubscribe()
+	}
+	if m.browseCacheUpdatedSub != nil {
+		m.browseCacheUpdatedSub.Unsubscribe()
 	}
 	if m.cancel != nil {
 		m.cancel()

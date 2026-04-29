@@ -42,10 +42,13 @@ export const load: PageLoad = async ({ params, url }) => {
 
     const config = result.data ?? null;
 
-    // In remote mode the cache is sourced from mantle's per-node Sparkplug
-    // observed-state (captured from the edge's `_meta/browse` metric), and
-    // browse-states aren't tracked per target — skip the states fetch but
-    // still pull caches so the operator sees what the edge has scanned.
+    // Caches: sourced from local KV when target is null, or from mantle's
+    // per-node Sparkplug observed-state (the edge's `_meta/browse` metric)
+    // when a target is set.
+    // Browse-states: mantle tracks remote browses keyed by (group, node) so the
+    // tag-config page can render an in-flight spinner without per-page
+    // localStorage tricks. The local fetch returns only local entries; the
+    // target fetch returns only entries matching that group/node.
     const [browseCaches, browseStates] = await Promise.all([
       (async () => {
         const caches: BrowseCache[] = [];
@@ -67,9 +70,10 @@ export const load: PageLoad = async ({ params, url }) => {
         return caches;
       })(),
       (async () => {
-        if (target) return [] as GatewayBrowseState[];
         try {
-          const statesResult = await api<GatewayBrowseState[]>('/gateways/browse-states');
+          const statesResult = await api<GatewayBrowseState[]>(
+            withTarget('/gateways/browse-states', target),
+          );
           return statesResult.data ?? [];
         } catch {
           return [] as GatewayBrowseState[];

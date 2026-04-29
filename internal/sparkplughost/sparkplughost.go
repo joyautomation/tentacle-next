@@ -474,7 +474,7 @@ func (m *Module) handleMessage(b bus.Bus, topic string, payload []byte) {
 		m.publishMetric(b, deviceKey, metric, msgType)
 	}
 
-	m.captureMeta(group, edgeNode, device, pl)
+	m.captureMeta(b, group, edgeNode, device, pl)
 	if msgType == "NDATA" && device == "" {
 		m.captureRPCReplies(group, edgeNode, pl)
 	}
@@ -609,12 +609,13 @@ func newRequestID() string {
 // into per-node observed-state on the host. Today only "_meta/browse" is
 // recognized — it carries the JSON browse cache published by the edge after
 // a successful protocol scan and lands in Node.BrowseCaches[device].
-func (m *Module) captureMeta(group, edgeNode, device string, pl *sparkplug.Payload) {
+func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *sparkplug.Payload) {
 	if device == "" {
 		return
 	}
 	var browse string
 	var browseSet bool
+	var browseTs int64
 	for i := range pl.Metrics {
 		metric := &pl.Metrics[i]
 		if metric.IsNull || !isMetaMetric(metric.Name) {
@@ -625,6 +626,7 @@ func (m *Module) captureMeta(group, edgeNode, device string, pl *sparkplug.Paylo
 			if s, ok := metric.Value.(string); ok {
 				browse = s
 				browseSet = true
+				browseTs = int64(metric.Timestamp)
 			}
 		}
 	}
@@ -634,9 +636,9 @@ func (m *Module) captureMeta(group, edgeNode, device string, pl *sparkplug.Paylo
 
 	key := group + "/" + edgeNode
 	m.invMu.Lock()
-	defer m.invMu.Unlock()
 	n, ok := m.nodes[key]
 	if !ok {
+		m.invMu.Unlock()
 		return
 	}
 	if n.BrowseCaches == nil {
@@ -647,8 +649,23 @@ func (m *Module) captureMeta(group, edgeNode, device string, pl *sparkplug.Paylo
 	} else {
 		// Cache is opaque to the host but downstream consumers expect JSON.
 		// Wrap as a JSON string so the API response stays well-formed.
-		if b, err := json.Marshal(browse); err == nil {
-			n.BrowseCaches[device] = b
+		if mb, err := json.Marshal(browse); err == nil {
+			n.BrowseCaches[device] = mb
+		}
+	}
+	m.invMu.Unlock()
+
+	if b != nil {
+		evt := sparkplug.HostBrowseCacheUpdated{
+			GroupID:    group,
+			NodeID:     edgeNode,
+			DeviceID:   device,
+			CachedAtMs: browseTs,
+		}
+		if data, err := json.Marshal(evt); err == nil {
+			if err := b.Publish(sparkplug.SubjectHostBrowseCacheUpdated, data); err != nil {
+				m.log.Debug("sparkplug-host: browse cache updated publish failed", "error", err)
+			}
 		}
 	}
 }

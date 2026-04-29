@@ -40,6 +40,23 @@ const SubjectHostVerb = "sparkplug.host.verb"
 // HostBrowseCacheReply.
 const SubjectHostBrowseCache = "sparkplug.host.browse_cache"
 
+// SubjectHostBrowseCacheUpdated is the bus subject sparkplug-host publishes
+// to when a remote edge ships a fresh "_meta/browse" cache for a device.
+// Mantle's api module subscribes to mark in-flight remote BrowseState entries
+// complete. Payload: HostBrowseCacheUpdated.
+const SubjectHostBrowseCacheUpdated = "sparkplug.host.browse_cache.updated"
+
+// HostBrowseCacheUpdated is the event payload broadcast on
+// SubjectHostBrowseCacheUpdated. CachedAtMs is the Sparkplug metric
+// timestamp (unix ms) so subscribers can ignore events that pre-date their
+// browse start.
+type HostBrowseCacheUpdated struct {
+	GroupID    string `json:"groupId"`
+	NodeID     string `json:"nodeId"`
+	DeviceID   string `json:"deviceId"`
+	CachedAtMs int64  `json:"cachedAtMs"`
+}
+
 // HostVerbRequest is the bus payload for SubjectHostVerb. Params is the
 // verb-specific JSON payload mantle ships in the NCMD body.
 type HostVerbRequest struct {

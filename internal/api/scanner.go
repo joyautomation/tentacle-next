@@ -164,6 +164,24 @@ func (m *Module) handleStartGatewayBrowse(w http.ResponseWriter, r *http.Request
 		}
 		var result sparkplug.BrowseRequestResult
 		_ = json.Unmarshal(resp.Result, &result)
+		// Register an in-flight BrowseState so polling clients (e.g. the
+		// tag-config page) can observe completion without inventing their own
+		// tracking. Completion is signaled by the sparkplug-host bus event
+		// SubjectHostBrowseCacheUpdated (subscribed in api.Start).
+		if result.BrowseID != "" {
+			m.browseMu.Lock()
+			m.browseStates[result.BrowseID] = &BrowseState{
+				BrowseID:  result.BrowseID,
+				GatewayID: gatewayID,
+				DeviceID:  deviceID,
+				Protocol:  protocol,
+				GroupID:   t.Group,
+				NodeID:    t.Node,
+				Status:    "browsing",
+				StartedAt: time.Now().UnixMilli(),
+			}
+			m.browseMu.Unlock()
+		}
 		writeJSON(w, http.StatusOK, map[string]string{
 			"browseId": result.BrowseID,
 			"deviceId": deviceID,
