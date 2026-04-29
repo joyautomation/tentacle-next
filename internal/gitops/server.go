@@ -180,6 +180,29 @@ func (s *Server) ReadFileFromBare(name, path string) ([]byte, error) {
 	return out, nil
 }
 
+// RepoHead returns the current SHA of the `main` ref for the named bare repo.
+// Returns an empty string (not an error) when the repo has no commits yet —
+// that's the normal state for a freshly created repo and shouldn't surface as
+// a failure to callers driving sync-status UIs.
+func (s *Server) RepoHead(name string) (string, error) {
+	if !validRepoName(name) {
+		return "", errors.New("invalid repo name")
+	}
+	repoPath := filepath.Join(s.rootDir, name+".git")
+	if _, err := os.Stat(repoPath); err != nil {
+		return "", err
+	}
+	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "main").CombinedOutput()
+	if err != nil {
+		txt := string(out)
+		if strings.Contains(txt, "unknown revision") || strings.Contains(txt, "Needed a single revision") {
+			return "", nil
+		}
+		return "", fmt.Errorf("git rev-parse: %w (%s)", err, strings.TrimSpace(txt))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // DeleteRepo removes a bare repo. Used by the API for fleet provisioning.
 func (s *Server) DeleteRepo(_ context.Context, name string) error {
 	if !validRepoName(name) {

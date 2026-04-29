@@ -11,6 +11,8 @@ export interface FleetModule {
 	running: boolean;
 }
 
+export type FleetSyncStatus = 'synced' | 'syncing' | 'empty' | 'unknown';
+
 export interface FleetNode {
 	groupId: string;
 	nodeId: string;
@@ -23,4 +25,7 @@ export interface FleetNode {
 	verbs?: string[];
 	modules?: FleetModule[];
 	modulesError?: string;
+	gitopsCommitSHA?: string;
+	repoHead?: string;
+	syncStatus?: FleetSyncStatus;
 }

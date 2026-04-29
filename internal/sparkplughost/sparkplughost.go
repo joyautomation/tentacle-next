@@ -60,6 +60,11 @@ type Node struct {
 	// JSON so the wire shape matches the local browse-cache API.
 	BrowseCaches map[string]json.RawMessage `json:"browseCaches,omitempty"`
 
+	// GitopsCommitSHA is the SHA the edge most recently applied to KV,
+	// captured from the node-level "_meta/gitops/commitSHA" String metric.
+	// Mantle compares this against the bare-repo HEAD to display sync status.
+	GitopsCommitSHA string `json:"gitopsCommitSHA,omitempty"`
+
 	// rpcInflight maps requestId → reply channel for outstanding RPC calls
 	// targeting this node. Populated when mantle issues NCMD; drained by
 	// the Node Status/<Verb> NDATA handler. Not serialized.
@@ -606,16 +611,15 @@ func newRequestID() string {
 }
 
 // captureMeta scans a payload for "_meta/*" metrics and routes their values
-// into per-node observed-state on the host. Today only "_meta/browse" is
-// recognized — it carries the JSON browse cache published by the edge after
-// a successful protocol scan and lands in Node.BrowseCaches[device].
+// into per-node observed-state on the host. Recognized metrics:
+//   - "_meta/browse" (device-level): JSON browse cache → Node.BrowseCaches[device]
+//   - "_meta/gitops/commitSHA" (node-level): edge gitops HEAD → Node.GitopsCommitSHA
 func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *sparkplug.Payload) {
-	if device == "" {
-		return
-	}
 	var browse string
 	var browseSet bool
 	var browseTs int64
+	var gitopsSHA string
+	var gitopsSet bool
 	for i := range pl.Metrics {
 		metric := &pl.Metrics[i]
 		if metric.IsNull || !isMetaMetric(metric.Name) {
@@ -623,14 +627,25 @@ func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *spar
 		}
 		switch metric.Name {
 		case "_meta/browse":
+			if device == "" {
+				continue
+			}
 			if s, ok := metric.Value.(string); ok {
 				browse = s
 				browseSet = true
 				browseTs = int64(metric.Timestamp)
 			}
+		case "_meta/gitops/commitSHA":
+			if device != "" {
+				continue
+			}
+			if s, ok := metric.Value.(string); ok {
+				gitopsSHA = s
+				gitopsSet = true
+			}
 		}
 	}
-	if !browseSet {
+	if !browseSet && !gitopsSet {
 		return
 	}
 
@@ -641,21 +656,26 @@ func (m *Module) captureMeta(b bus.Bus, group, edgeNode, device string, pl *spar
 		m.invMu.Unlock()
 		return
 	}
-	if n.BrowseCaches == nil {
-		n.BrowseCaches = make(map[string]json.RawMessage)
-	}
-	if json.Valid([]byte(browse)) {
-		n.BrowseCaches[device] = json.RawMessage(browse)
-	} else {
-		// Cache is opaque to the host but downstream consumers expect JSON.
-		// Wrap as a JSON string so the API response stays well-formed.
-		if mb, err := json.Marshal(browse); err == nil {
-			n.BrowseCaches[device] = mb
+	if browseSet {
+		if n.BrowseCaches == nil {
+			n.BrowseCaches = make(map[string]json.RawMessage)
 		}
+		if json.Valid([]byte(browse)) {
+			n.BrowseCaches[device] = json.RawMessage(browse)
+		} else {
+			// Cache is opaque to the host but downstream consumers expect JSON.
+			// Wrap as a JSON string so the API response stays well-formed.
+			if mb, err := json.Marshal(browse); err == nil {
+				n.BrowseCaches[device] = mb
+			}
+		}
+	}
+	if gitopsSet {
+		n.GitopsCommitSHA = gitopsSHA
 	}
 	m.invMu.Unlock()
 
-	if b != nil {
+	if browseSet && b != nil {
 		evt := sparkplug.HostBrowseCacheUpdated{
 			GroupID:    group,
 			NodeID:     edgeNode,

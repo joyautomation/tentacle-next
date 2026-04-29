@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -14,7 +15,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/joyautomation/tentacle/internal/bus"
 	"github.com/joyautomation/tentacle/internal/paths"
+	"github.com/joyautomation/tentacle/internal/topics"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -203,6 +206,28 @@ func (m *Module) handleGetHostname(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"hostname": hostname})
+}
+
+// handleStreamGitopsApplied forwards GitOpsApplied bus events as SSE so the
+// edge web UI can call invalidateAll() after a remote-driven config change.
+// GET /api/v1/gitops/applied/stream
+func (m *Module) handleStreamGitopsApplied(w http.ResponseWriter, r *http.Request) {
+	sse, ok := newSSEWriter(w)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	sub, err := m.bus.Subscribe(topics.GitOpsApplied, func(_ string, data []byte, _ bus.ReplyFunc) {
+		sse.WriteEvent("applied", json.RawMessage(data))
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to subscribe: "+err.Error())
+		return
+	}
+	defer sub.Unsubscribe()
+
+	<-r.Context().Done()
 }
 
 // getGitopsSSHKeyPath resolves the SSH key path from KV config or default.

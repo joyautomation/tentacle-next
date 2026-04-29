@@ -9,9 +9,10 @@
   import ThemeSwitch from "$lib/components/ThemeSwitch.svelte";
   import NavSidebar from "$lib/components/NavSidebar.svelte";
   import { onMount } from "svelte";
-  import { goto, onNavigate } from "$app/navigation";
+  import { goto, invalidateAll, onNavigate } from "$app/navigation";
   import { themeState, type Theme } from "./theme.svelte";
   import { api } from "$lib/api/client";
+  import { subscribe } from "$lib/api/subscribe";
   import { isMonolith, role, brandName } from "$lib/stores/mode";
   import { get } from "svelte/store";
 
@@ -143,7 +144,17 @@
       if (apiConnected) fetchModules();
     }, 5000);
 
-    return () => clearInterval(poll);
+    // Listen for gitops applied events. When the gitops module converges KV
+    // with a remote commit, every load function re-runs so config-driven
+    // pages reflect the new state without a manual refresh.
+    const unsubscribeApplied = subscribe('/gitops/applied/stream', () => {
+      invalidateAll();
+    });
+
+    return () => {
+      clearInterval(poll);
+      unsubscribeApplied();
+    };
   });
 
   onNavigate((navigation) => {

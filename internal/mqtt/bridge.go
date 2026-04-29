@@ -39,6 +39,11 @@ type Bridge struct {
 	// state, not a tag value.
 	browseCaches map[string][]byte
 
+	// Latest gitops commit SHA applied to KV. Published as the node-level
+	// `_meta/gitops/commitSHA` String metric so mantle can compare it
+	// against its own bare-repo HEAD to display sync status.
+	gitopsCommitSHA string
+
 	// Template registry
 	templates *TemplateRegistry
 
@@ -116,6 +121,7 @@ func (br *Bridge) Start() error {
 	br.subscribeToSFStatus()
 	br.subscribeToData()
 	br.subscribeToBrowseCache()
+	br.subscribeToGitOpsApplied()
 
 	// Start drain goroutine
 	br.drainStop = make(chan struct{})
@@ -474,7 +480,8 @@ func (br *Bridge) scheduleRebirth() {
 	})
 }
 
-// updateNodeMetrics rebuilds the node-level metrics (template definitions).
+// updateNodeMetrics rebuilds the node-level metrics (template definitions
+// plus interop signals like the gitops commit SHA).
 func (br *Bridge) updateNodeMetrics() {
 	var nodeMetrics []sparkplug.Metric
 	for name, tmpl := range br.templates.All() {
@@ -484,6 +491,12 @@ func (br *Bridge) updateNodeMetrics() {
 			Timestamp: uint64(time.Now().UnixMilli()),
 			Value:     tmpl,
 		})
+	}
+	br.mu.RLock()
+	sha := br.gitopsCommitSHA
+	br.mu.RUnlock()
+	if sha != "" {
+		nodeMetrics = append(nodeMetrics, sparkplug.NewStringMetric(gitopsCommitMetricName, sha))
 	}
 	br.node.SetNodeMetrics(nodeMetrics)
 }
@@ -888,6 +901,62 @@ func (br *Bridge) handleBrowseCacheUpdate(deviceID string, cache []byte) {
 	metric := sparkplug.NewStringMetric(browseCacheMetricName, string(cacheCopy))
 	if err := br.node.PublishDeviceData(deviceID, []sparkplug.Metric{metric}); err != nil {
 		br.log.Warn("mqtt: failed to publish browse cache DDATA", "device", deviceID, "error", err)
+	}
+}
+
+// gitopsCommitMetricName is the Sparkplug node-level metric name carrying
+// the SHA of the most recent gitops commit applied to KV. Like
+// `_meta/browse`, it's reserved interop state — mantle reads it to show
+// sync status against its bare-repo HEAD.
+const gitopsCommitMetricName = "_meta/gitops/commitSHA"
+
+// subscribeToGitOpsApplied listens for gitops "applied" events. Each event
+// carries the SHA the gitops module just converged KV onto; the bridge
+// stores it for inclusion in NBIRTH and immediately publishes an NDATA so
+// mantle sees the new SHA without waiting for a rebirth.
+func (br *Bridge) subscribeToGitOpsApplied() {
+	sub, err := br.b.Subscribe(topics.GitOpsApplied, func(_ string, data []byte, _ bus.ReplyFunc) {
+		var evt topics.GitOpsAppliedEvent
+		if err := json.Unmarshal(data, &evt); err != nil {
+			br.log.Warn("mqtt: bad gitops applied payload", "error", err)
+			return
+		}
+		if evt.CommitSHA == "" {
+			return
+		}
+		br.handleGitOpsApplied(evt.CommitSHA)
+	})
+	if err != nil {
+		br.log.Error("mqtt: failed to subscribe to gitops applied", "error", err)
+		return
+	}
+	br.mu.Lock()
+	br.dataSubs = append(br.dataSubs, sub)
+	br.mu.Unlock()
+}
+
+// handleGitOpsApplied stores the latest commit SHA and emits an NDATA
+// carrying the _meta/gitops/commitSHA metric. The SHA is also added to the
+// node's metric set so the next NBIRTH (after a rebirth or reconnect)
+// carries it automatically.
+func (br *Bridge) handleGitOpsApplied(sha string) {
+	br.mu.Lock()
+	if br.gitopsCommitSHA == sha {
+		br.mu.Unlock()
+		return
+	}
+	br.gitopsCommitSHA = sha
+	br.mu.Unlock()
+
+	// Refresh node metric set so any future NBIRTH includes the new SHA.
+	br.updateNodeMetrics()
+
+	if br.node == nil || br.node.State() != StateBorn {
+		return
+	}
+	metric := sparkplug.NewStringMetric(gitopsCommitMetricName, sha)
+	if err := br.node.PublishNodeData([]sparkplug.Metric{metric}); err != nil {
+		br.log.Warn("mqtt: failed to publish gitops commit NDATA", "sha", sha, "error", err)
 	}
 }
 

@@ -62,6 +62,22 @@
     return `/fleet/${encodeURIComponent(groupId)}/${encodeURIComponent(nodeId)}`;
   }
 
+  function syncLabel(status?: string): string {
+    switch (status) {
+      case 'synced': return 'Synced';
+      case 'syncing': return 'Syncing';
+      case 'empty': return 'Empty repo';
+      case 'unknown': return 'Unknown';
+      default: return '—';
+    }
+  }
+
+  function syncTitle(n: { gitopsCommitSHA?: string; repoHead?: string }): string {
+    const edge = n.gitopsCommitSHA || '(not yet reported)';
+    const head = n.repoHead || '(no commits)';
+    return `Edge: ${edge}\nMantle HEAD: ${head}`;
+  }
+
   onMount(() => {
     pollHandle = setInterval(() => {
       invalidateAll();
@@ -103,6 +119,7 @@
             <th>Group</th>
             <th>Node</th>
             <th>Status</th>
+            <th>Sync</th>
             <th>Modules</th>
             <th class="num">Devices</th>
             <th>Last Seen</th>
@@ -118,6 +135,15 @@
                 <span class="badge" class:online={n.online} class:offline={!n.online}>
                   {n.online ? 'Online' : 'Offline'}
                 </span>
+              </td>
+              <td>
+                <span
+                  class="sync-badge"
+                  class:sync-synced={n.syncStatus === 'synced'}
+                  class:sync-syncing={n.syncStatus === 'syncing'}
+                  class:sync-muted={n.syncStatus === 'empty' || n.syncStatus === 'unknown' || !n.syncStatus}
+                  title={syncTitle(n)}
+                >{syncLabel(n.syncStatus)}</span>
               </td>
               <td>
                 {#if n.modulesError}
@@ -349,6 +375,32 @@
     }
 
     &.offline {
+      background: var(--badge-muted-bg);
+      color: var(--badge-muted-text);
+    }
+  }
+
+  .sync-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.125rem 0.5rem;
+    border-radius: var(--rounded-full, 999px);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: help;
+
+    &.sync-synced {
+      background: var(--badge-green-bg);
+      color: var(--badge-green-text);
+    }
+
+    &.sync-syncing {
+      background: var(--badge-amber-bg, color-mix(in srgb, #f59e0b 18%, transparent));
+      color: var(--badge-amber-text, #b45309);
+    }
+
+    &.sync-muted {
       background: var(--badge-muted-bg);
       color: var(--badge-muted-text);
     }

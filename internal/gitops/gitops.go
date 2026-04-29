@@ -112,7 +112,7 @@ func (m *Module) Start(ctx context.Context, b bus.Bus) error {
 		// authoritative desired state. Without this forced apply, the syncToGit
 		// below would export stale KV and overwrite the just-cloned files.
 		configPath := filepath.Join(cloneDir, m.cfg.Path)
-		applyFromDisk(b, configPath, m.log)
+		applyFromDisk(b, m.repo, configPath, m.log)
 
 		// Now export KV → disk to capture any local state not yet in git.
 		// Since apply just converged KV with disk, this should typically be a no-op.

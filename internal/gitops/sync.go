@@ -73,13 +73,14 @@ func syncToGit(b bus.Bus, repo *gitRepo, configPath, nodeID string, autoPush boo
 // applyFromDisk reads all manifests in configPath and applies them to KV
 // unconditionally. Used at startup to force convergence of KV with the
 // just-cloned repo, regardless of whether any "new" commits were pulled.
-func applyFromDisk(b bus.Bus, configPath string, log *slog.Logger) {
+func applyFromDisk(b bus.Bus, repo *gitRepo, configPath string, log *slog.Logger) {
 	resources, err := readManifestFiles(configPath)
 	if err != nil {
 		log.Error("gitops: read manifests for initial apply failed", "error", err)
 		return
 	}
 	if len(resources) == 0 {
+		publishApplied(b, repo, "applyFromDisk", 0, 0, log)
 		return
 	}
 	result, err := manifest.Apply(b, resources, "gitops")
@@ -89,6 +90,30 @@ func applyFromDisk(b bus.Bus, configPath string, log *slog.Logger) {
 	}
 	manifest.Prune(b, result, "gitops")
 	log.Info("gitops: initial apply from disk", "applied", len(result.Applied), "skipped", len(result.Skipped))
+	publishApplied(b, repo, "applyFromDisk", len(result.Applied), len(result.Skipped), log)
+}
+
+// publishApplied notifies subscribers that gitops has finished applying a
+// commit to KV. Best-effort — a missing subscriber is fine.
+func publishApplied(b bus.Bus, repo *gitRepo, source string, applied, skipped int, log *slog.Logger) {
+	if b == nil {
+		return
+	}
+	sha, _ := repo.CurrentSHA()
+	evt := topics.GitOpsAppliedEvent{
+		CommitSHA: sha,
+		Source:    source,
+		Timestamp: time.Now().UnixMilli(),
+		Applied:   applied,
+		Skipped:   skipped,
+	}
+	data, err := json.Marshal(evt)
+	if err != nil {
+		return
+	}
+	if err := b.Publish(topics.GitOpsApplied, data); err != nil {
+		log.Debug("gitops: publish applied failed", "error", err)
+	}
 }
 
 // syncFromGit pulls remote changes and applies them to KV.
@@ -104,7 +129,7 @@ func syncFromGit(b bus.Bus, repo *gitRepo, configPath string, log *slog.Logger) 
 		}
 		repo.EnsureIdentity()
 		log.Info("gitops: cloned remote on retry", "dir", repo.dir, "remote", repo.remote)
-		applyFromDisk(b, configPath, log)
+		applyFromDisk(b, repo, configPath, log)
 		return
 	}
 
@@ -149,6 +174,7 @@ func syncFromGit(b bus.Bus, repo *gitRepo, configPath string, log *slog.Logger) 
 		"applied", len(result.Applied),
 		"skipped", len(result.Skipped),
 	)
+	publishApplied(b, repo, "syncFromGit", len(result.Applied), len(result.Skipped), log)
 }
 
 // isGitOpsSource checks the config_metadata bucket to see if a change was

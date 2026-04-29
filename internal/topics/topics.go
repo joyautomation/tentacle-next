@@ -78,6 +78,28 @@ type BrowseCacheUpdate struct {
 	Timestamp int64           `json:"timestamp"` // ms epoch
 }
 
+// GitOps.
+//
+// GitOpsApplied fires after the gitops module advances HEAD via clone-retry,
+// applyFromDisk, or syncFromGit and the resulting manifests have been written
+// to KV. Two consumers care:
+//   - The api module exposes an SSE stream so the edge web UI can re-run all
+//     SvelteKit load functions (invalidateAll) after a remote-driven config
+//     change.
+//   - The mqtt bridge republishes the new commit SHA as the
+//     `_meta/gitops/commitSHA` Sparkplug metric so mantle can show "synced @ X"
+//     vs "syncing…" against its own bare-repo HEAD.
+const GitOpsApplied = "gitops.applied"
+
+// GitOpsAppliedEvent is the bus payload for GitOpsApplied.
+type GitOpsAppliedEvent struct {
+	CommitSHA string `json:"commitSHA"`
+	Source    string `json:"source"`              // "clone-retry" | "applyFromDisk" | "syncFromGit"
+	Timestamp int64  `json:"timestamp"`           // ms epoch
+	Applied   int    `json:"applied,omitempty"`   // number of resources applied (syncFromGit only)
+	Skipped   int    `json:"skipped,omitempty"`
+}
+
 // SNMP specific.
 const SnmpSet = "snmp.set"
 func SnmpTrap(deviceID string) string { return "snmp.trap." + deviceID }

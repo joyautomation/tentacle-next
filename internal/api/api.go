@@ -344,6 +344,9 @@ func (m *Module) routes() http.Handler {
 		r.Get("/gitops/history", m.handleGetGitopsHistory)
 		r.Get("/gitops/history/diff", m.handleGetGitopsHistoryDiff)
 
+		// GitOps applied event stream — drives invalidateAll on the edge UI.
+		r.Get("/gitops/applied/stream", m.handleStreamGitopsApplied)
+
 		// GitOps server (mantle-only): repo management API.
 		m.mountGitServerAPI(r)
 

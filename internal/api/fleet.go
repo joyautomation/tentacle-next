@@ -58,9 +58,28 @@ func (m *Module) handleGetFleetNodes(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			n["modules"] = []fleetModule{}
 			n["modulesError"] = err.Error()
-			continue
+		} else {
+			n["modules"] = mods
 		}
-		n["modules"] = mods
+
+		// Sync status: compare the edge's most-recently-applied SHA (from
+		// "_meta/gitops/commitSHA") against this mantle's bare-repo HEAD.
+		// Edge sends an 8-char prefix to keep the Sparkplug payload small,
+		// so prefix-match rather than equality.
+		edgeSHA, _ := n["gitopsCommitSHA"].(string)
+		if head, herr := srv.RepoHead(repoNameForFleet(group, node)); herr == nil {
+			n["repoHead"] = head
+			switch {
+			case head == "":
+				n["syncStatus"] = "empty"
+			case edgeSHA == "":
+				n["syncStatus"] = "unknown"
+			case strings.HasPrefix(head, edgeSHA):
+				n["syncStatus"] = "synced"
+			default:
+				n["syncStatus"] = "syncing"
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, nodes)
